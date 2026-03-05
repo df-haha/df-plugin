@@ -1,0 +1,7 @@
+{
+  "name": "deep-research-ryan",
+  "description": "多層次深度研究引擎 — 自動調度 subagents 執行多階段研究，支援公司、產品、技術、產業、人物等 8 種研究類型",
+  "author": {
+    "name": "df-haha"
+  }
+}

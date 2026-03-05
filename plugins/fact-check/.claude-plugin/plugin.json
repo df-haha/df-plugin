@@ -1,0 +1,7 @@
+{
+  "name": "fact-check",
+  "description": "文檔事實查核系統 — 5 層查證架構，支援實體、技術、數據、人物、論述的交叉驗證",
+  "author": {
+    "name": "df-haha"
+  }
+}

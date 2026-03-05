@@ -30,6 +30,22 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/dafon-doc-gen",
       "category": "productivity"
+    },
+    {
+      "name": "deep-research-ryan",
+      "description": "多層次深度研究引擎 — 自動調度 subagents 執行多階段研究，支援公司、產品、技術、產業、人物等 8 種研究類型",
+      "version": "1.0.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/deep-research-ryan",
+      "category": "research"
+    },
+    {
+      "name": "fact-check",
+      "description": "文檔事實查核系統 — 5 層查證架構，支援實體、技術、數據、人物、論述的交叉驗證",
+      "version": "1.0.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/fact-check",
+      "category": "research"
     }
   ]
 }
