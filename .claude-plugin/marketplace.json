@@ -46,6 +46,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/fact-check",
       "category": "research"
+    },
+    {
+      "name": "daily-work-log",
+      "description": "跨專案工作日誌產生器 — 掃描 Claude Code session + ccusage token 成本分析，彙整工作進度，產出 markdown 日誌並可透過 Outlook 寄出",
+      "version": "1.1.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/daily-work-log",
+      "category": "productivity"
     }
   ]
 }
