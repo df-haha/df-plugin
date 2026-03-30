@@ -1,0 +1,16 @@
+{
+  "name": "codex-review",
+  "description": "Codex CLI 二次審查 — 使用 OpenAI Codex CLI 對程式碼、計畫或技術決策���行獨立審查，自動進行多輪 Claude + Codex 對審直到意見收斂",
+  "author": {
+    "name": "df-haha"
+  },
+  "prerequisites": [
+    {
+      "name": "codex",
+      "type": "cli",
+      "installCommand": "npm install -g @openai/codex",
+      "checkCommand": "codex --version",
+      "description": "OpenAI Codex CLI — 需先安裝並用 codex auth 登入"
+    }
+  ]
+}
