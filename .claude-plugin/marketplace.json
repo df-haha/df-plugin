@@ -54,6 +54,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/daily-work-log",
       "category": "productivity"
+    },
+    {
+      "name": "codex-review",
+      "description": "Codex CLI 二次審查 — 使用 OpenAI Codex CLI 對程式碼、計畫或技術決策進行獨立審查，自動進行多輪 Claude + Codex 對審直到意見收斂",
+      "version": "1.0.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/codex-review",
+      "category": "development"
     }
   ]
 }
