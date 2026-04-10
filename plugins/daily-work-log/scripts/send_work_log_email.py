@@ -11,10 +11,21 @@ import subprocess
 import sys
 import re
 import os
+import json
 from pathlib import Path
 
 
-DEFAULT_TO = "haha.huang@df-recycle.com.tw"
+CONFIG_PATH = Path.home() / ".claude" / "daily-work-log" / "config.json"
+
+
+def load_config() -> dict:
+    """讀取 daily-work-log config，JSON parse 失敗視為未設定。"""
+    try:
+        if CONFIG_PATH.exists():
+            return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {}
 
 
 def extract_date_from_filename(filepath: str) -> str:
@@ -190,31 +201,6 @@ def _section_header(title: str) -> str:
 
 def open_outlook_draft(subject: str, html_body: str, to_email: str):
     """透過 PowerShell Outlook COM 開啟郵件草稿"""
-    # 將 HTML 寫入暫存檔，避免 PowerShell 命令列長度限制與跳脫問題
-    tmp_html = Path("/tmp/work_log_email.html")
-    tmp_html.write_text(html_body, encoding="utf-8")
-
-    # PowerShell 腳本：讀取暫存檔內容，建立 Outlook 草稿
-    ps_script = f'''
-$htmlContent = [System.IO.File]::ReadAllText("{tmp_html.as_posix().replace('/', '\\\\').replace('\\\\tmp', 'C:\\\\temp')}", [System.Text.Encoding]::UTF8)
-$outlook = New-Object -ComObject Outlook.Application
-$mail = $outlook.CreateItem(0)
-$mail.To = "{to_email}"
-$mail.Subject = "{subject}"
-$mail.HTMLBody = $htmlContent
-$mail.Display()
-'''
-
-    # 先確保 C:\temp 存在並寫入檔案（WSL /tmp 不能直接被 Windows 讀取）
-    win_tmp = Path("/mnt/c/temp")
-    # 透過 PowerShell 建立目錄與寫入檔案
-    setup_script = f'''
-if (-not (Test-Path "C:\\temp")) {{ New-Item -ItemType Directory -Path "C:\\temp" | Out-Null }}
-[System.IO.File]::WriteAllText("C:\\temp\\work_log_email.html", @"
-{html_body}
-"@, [System.Text.Encoding]::UTF8)
-'''
-
     # 合併為單一 PowerShell 呼叫
     combined_script = f'''
 # 寫入暫存 HTML
@@ -257,13 +243,21 @@ def main():
         sys.exit(1)
 
     md_file = sys.argv[1]
-    to_email = DEFAULT_TO
 
-    # 解析 --to 參數
+    # 優先序：--to 參數 > config 檔 email > 未設定則 exit
+    to_email = ""
     if "--to" in sys.argv:
         idx = sys.argv.index("--to")
         if idx + 1 < len(sys.argv):
             to_email = sys.argv[idx + 1]
+
+    if not to_email:
+        config = load_config()
+        to_email = config.get("outlook_email", "")
+
+    if not to_email:
+        print("未設定收件者。請用 --to 指定或在 ~/.claude/daily-work-log/config.json 設定 outlook_email。", file=sys.stderr)
+        sys.exit(0)
 
     # 讀取 markdown
     md_path = Path(md_file)

@@ -17,9 +17,24 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep
 
 ## 執行流程
 
+### Phase 0：環境與設定檢查
+
+1. 檢查 ccusage：
+   - `ccusage --version`
+   - 失敗 → 提示：`npm install -g ccusage`（GitHub: ryoppippi/ccusage）
+   - ccusage 是 optional，跳過不影響核心功能
+
+2. 檢查 config：
+   - 讀 `~/.claude/daily-work-log/config.json`
+   - 不存在或無 outlook_email →
+     詢問使用者：「首次使用，請提供 Outlook 收件者 email（或輸入 skip 跳過寄信功能）」
+   - 使用者提供 email → 建立 config.json: `{"outlook_email": "user@example.com"}`
+   - 使用者 skip → 建立 config.json: `{"outlook_email": ""}`
+   - 已有 config 且有 email → 直接進 Phase 1
+
 ### Phase 1：Session 掃描 + 成本數據
 
-執行 Python 腳本掃描所有專案的 session 檔案：
+執行 Python 腳本掃描所有專案的 session 檔案（Claude Code + Codex CLI/Desktop + Gemini CLI）：
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/daily_work_log.py {YYYY-MM-DD|today}
@@ -81,18 +96,24 @@ mcp__plugin_claude-mem_mcp-search__timeline(date="{YYYY-MM-DD}")
 
 > 產出時間：{now}
 > 來源：Claude Code session 分析 + ccusage
-> 統計：{N} sessions ｜ {M} 專案 ｜ {earliest} → {latest}
+> 統計：Claude {N} sessions ｜ Codex {N} sessions ｜ Gemini {N} sessions ｜ {M} 專案 ｜ {earliest} → {latest}
 > 成本：${total_cost} （Opus: ${opus_cost} ｜ Sonnet: ${sonnet_cost} ｜ Haiku: ${haiku_cost}）
 
 ---
 
-## 一、{專案名}（{session_count} sessions ｜ ${cost}）
+## 一、{專案名}（Claude {N} + Codex {N} + Gemini {N} sessions ｜ ${cost}）
 
-### {工作主題}
+### Claude Code 工作
 - 具體工作項目 1
 - 具體工作項目 2
 
-## 二、{專案名}（{session_count} sessions ｜ ${cost}）
+### Codex CLI / Desktop 工作
+- ...（標註來源：CLI 或 Desktop）
+
+### Gemini CLI 工作
+- ...
+
+## 二、{專案名}（Claude {N} + Codex {N} + Gemini {N} sessions ｜ ${cost}）
 ...
 
 ---
@@ -169,7 +190,7 @@ mcp__plugin_claude-mem_mcp-search__timeline(date="{YYYY-MM-DD}")
 4. 腳本會自動：
    - 讀取 md 檔並轉換為正式郵件 HTML（微軟正黑體、大豐綠配色）
    - 郵件標題：`每日工作報告 YYYY/MM/DD`
-   - 收件者：haha.huang@df-recycle.com.tw
+   - 收件者：讀取 `~/.claude/daily-work-log/config.json` 的 `outlook_email`（未設定則跳過寄信）
    - 透過 Outlook COM 開啟草稿視窗（**不會自動發送**）
 5. 告知使用者：「Outlook 草稿已開啟，請確認內容後按發送。」
 

@@ -254,6 +254,191 @@ def scan_sessions(target_date: datetime) -> dict:
     return result
 
 
+def scan_codex_sessions(target_date: datetime) -> list:
+    """掃描 Codex CLI (WSL + Windows Desktop) 的 session JSONL 檔案。"""
+    day_start = target_date
+    day_end = day_start + timedelta(days=1)
+    date_parts = target_date.strftime("%Y/%m/%d").split("/")
+
+    search_dirs = [
+        Path.home() / ".codex" / "sessions" / date_parts[0] / date_parts[1] / date_parts[2],
+        Path(f"/mnt/c/Users/haha.huang/.codex/sessions/{date_parts[0]}/{date_parts[1]}/{date_parts[2]}"),
+    ]
+
+    sessions = []
+    seen_ids: set[str] = set()
+
+    for sessions_dir in search_dirs:
+        if not sessions_dir.exists():
+            continue
+        source_label = "codex_desktop" if "/mnt/c/" in str(sessions_dir) else "cli"
+
+        for jsonl_file in sorted(sessions_dir.glob("*.jsonl")):
+            try:
+                session_id = ""
+                cwd = ""
+                model = ""
+                originator = ""
+                source = source_label
+                user_messages: list[str] = []
+                timestamps: list[float] = []
+
+                with open(jsonl_file, encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        entry_type = entry.get("type", "")
+                        payload = entry.get("payload", {})
+
+                        ts_raw = entry.get("timestamp")
+                        if ts_raw:
+                            dt = parse_timestamp(ts_raw)
+                            if dt and day_start <= dt < day_end:
+                                timestamps.append(dt.timestamp())
+
+                        if entry_type == "session_meta":
+                            session_id = payload.get("id", "")
+                            cwd = payload.get("cwd", "")
+                            originator = payload.get("originator", "")
+                            if payload.get("source"):
+                                source = payload["source"]
+
+                        elif entry_type == "turn_context":
+                            if payload.get("model"):
+                                model = payload["model"]
+
+                        elif entry_type == "response_item":
+                            if payload.get("role") == "user":
+                                content = payload.get("content", [])
+                                if isinstance(content, list):
+                                    for item in content:
+                                        if isinstance(item, dict) and item.get("type") == "input_text":
+                                            text = item.get("text", "")
+                                            if text and len(text) > 5 and len(user_messages) < 3:
+                                                user_messages.append(text[:300])
+
+                        elif entry_type == "event_msg":
+                            if payload.get("type") == "user_message":
+                                text = payload.get("message", "")
+                                if text and len(text) > 5 and len(user_messages) < 3:
+                                    user_messages.append(text[:300])
+
+                if not timestamps or not session_id:
+                    continue
+                if session_id in seen_ids:
+                    continue
+                seen_ids.add(session_id)
+
+                project = Path(cwd).name if cwd else jsonl_file.stem
+                start_ts = min(timestamps)
+                end_ts = max(timestamps)
+
+                sessions.append({
+                    "session_id": session_id,
+                    "provider": "codex",
+                    "source": source,
+                    "project": project,
+                    "cwd": cwd,
+                    "start": start_ts,
+                    "end": end_ts,
+                    "start_time": datetime.fromtimestamp(start_ts, tz=TZ_GMT8).strftime("%H:%M"),
+                    "end_time": datetime.fromtimestamp(end_ts, tz=TZ_GMT8).strftime("%H:%M"),
+                    "model": model,
+                    "message_count": len(user_messages),
+                    "topic_hints": user_messages,
+                })
+            except Exception as e:
+                print(f"Error parsing codex session {jsonl_file.name}: {e}", file=sys.stderr)
+
+    return sessions
+
+
+def scan_gemini_sessions(target_date: datetime) -> list:
+    """掃描 Gemini CLI 的 session JSON 檔案。"""
+    day_start = target_date
+    day_end = day_start + timedelta(days=1)
+    gemini_tmp = Path.home() / ".gemini" / "tmp"
+
+    if not gemini_tmp.exists():
+        return []
+
+    sessions = []
+
+    for proj_dir in sorted(gemini_tmp.iterdir()):
+        if not proj_dir.is_dir():
+            continue
+        chats_dir = proj_dir / "chats"
+        if not chats_dir.exists():
+            continue
+
+        for session_file in sorted(chats_dir.glob("session-*.json")):
+            try:
+                data = json.loads(session_file.read_text(encoding="utf-8"))
+                start_time_str = data.get("startTime", "")
+                if not start_time_str:
+                    continue
+
+                start_dt = parse_timestamp(start_time_str)
+                if not start_dt or not (day_start <= start_dt < day_end):
+                    continue
+
+                session_id = data.get("sessionId", session_file.stem)
+                messages = data.get("messages", [])
+
+                # Extract model and user messages
+                model = ""
+                user_messages: list[str] = []
+                last_ts = start_dt
+
+                for msg in messages:
+                    msg_type = msg.get("type", "")
+                    if msg.get("model"):
+                        model = msg["model"]
+                    if msg_type == "user":
+                        content = msg.get("content", "")
+                        if isinstance(content, list):
+                            text = " ".join(
+                                item.get("text", "") if isinstance(item, dict) else str(item)
+                                for item in content
+                            )
+                        elif isinstance(content, str):
+                            text = content
+                        else:
+                            text = str(content)
+                        if text and len(text) > 5 and len(user_messages) < 3:
+                            user_messages.append(text[:300])
+
+                    msg_ts = parse_timestamp(msg.get("timestamp"))
+                    if msg_ts and msg_ts > last_ts:
+                        last_ts = msg_ts
+
+                project = proj_dir.name
+                sessions.append({
+                    "session_id": session_id,
+                    "provider": "gemini",
+                    "source": "gemini_cli",
+                    "project": project,
+                    "cwd": str(proj_dir),
+                    "start": start_dt.timestamp(),
+                    "end": last_ts.timestamp(),
+                    "start_time": start_dt.strftime("%H:%M"),
+                    "end_time": last_ts.strftime("%H:%M"),
+                    "model": model,
+                    "message_count": len(user_messages),
+                    "topic_hints": user_messages,
+                })
+            except Exception as e:
+                print(f"Error parsing gemini session {session_file.name}: {e}", file=sys.stderr)
+
+    return sessions
+
+
 def fetch_ccusage(target_date: datetime) -> dict | None:
     """呼叫 ccusage CLI 取得當日 token 用量與成本。
 
@@ -353,6 +538,23 @@ def main():
     print(f"Scanning sessions for {target_date.strftime('%Y-%m-%d')} (GMT+8)...", file=sys.stderr)
 
     result = scan_sessions(target_date)
+
+    # 新增：掃描 Codex + Gemini sessions
+    codex_sessions = scan_codex_sessions(target_date)
+    gemini_sessions = scan_gemini_sessions(target_date)
+
+    if codex_sessions:
+        result["codex_sessions"] = codex_sessions
+        result["stats"]["total_sessions"] += len(codex_sessions)
+    if gemini_sessions:
+        result["gemini_sessions"] = gemini_sessions
+        result["stats"]["total_sessions"] += len(gemini_sessions)
+
+    result["stats"]["providers"] = {
+        "claude": sum(p["session_count"] for p in result["projects"].values()),
+        "codex": len(codex_sessions),
+        "gemini": len(gemini_sessions),
+    }
 
     # 整合 ccusage 成本數據
     if with_cost:

@@ -24,14 +24,6 @@
       "category": "productivity"
     },
     {
-      "name": "dafon-doc-gen",
-      "description": "大豐環保品牌文件生成工具 — 產生符合 CIS 規範的 PowerPoint 簡報與 Word 文件",
-      "version": "1.0.0",
-      "author": { "name": "df-haha" },
-      "source": "./plugins/dafon-doc-gen",
-      "category": "productivity"
-    },
-    {
       "name": "deep-research-ryan",
       "description": "多層次深度研究引擎 — 自動調度 subagents 執行多階段研究，支援公司、產品、技術、產業、人物等 8 種研究類型",
       "version": "1.0.0",
@@ -49,18 +41,18 @@
     },
     {
       "name": "daily-work-log",
-      "description": "跨專案工作日誌產生器 — 掃描 Claude Code session + ccusage token 成本分析，彙整工作進度，產出 markdown 日誌並可透過 Outlook 寄出",
-      "version": "1.1.0",
+      "description": "跨專案工作日誌產生器 — 掃描 Claude Code / Codex / Gemini session，首次使用引導設定，彙整工作進度，產出 markdown 日誌並可透過 Outlook 寄出",
+      "version": "1.2.0",
       "author": { "name": "df-haha" },
       "source": "./plugins/daily-work-log",
       "category": "productivity"
     },
     {
-      "name": "codex-review",
-      "description": "Codex CLI 二次審查 — 使用 OpenAI Codex CLI 對程式碼、計畫或技術決策進行獨立審查，自動進行多輪 Claude + Codex 對審直到意見收斂",
+      "name": "ai-review",
+      "description": "AI 二次審查 — 使用 Codex CLI 或 Gemini CLI 對程式碼、計畫或技術決策進行獨立審查，支援單審或雙重對審",
       "version": "1.0.0",
       "author": { "name": "df-haha" },
-      "source": "./plugins/codex-review",
+      "source": "./plugins/ai-review",
       "category": "development"
     }
   ]

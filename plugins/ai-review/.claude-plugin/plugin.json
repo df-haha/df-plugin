@@ -1,0 +1,25 @@
+{
+  "name": "ai-review",
+  "description": "AI 二次審查 — Codex/Gemini CLI 獨立審查 + 多輪對審",
+  "author": {
+    "name": "df-haha"
+  },
+  "prerequisites": [
+    {
+      "name": "codex",
+      "type": "cli",
+      "installCommand": "npm install -g @openai/codex",
+      "checkCommand": "codex --version",
+      "optional": true,
+      "description": "OpenAI Codex CLI — 需先安裝並用 codex auth 登入"
+    },
+    {
+      "name": "gemini",
+      "type": "cli",
+      "installCommand": "npm install -g @google/gemini-cli",
+      "checkCommand": "gemini --version",
+      "optional": true,
+      "description": "Google Gemini CLI — 需先安裝並用 gemini auth 登入"
+    }
+  ]
+}
