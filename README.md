@@ -20,7 +20,7 @@ claude plugin install first-principles
 |--------|------|
 | **first-principles** | 第一性原理思考框架 — 基於 Elon Musk 的第一性原理方法論，自動拆解問題到最基本的事實與假設 |
 | **markitdown** | 使用 Microsoft MarkItDown 將 PDF、PPT、Word、Excel 等檔案轉換為 Markdown |
-| **deep-research-ryan** | 多層次深度研究引擎 — 自動調度 subagents 執行多階段研究，支援公司、產品、技術、產業、人物等 8 種研究類型 |
-| **fact-check** | 文檔事實查核系統 — 5 層查證架構，支援實體、技術、數據、人物、論述的交叉驗證 |
+| **deep-research-ryan** | 多層次深度研究引擎 — 自動調度 subagents 執行多階段研究，支援公司、產品、技術、產業、人物等 8 種研究類型（by [Ryan](https://github.com/anthropics/claude-code/tree/main/.claude/skills/deep-research)） |
+| **fact-check** | 文檔事實查核系統 — 5 層查證架構，支援實體、技術、數據、人物、論述的交叉驗證（by [Ryan](https://github.com/anthropics/claude-code/tree/main/.claude/skills/deep-research)） |
 | **daily-work-log** | 跨專案工作日誌產生器 — 掃描 Claude Code / Codex / Gemini session，首次使用引導設定，產出 markdown 日誌並可透過 Outlook 寄出 |
 | **ai-review** | AI 二次審查 — 使用 Codex CLI 或 Gemini CLI 對程式碼/計畫/技術決策進行獨立審查，支援單審或 Codex+Gemini 雙重對審 |
