@@ -255,14 +255,15 @@ mcp__plugin_claude-mem_mcp-search__timeline(date="{YYYY-MM-DD}")
 
 ## AI 使用費用明細
 
-| 專案 | 使用的 AI 模型 | 費用 |
-|------|---------------|------|
-| {專案名（白話）} | {模型名，如 Claude Opus / Sonnet} | ${cost} |
-| {專案名（白話）} | {模型名} | ${cost} |
-| 背景自動化程序 | Claude Sonnet | ${cost} |
-| **合計** | | **${total}** |
+| 專案 | 使用的 AI 模型 | 費用 | 備註 |
+|------|---------------|------|------|
+| {專案名（白話）} | {模型名，如 Claude Opus / Sonnet} | ${cost} | {原始 repo 名稱} |
+| {專案名（白話）} | {模型名} | ${cost} | {原始 repo 名稱} |
+| 背景自動化程序 | Claude Sonnet | ${cost} | claude-mem observer |
+| **合計** | | **${total}** | |
 
 > 「背景自動化程序」為 AI 記憶系統的自動運作費用，非人工操作。
+> 「備註」欄為原始程式專案名稱，供技術人員對照。
 
 ---
 ---
