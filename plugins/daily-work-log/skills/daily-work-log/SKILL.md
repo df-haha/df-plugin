@@ -176,53 +176,95 @@ mcp__plugin_claude-mem_mcp-search__timeline(date="{YYYY-MM-DD}")
 
 ### 日誌結構模板
 
+日誌分為兩個部分：
+- **Part 1（工作摘要）**：給主管看的。白話文、無技術術語、著重成果與進度。主管是非技術職，看不懂 git、token、cache 這些詞。
+- **Part 2（技術執行細節）**：給主管的 Claude Code 看的。包含 session 細節、指令記錄、token 用量、git 狀態等。主管的 AI 助理可以用這些資訊追蹤具體做了什麼。
+
+### Part 1 寫作原則
+
+- **用白話文**：「修好了照片上傳的問題」而不是「fix photo upload silent failure」
+- **講成果不講工具**：「完成課程投影片 30 頁」而不是「使用 Pencil MCP batch_design 建立 30 個 slide nodes」
+- **講目的不講手段**：「評估伺服器規格」而不是「研究 GitHub README 分析 Docker image 資源需求」
+- **狀態用中文**：完成、進行中、待處理、已擱置
+- **成本只寫總數**：「今日 AI 使用費用：$5.16」，不要列 model breakdown
+- **不要出現的詞**：token、cache、session、commit、push、git、MCP、API、SDK、CLI、plugin、hook、agent、node、deploy、repo
+- **可以出現的詞**：程式、系統、網站、應用、伺服器、資料庫、檔案、更新、修正、測試、上線、同步
+
 ```markdown
 # {YYYY-MM-DD} 工作日誌
 
-> 產出時間：{now}
-> 來源：Claude Code session 分析 + ccusage
-> 統計：Claude {N} sessions | Codex {N} sessions | Gemini {N} sessions | {M} 專案 | {earliest} → {latest}
-> 成本：${total_cost} （Opus: ${opus_cost} | Sonnet: ${sonnet_cost} | Haiku: ${haiku_cost}）
+> 日期：{YYYY-MM-DD}（{星期}）
+> 工作時段：{earliest} → {latest}
+> 涉及專案：{M} 個
+> 今日 AI 使用費用：${total_cost}
 
 ---
 
-## 一、{專案名}（Claude {N} + Codex {N} + Gemini {N} sessions | ${cost}）
+## 一、{專案名（白話）}
 
-### Claude Code 工作
-- 具體工作項目 1
-- 具體工作項目 2
+### {工作主題（白話描述）}
+- {用一般人聽得懂的方式描述做了什麼}
+- {著重成果：完成了什麼、產出了什麼、解決了什麼問題}
+- {如有未完成的項目，說明目前進度和下一步}
 
-### Codex CLI / Desktop 工作
-- ...（標註來源：CLI 或 Desktop）
+## 二、{專案名（白話）}
 
-### Gemini CLI 工作
+### {工作主題}
 - ...
 
-## 二、{專案名}（Claude {N} + Codex {N} + Gemini {N} sessions | ${cost}）
-...
+---
+
+## 今日產出
+
+| # | 項目 | 狀態 |
+|---|------|------|
+| 1 | {白話描述產出物} | 完成 |
+| 2 | {白話描述} | 進行中（{簡述卡在哪裡}） |
 
 ---
 
-## Git 狀態
+## 待處理事項
 
-### {專案名}
+- [ ] {白話描述需要後續處理的事情}
+
+---
+---
+
+<!-- Part 2: 技術執行細節（供 AI 助理參考，非人工閱讀區域） -->
+
+# 技術執行細節
+
+> 以下內容為 AI 可讀的結構化執行記錄，供後續追蹤與分析使用。
+
+## Session 概覽
+
+> 來源：Claude Code session 分析 + ccusage
+> 統計：Claude {N} sessions | Codex {N} sessions | Gemini {N} sessions
+> 時段：{earliest} → {latest}
+
+## 各專案執行細節
+
+### {專案名}（{session_count} sessions | ${cost}）
+
+#### 執行動作
+- {實際執行的指令、讀寫的檔案、呼叫的工具}
+- {具體的 session 內容摘要}
+
+#### Git 狀態
 - 今日 commit：{N} 個
   - `{hash}` {commit message}
 - 未 push：{N} 個（或「無」）
 - 未 commit 修改：{N} 個檔案（或「無」）
 
----
-
-## 待辦事項（若有未提交/未推送的變更）
-
-- [ ] {專案名}：{N} 個檔案未 commit
-- [ ] {專案名}：{N} 個 commit 未 push
+### claude-mem observer（背景程序，非人工作業）
+- sessions：{N}
+- 用途：自動記憶寫入
 
 ---
 
 ## Token 用量與成本
 
-### 專案成本分解（含模型用量）
+### 按專案分解
 
 #### {專案名} | {N} sessions | ${cost}
 | 模型 | Input | Output | Cache Create | Cache Read | Total | 成本 |
@@ -232,25 +274,15 @@ mcp__plugin_claude-mem_mcp-search__timeline(date="{YYYY-MM-DD}")
 #### claude-mem observer（背景記憶寫入稅）| {N} sessions | ${cost}
 | 模型 | Input | Output | Cache Create | Cache Read | Total | 成本 |
 |------|-------|--------|--------------|------------|-------|------|
-| claude-sonnet-4-5 | {n} | {n} | {n} | {n} | {n} | ${cost} |
+| {model} | {n} | {n} | {n} | {n} | {n} | ${cost} |
 
-> claude-mem observer 為背景程序，非人工作業。
-
-#### 合計
+### 合計
 
 | 項目 | Sessions | Total Tokens | 成本 |
 |------|----------|--------------|------|
 | **當日合計** | {N} | {n} | **${total}** |
 
 > 來源：`ccusage daily -i -j`。Token 數以 K/M 為單位。
-
----
-
-## 產出清單
-
-| # | 產出項目 | 狀態 |
-|---|---------|------|
-| 1 | ... | 完成 |
 ```
 
 > **→ TaskUpdate: Phase 4 → completed**
