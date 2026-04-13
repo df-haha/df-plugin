@@ -150,19 +150,43 @@ cd {project_dir} && git log @{u}.. --oneline 2>/dev/null  # 未 push 的 commit
 
 ---
 
-## Phase 3：深度分析（可選）
+## Phase 3：Session 內容分析
 
 > **→ TaskUpdate: Phase 3 → in_progress**
 
-如果 claude-mem MCP 可用，用 timeline 補充摘要：
+### 3-1. 篩選需要分析的 sessions
+
+從 Phase 1 結果中，排除 observer sessions 後，篩選：
+- `user_msg_count >= 5` 的 sessions（跳過瑣碎的短 session）
+- 按 `size_kb` 排序，取前 10 個最大的
+- 記錄每個 session 的 JSONL 完整路徑：`~/.claude/projects/-home-{project_key}/{session_file}`
+
+### 3-2. 提取 session 執行細節
+
+對篩選出的 sessions 執行：
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/extract_session_details.py {session1_full_path} {session2_full_path} ...
+```
+
+輸出每個 session 的：
+- `user_messages`：使用者實際說了什麼（過濾掉系統訊息）
+- `tool_usage`：使用了哪些工具、各幾次
+- `files_touched`：讀寫了哪些檔案
+- `commands_run`：執行了哪些指令
+- `mcp_tools`：呼叫了哪些外部服務
+
+利用這些資訊在 Phase 4 撰寫準確的工作描述，而非僅從 `topic_hints` 猜測。
+
+### 3-3. claude-mem 補充（可選）
+
+如果 claude-mem MCP 可用，額外呼叫 timeline 取得結構化觀察記錄作為補充：
 
 ```
 mcp__plugin_claude-mem_mcp-search__timeline(date="{YYYY-MM-DD}")
 ```
 
-這能取得當天已結構化的 observations，比原始 JSONL 更精煉。
-
-若 claude-mem 不可用或資料不足，直接從 Phase 1 的 JSON 中的 `topic_hints`（用戶前幾句話）推斷工作主題。
+若 claude-mem 不可用，3-2 的資料已足夠撰寫日誌。
 
 > **→ TaskUpdate: Phase 3 → completed**
 
@@ -186,9 +210,9 @@ mcp__plugin_claude-mem_mcp-search__timeline(date="{YYYY-MM-DD}")
 - **講成果不講工具**：「完成課程投影片 30 頁」而不是「使用 Pencil MCP batch_design 建立 30 個 slide nodes」
 - **講目的不講手段**：「評估伺服器規格」而不是「研究 GitHub README 分析 Docker image 資源需求」
 - **狀態用中文**：完成、進行中、待處理、已擱置
-- **成本只寫總數**：「今日 AI 使用費用：$5.16」，不要列 model breakdown
-- **不要出現的詞**：token、cache、session、commit、push、git、MCP、API、SDK、CLI、plugin、hook、agent、node、deploy、repo
+- **不要出現的詞**：cache、session、commit、push、git、MCP、API、SDK、CLI、plugin、hook、agent、node、deploy、repo
 - **可以出現的詞**：程式、系統、網站、應用、伺服器、資料庫、檔案、更新、修正、測試、上線、同步
+- **成本與用量**：Part 1 包含按專案的費用分解表，用「AI 使用量」代替 token，用「輸入/輸出/快取」代替 input/output/cache
 
 ```markdown
 # {YYYY-MM-DD} 工作日誌
@@ -226,6 +250,19 @@ mcp__plugin_claude-mem_mcp-search__timeline(date="{YYYY-MM-DD}")
 ## 待處理事項
 
 - [ ] {白話描述需要後續處理的事情}
+
+---
+
+## AI 使用費用明細
+
+| 專案 | 使用的 AI 模型 | 費用 |
+|------|---------------|------|
+| {專案名（白話）} | {模型名，如 Claude Opus / Sonnet} | ${cost} |
+| {專案名（白話）} | {模型名} | ${cost} |
+| 背景自動化程序 | Claude Sonnet | ${cost} |
+| **合計** | | **${total}** |
+
+> 「背景自動化程序」為 AI 記憶系統的自動運作費用，非人工操作。
 
 ---
 ---
