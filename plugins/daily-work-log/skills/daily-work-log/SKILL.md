@@ -1,7 +1,7 @@
 ---
 name: daily-work-log
 description: 跨專案工作日誌產生器。掃描指定日期的所有 Claude Code session JSONL 檔案，彙整各專案工作進度，輸出結構化 markdown 日誌。觸發時機：當用戶說「彙整工作進度」、「工作日誌」、「session summary」、「今天做了什麼」、「整理今天的工作」、「產出工作日誌」、「日誌」時使用。即使用戶只是隨口問「今天做了哪些事」也應觸發此 skill。
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, TaskUpdate, TaskList, AskUserQuestion
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, mcp__plugin_claude-mem_mcp-search__timeline
 ---
 
 # 跨專案工作日誌產生器
@@ -154,14 +154,22 @@ cd {project_dir} && git log @{u}.. --oneline 2>/dev/null  # 未 push 的 commit
 
 > **→ TaskUpdate: Phase 3 → in_progress**
 
-### 3-1. 篩選需要分析的 sessions
+### 3-1. claude-mem 優先（主要資料來源）
 
-從 Phase 1 結果中，排除 observer sessions 後，篩選：
-- `user_msg_count >= 5` 的 sessions（跳過瑣碎的短 session）
-- 按 `size_kb` 排序，取前 10 個最大的
-- 記錄每個 session 的 JSONL 完整路徑：`~/.claude/projects/-home-{project_key}/{session_file}`
+**先嘗試 claude-mem**。如果 claude-mem MCP 可用，用 timeline 取得當日結構化觀察記錄：
 
-### 3-2. 提取 session 執行細節
+```
+mcp__plugin_claude-mem_mcp-search__timeline(date="{YYYY-MM-DD}")
+```
+
+- **成功取得資料** → claude-mem 的觀察記錄已包含檔案操作、工具呼叫、決策等結構化資訊，**跳過 3-2**，直接用 claude-mem 資料撰寫日誌
+- **失敗（MCP 不可用、無資料、或回傳錯誤）** → 進入 3-2 fallback 流程
+
+### 3-2. Session JSONL 分析（fallback）
+
+**僅在 claude-mem 不可用時執行此步驟。**
+
+從 Phase 1 結果中，排除 observer sessions 後，篩選**所有** `user_msg_count >= 5` 的 sessions（不設上限，全部分析）。記錄每個 session 的 JSONL 完整路徑：`~/.claude/projects/-home-{project_key}/{session_file}`
 
 對篩選出的 sessions 執行：
 
@@ -177,16 +185,6 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/extract_session_details.py {session1_full_
 - `mcp_tools`：呼叫了哪些外部服務
 
 利用這些資訊在 Phase 4 撰寫準確的工作描述，而非僅從 `topic_hints` 猜測。
-
-### 3-3. claude-mem 補充（可選）
-
-如果 claude-mem MCP 可用，額外呼叫 timeline 取得結構化觀察記錄作為補充：
-
-```
-mcp__plugin_claude-mem_mcp-search__timeline(date="{YYYY-MM-DD}")
-```
-
-若 claude-mem 不可用，3-2 的資料已足夠撰寫日誌。
 
 > **→ TaskUpdate: Phase 3 → completed**
 
