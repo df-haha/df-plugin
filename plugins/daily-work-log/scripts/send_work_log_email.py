@@ -53,13 +53,16 @@ def md_to_html(md_content: str) -> str:
     # 解析 markdown 結構
     sections = []          # (level, title, items)
     output_table_rows = [] # 產出清單表格
+    cost_table_rows = []   # AI 使用費用明細表格
     topic_items = []       # 工作主題分類
 
     current_section = None
     current_subsection = None
     in_table = False
+    in_cost_table = False
     in_topics = False
     table_header_skipped = False
+    cost_header_skipped = False
 
     for line in body_lines:
         stripped = line.strip()
@@ -67,8 +70,10 @@ def md_to_html(md_content: str) -> str:
         # 分隔線
         if stripped == "---":
             in_table = False
+            in_cost_table = False
             in_topics = False
             table_header_skipped = False
+            cost_header_skipped = False
             continue
 
         # 工作主題分類
@@ -81,9 +86,11 @@ def md_to_html(md_content: str) -> str:
                 topic_items.append(match.group(1))
             continue
 
-        # 產出清單表格
-        if stripped == "## 產出清單":
+        # 產出清單表格（支援舊稱「產出清單」與新稱「今日產出」）
+        if stripped in ("## 產出清單", "## 今日產出"):
             in_table = True
+            in_cost_table = False
+            in_topics = False
             table_header_skipped = False
             continue
         if in_table:
@@ -102,9 +109,39 @@ def md_to_html(md_content: str) -> str:
                     output_table_rows.append((num, item, status))
             continue
 
+        # AI 使用費用明細表格（4 欄：專案 / 模型 / 費用 / 備註）
+        if stripped == "## AI 使用費用明細":
+            in_cost_table = True
+            in_table = False
+            in_topics = False
+            cost_header_skipped = False
+            continue
+        if in_cost_table:
+            if stripped.startswith("|"):
+                if not cost_header_skipped:
+                    if "---" in stripped:
+                        cost_header_skipped = True
+                    continue
+                cols = [c.strip() for c in stripped.split("|")[1:-1]]
+                if len(cols) >= 3:
+                    project = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", cols[0])
+                    model = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", cols[1])
+                    cost = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", cols[2])
+                    note = cols[3] if len(cols) >= 4 else ""
+                    cost_table_rows.append((project, model, cost, note))
+            elif stripped and not stripped.startswith(">"):
+                # 遇到非表格、非引言內容（空行除外）→ 離開費用表格區段
+                in_cost_table = False
+            continue
+
         # 專案標題 (## 一、...)
+        # 排除已由專屬邏輯處理的區段（產出清單、工作主題、費用明細）
+        skip_h2_prefixes = (
+            "## 產出", "## 工作", "## 今日產出",
+            "## AI 使用費用明細", "## AI使用費用明細",
+        )
         match_h2 = re.match(r"^##\s+(.+)$", stripped)
-        if match_h2 and not stripped.startswith("## 產出") and not stripped.startswith("## 工作"):
+        if match_h2 and not any(stripped.startswith(p) for p in skip_h2_prefixes):
             title = match_h2.group(1)
             current_section = {"title": title, "subsections": [], "items": []}
             sections.append(current_section)
@@ -184,9 +221,27 @@ def md_to_html(md_content: str) -> str:
             html_parts.append("</tr>")
         html_parts.append("</table>")
 
-    # 結語 + 簽名
+    # 四、AI 使用費用明細
+    if cost_table_rows:
+        html_parts.append(_section_header("四、AI 使用費用明細"))
+        html_parts.append('<table style="border-collapse: collapse; width: 100%;">')
+        html_parts.append('<tr style="background: #E3F2FD;">')
+        html_parts.append('  <th style="border: 1px solid #BBDEFB; padding: 8px; text-align: left;">專案</th>')
+        html_parts.append('  <th style="border: 1px solid #BBDEFB; padding: 8px; text-align: left;">使用的 AI 模型</th>')
+        html_parts.append('  <th style="border: 1px solid #BBDEFB; padding: 8px; text-align: right; width: 100px;">費用</th>')
+        html_parts.append('  <th style="border: 1px solid #BBDEFB; padding: 8px; text-align: left;">備註</th>')
+        html_parts.append("</tr>")
+        for project, model, cost, note in cost_table_rows:
+            html_parts.append("<tr>")
+            html_parts.append(f'  <td style="border: 1px solid #ddd; padding: 8px;">{project}</td>')
+            html_parts.append(f'  <td style="border: 1px solid #ddd; padding: 8px;">{model}</td>')
+            html_parts.append(f'  <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">{cost}</td>')
+            html_parts.append(f'  <td style="border: 1px solid #ddd; padding: 8px; color: #666;">{note}</td>')
+            html_parts.append("</tr>")
+        html_parts.append("</table>")
+
+    # 結語
     html_parts.append('<p style="margin-top: 20px;">如有需要進一步了解的部分，歡迎隨時告知。</p>')
-    html_parts.append('<p style="margin-top: 16px;">黃奕儒<br/><span style="color: #666; font-size: 12px;">營運部</span></p>')
     html_parts.append("</div>")
 
     return "\n".join(html_parts)
@@ -199,9 +254,31 @@ def _section_header(title: str) -> str:
     )
 
 
-def open_outlook_draft(subject: str, html_body: str, to_email: str):
-    """透過 PowerShell Outlook COM 開啟郵件草稿"""
-    # 合併為單一 PowerShell 呼叫
+def _to_windows_path(posix_path: Path) -> str:
+    """將 WSL/Linux 路徑轉成 Windows 路徑給 Outlook COM 用。"""
+    abs_path = str(posix_path.resolve())
+    try:
+        result = subprocess.run(
+            ["wslpath", "-w", abs_path],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # 非 WSL 環境，假設已是 Windows 路徑
+        return abs_path
+
+
+def open_outlook_draft(subject: str, html_body: str, to_email: str, attachment_path: Path | None = None):
+    """透過 PowerShell Outlook COM 開啟郵件草稿，並可選擇夾帶附件。"""
+    attach_line = ""
+    if attachment_path is not None and attachment_path.exists():
+        win_path = _to_windows_path(attachment_path)
+        # 用單引號 PowerShell 字串避免路徑中 $ 等被展開
+        ps_escaped = win_path.replace("'", "''")
+        attach_line = f"$mail.Attachments.Add('{ps_escaped}') | Out-Null"
+
     combined_script = f'''
 # 寫入暫存 HTML
 if (-not (Test-Path "C:\\temp")) {{ New-Item -ItemType Directory -Path "C:\\temp" | Out-Null }}
@@ -217,6 +294,7 @@ $mail = $outlook.CreateItem(0)
 $mail.To = "{to_email}"
 $mail.Subject = "{subject}"
 $mail.HTMLBody = $body
+{attach_line}
 $mail.Display()
 
 # 清理暫存
@@ -235,6 +313,8 @@ Remove-Item "C:\\temp\\work_log_email.html" -ErrorAction SilentlyContinue
         sys.exit(1)
     else:
         print("[OK] Outlook 草稿已開啟，請確認後按發送。")
+        if attach_line:
+            print(f"[OK] 已夾帶附件：{attachment_path.name}")
 
 
 def main():
@@ -274,11 +354,12 @@ def main():
     # 轉換為 HTML
     html_body = md_to_html(md_content)
 
-    # 開啟 Outlook 草稿
+    # 開啟 Outlook 草稿（自動夾帶 md 原檔為附件）
     print(f"[INFO] 郵件標題：{subject}")
     print(f"[INFO] 收件者：{to_email}")
+    print(f"[INFO] 附件：{md_path.name}")
     print(f"[INFO] 正在開啟 Outlook 草稿...")
-    open_outlook_draft(subject, html_body, to_email)
+    open_outlook_draft(subject, html_body, to_email, attachment_path=md_path)
 
 
 if __name__ == "__main__":
