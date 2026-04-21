@@ -41,8 +41,8 @@
     },
     {
       "name": "daily-work-log",
-      "description": "跨專案工作/週報產生器 — 掃描 Claude Code / Codex / Gemini session，彙整日/週工作進度,追蹤 Claude Code 訂閱 7d/5h 用量（官方 endpoint），支援 SDD spec drift 偵測（屬下週報）、AI 小白 vs 老手雙檔 signal 分析，透過 Outlook 寄出並夾帶 md 附件",
-      "version": "1.7.0",
+      "description": "跨專案工作/週報產生器 — 掃描 Claude Code / Codex / Gemini session，彙整日/週工作進度，追蹤 Claude Code 訂閱 7d/5h 用量（官方 endpoint），支援 SDD spec drift 偵測（屬下週報）、AI 小白 vs 老手雙檔 signal 分析，透過 Outlook 寄出並夾帶 md 附件",
+      "version": "1.7.1",
       "author": { "name": "df-haha" },
       "source": "./plugins/daily-work-log",
       "category": "productivity"
