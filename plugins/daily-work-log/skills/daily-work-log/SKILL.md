@@ -120,6 +120,20 @@ ccusage daily --since {YYYYMMDD} --until {YYYYMMDD} -i -j
 
 **claude-mem observer 專案的說明**：若出現 `-home-hahahuang--claude-mem-observer-sessions` 專案，這是 `claude-mem` plugin 的背景 observer 程序（把主 session 動作結構化成 memory），**不是人工作業**。在日誌中獨立列出並標註為「背景記憶寫入稅」，不要當成實際專案。
 
+### 1-1. Claude Code 訂閱用量
+
+呼叫 usage tracker 取得當前 7 天/5 小時滾動窗用量（Anthropic `/usage` 背後的 endpoint）：
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/claude_usage_tracker.py
+```
+
+- 若 `ok: true` → 記下 `seven_day.utilization_pct` 與 `seven_day.resets_at_local`，Phase 4 的 md header 要加一行呈現
+  - 若 `resets_at_local` 為 null，改用 `resets_at_utc`；若兩者都為 null，md header 只寫百分比，省略括號內的重置時間
+- 若 `ok: false`（token 過期、API key 用戶、endpoint 失效等）→ Phase 4 標示「Claude Code 用量：無法取得（原因）」，不要中斷流程
+
+此 endpoint 未文檔化，失敗屬正常降級，**不要**視為錯誤重試。
+
 > **→ TaskUpdate: Phase 1 → completed**
 
 ---
@@ -219,6 +233,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/extract_session_details.py {session1_full_
 > 工作時段：{earliest} → {latest}
 > 涉及專案：{M} 個
 > 今日 AI 使用費用：${total_cost}
+> Claude Code 本週用量：{seven_day_pct}%（重置 {resets_at_local}）
 
 ---
 

@@ -54,7 +54,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
 |------|------|------|
 | `user_name` | ✅ | 屬下本人姓名（寫進週報 header） |
 | `user_role` | ✅ | `senior` 或 `ai-coder-junior`（決定 signal 規則） |
-| `manager_email` | ✅ | 週報收件者(主管) |
+| `manager_email` | ✅ | 週報收件者（主管） |
 | `repos` | ✅ | 要掃的 repo 絕對路徑清單（至少 1 個） |
 | `week_start` | 選配 | `monday`（預設）或 `sunday` |
 | `outlook_email` | 選配 | 日報用，週報用 `manager_email`；若後者缺失則 fallback |
@@ -98,6 +98,20 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/weekly_report.py {--week YYYY-MM-DD | --la
 **注意**：script 不會自己寫 md，它只產資料。你（Claude）在 Phase 4 讀這份 JSON 組裝 md。
 
 **若某個 repo `spec.md` 不存在**：在 Phase 4 的週報裡該 repo 區塊明確標記「⚠ 未找到 SDD 檔案（spec.md/plan.md/tasks.md）」並提醒屬下補上。
+
+### 1-1. Claude Code 訂閱用量
+
+呼叫 usage tracker 取得當前 7 天/5 小時滾動窗用量（Anthropic `/usage` 背後的 endpoint）：
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/claude_usage_tracker.py
+```
+
+- 若 `ok: true` → 記下 `seven_day.utilization_pct` 與 `seven_day.resets_at_local`，Phase 4 的 md header 要加一行呈現；若有 `seven_day_sonnet` / `seven_day_opus` 也一併列出
+  - 若 `resets_at_local` 為 null，改用 `resets_at_utc`；若兩者都為 null，md header 只寫百分比，省略括號內的重置時間
+- 若 `ok: false`（token 過期、API key 用戶、endpoint 失效等）→ Phase 4 標示「Claude Code 用量：無法取得（原因）」，不要中斷流程
+
+此 endpoint 未文檔化，失敗屬正常降級，**不要**視為錯誤重試。
 
 > **→ TaskUpdate: Phase 1 → completed**
 
@@ -183,6 +197,7 @@ Scope 對齊度計算：`len(touched ∩ spec_files) / len(touched ∪ spec_file
 > 角色：{user_role_中文}（資深工程師 / AI-coder 小白）
 > 產出時間：{generated_at}
 > 涉及 repo：{N} 個｜Session：{N}｜Commit：{N}
+> Claude Code 本週用量：{seven_day_pct}%（重置 {resets_at_local}）{若 Sonnet/Opus 分開：｜Sonnet {N}%｜Opus {N}%}
 
 ---
 
