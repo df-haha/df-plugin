@@ -1,7 +1,7 @@
 ---
 name: daily-work-log
 description: 跨專案工作日誌產生器。掃描指定日期的所有 Claude Code session JSONL 檔案，彙整各專案工作進度，輸出結構化 markdown 日誌。觸發時機：當用戶說「彙整工作進度」、「工作日誌」、「session summary」、「今天做了什麼」、「整理今天的工作」、「產出工作日誌」、「日誌」時使用。即使用戶只是隨口問「今天做了哪些事」也應觸發此 skill。
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, mcp__plugin_claude-mem_mcp-search__timeline
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, Skill, mcp__plugin_claude-mem_mcp-search__timeline, mcp__github__push_files
 ---
 
 # 跨專案工作日誌產生器
@@ -156,9 +156,98 @@ cd {project_dir} && git log @{u}.. --oneline 2>/dev/null  # 未 push 的 commit
 - 是否有未 push 的 commit
 
 **處理規則**：
-1. 若有未 commit 修改或未 push commit → **先提醒使用者去 commit/push**，等使用者回覆後再繼續
-2. 使用者說「做完了」→ 重新檢查一次 git 狀態
-3. 使用者說「先不做」或「跳過」→ 繼續產出 md，並在日誌的「待辦事項」區塊明列哪些專案有未提交/未推送的變更
+1. 若有未 commit 修改或未 push commit → 進入 **2-1 半自動 commit 協助**
+2. 若完全乾淨 → 直接完成 Phase 2
+
+### 2-1. 半自動 commit / push 協助（僅在偵測到 uncommitted 或 unpushed 時執行）
+
+**若使用者回覆「全部跳過」→ 立即終止迴圈，剩下 repo 全進「待處理事項」（含未 commit 檔案清單），不再逐一詢問。**
+
+**對每個有變動的 repo，逐一處理**（不要批次、不要一次全部 commit）：
+
+1. **收集 repo 狀態**：
+   ```bash
+   cd {repo_dir} && git rev-parse --abbrev-ref HEAD 2>/dev/null                 # 目前 branch
+   cd {repo_dir} && git status --short 2>/dev/null                              # 哪些檔案動了
+   cd {repo_dir} && git diff --stat 2>/dev/null | tail -20                      # unstaged diff stat
+   cd {repo_dir} && git diff --staged --stat 2>/dev/null | tail -20             # staged diff stat
+   cd {repo_dir} && git log @{u}.. --oneline 2>/dev/null || true                # 未 push 的 commit
+   cd {repo_dir} && git diff 2>/dev/null | wc -l                                # 總 diff 行數
+   ```
+   記錄：branch 名、變動檔案清單、unstaged/staged 比例、diff 總行數。
+
+2. **Secret 預檢（硬性，不可跳過）**：
+   ```bash
+   cd {repo_dir} && git status --short | grep -iE '\.(env|key|pem|p12|pfx)$|credentials|secret|\.pypirc|id_rsa'
+   ```
+   - 若有 match → **停下來**，印出匹配到的檔案，用 AskUserQuestion 警告：「偵測到疑似密鑰檔 X，確定要 commit 嗎？」預設「否」。選「否」→ 本 repo 跳過，記進待辦並明列這些疑似密鑰檔要手動處理。
+
+3. **讀 diff**（根據步驟 1 的總行數決定）：
+   - 總行數 ≤ 300 → 完整 `git diff`
+   - 300 < 總行數 ≤ 2000 → `git diff --stat`（所有檔案）+ `git diff --name-only`（全清單）
+   - 總行數 > 2000 → 只用 `git diff --stat`，**並在 commit message draft 強制加上**「⚠ 建議拆成多個 commit（diff 超過 2000 行）」
+
+4. **產生 commit message draft**（你自己寫，不要呼叫外部 script）：
+   - subject < 50 字元，格式 `<type>: <description>`（type = feat/fix/refactor/docs/test/chore）
+   - 關注「why」而不是「what」
+   - 若偵測到多個無關變動（例如同時改 `.claude/skills/*` 和 `backend/data/*`）→ draft 開頭加「⚠ 變動涉及多個不相關領域，建議拆成多個 commit」
+
+5. **用 `AskUserQuestion` 問使用者**：
+
+   > {repo_name}（branch: {branch_name}）有變動（N 檔 / +X/-Y 行）。
+   > {若 branch != main/master：⚠ 目前不在主分支}
+   > 我建議的 commit message：
+   > ```
+   > <draft>
+   > ```
+   > 怎麼處理？
+
+   選項：
+   - `commit + push（用建議 message）` — 照 draft 跑步驟 6-7
+   - `我自己編輯 message` — 等使用者貼新 message。收到後**必須**再用 AskUserQuestion 二次確認（「確認用此 message commit？ <new_message>」），yes 才繼續步驟 6。不得跳過二次確認
+   - `這個 repo 跳過` — 記進 Phase 4 的「待處理事項」（含未 commit 檔案清單）
+   - `全部跳過` — 終止本迴圈，剩下 repos 全記進待辦（含檔案清單），不再問
+
+6. **執行 commit**（使用者確認後）：
+   - **優先**：使用 `Skill` tool 呼叫 `commit-commands:commit`（若可用，格式與使用者既有流程一致）
+   - **fallback**（屬下未裝 `commit-commands` plugin）：
+     ```bash
+     # 只 add 步驟 1 列出的「屬於本次變動」的檔案；禁用 git add -A 避免意外納入未預期檔案（尤其是 secrets）
+     cd {repo_dir} && git add -- <檔案1> <檔案2> ... && git commit -m "<message>"
+     ```
+     （若 pre-commit hook 失敗，**不得** `--no-verify` 繞過；修問題後重跑）
+
+7. **執行 push**：
+   ```bash
+   cd {repo_dir} && git push 2>&1
+   ```
+
+   **技術說明**：本 skill 的 push 一律用 bash，不用 `mcp__github__push_files`。push_files 是呼叫 Contents API 產生新的遠端 commit，無法疊加到已存在的本地 commit（會衝突）。使用者 CLAUDE.md 規則「git push 一律用 GitHub MCP」只適用於「未 commit 直接推檔案」的場景。本段若觸發 `git-push-reminder.sh` 等 hook 的提示，屬預期行為，忽略即可。
+
+8. **Push 失敗處理**（return code 非 0）：
+
+   印出完整 stderr，然後用 AskUserQuestion 詢問：
+
+   > {repo} push 失敗：{stderr 第一行}
+   > 怎麼處理？
+
+   選項：
+   - `保留本地 commit，之後手動 push` — 記進 Phase 4 待辦「已 commit 未 push」
+   - `撤回 commit（git reset --soft HEAD~1）` — 撤 commit 保留 working tree 變動，記進待辦
+   - `重試一次 push` — 再跑一次 `git push`（只允許重試 1 次，再失敗回到本題）
+
+9. **記錄結果**（塞進 Phase 4 要用的結構）：
+   - 成功：`{repo, hash, subject, branch}`
+   - 跳過：`{repo, 原因, 未 commit 檔案清單（git status --short 原文）}`
+   - commit 成功但 push 失敗：`{repo, hash, stderr, 使用者選擇}`
+
+### 2-2. 原流程收尾
+
+- Phase 4 的日報「Git 狀態」區塊：列出本流程新增的 commit（標「本次 skill 自動協助 commit」；若 branch 非主分支也標出）
+- Phase 4 的「待處理事項」：
+  - 跳過的 repo（含未 commit 檔案清單）
+  - commit 成功但 push 失敗的 repo
+  - 撤回的 commit（若使用者選 reset）
 
 > **→ TaskUpdate: Phase 2 → completed**
 
