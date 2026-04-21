@@ -2,3 +2,8 @@
 *.ai
 # Word temp files
 ~$*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo

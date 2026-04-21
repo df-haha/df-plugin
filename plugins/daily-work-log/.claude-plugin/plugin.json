@@ -1,7 +1,7 @@
 {
   "name": "daily-work-log",
-  "version": "1.6.0",
-  "description": "跨專案工作日誌產生器 — 掃描 Claude Code session 檔案，自動彙整各專案工作進度，產出格式化 markdown 日誌並可透過 Outlook 寄出",
+  "version": "1.7.0",
+  "description": "跨專案工作/週報產生器 — 掃描 Claude Code session 檔案，自動彙整日/週工作進度，支援 spec drift 偵測（屬下週報）、AI 小白 vs 老手雙檔 signal 分析，透過 Outlook 寄出並夾帶 md 附件",
   "author": {
     "name": "df-haha"
   }
