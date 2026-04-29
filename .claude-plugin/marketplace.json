@@ -62,6 +62,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/evaluate-business-idea",
       "category": "productivity"
+    },
+    {
+      "name": "handoff",
+      "description": "跨 session 複雜任務交接 — 自動從本次對話收集 commit / 決策共識 / 待辦 / 相關 memory，產出結構化 handoff prompt 並落盤至 ~/.claude/handoffs/，含自我清理段落避免堆積",
+      "version": "1.0.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/handoff",
+      "category": "productivity"
     }
   ]
 }
