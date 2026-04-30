@@ -35,6 +35,8 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 - 達成的決策共識（特別是 Codex 對審後的結論）
 - 明確的待辦事項（使用者下次想做的 Step A/B/C）
 - 已浮現的禁止清單（對話中明確的「不要 X」）
+- **上個 plan mode 通過的 plan**（若本 session 有 `ExitPlanMode` 拍板的 plan markdown，整段保留下來；handoff 常用情境就是「plan mode 通過後跨 session 接手」，plan 是下個 session 的執行藍本）
+- **進行中的 TodoList 狀態**（本 session 最後一次 TodoWrite / TaskCreate 的清單，按 `completed` / `in_progress` / `pending` 三類分組；下個 session 才知道接手點在哪）
 
 ### Step 2：未 commit 變更提醒
 
@@ -61,7 +63,7 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 
 使用下方「Handoff Prompt 模板」，把 Step 1 收集的脈絡填進去。
 
-**重要**：模板最後的「🧹 開工前清理」段落**必須**填入本次 handoff md 的具體路徑，讓下個 session 拿到後執行 `rm` 自我清理。
+**重要**：模板最後的「開工順序」清單第 1 步**必須**填入本次 handoff md 的具體路徑，讓下個 session 拿到後第一件事就 `rm` 自我清理。
 
 ### Step 5：落盤 + Print
 
@@ -73,14 +75,14 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 ✅ Handoff 已落盤：~/.claude/handoffs/<檔名>.md
 
 📋 複製上方完整 prompt（從「你好！上個 session...」到最末），貼到下個 session 的第一句話即可。
-新 session 會依 prompt 內含的 🧹 清理段落自動 rm 這份 md，不需手動清。
+新 session 會依 prompt 內含的「開工順序」第 1 步自動 rm 這份 md，不需手動清。
 ```
 
 ---
 
 ## Handoff Prompt 模板
 
-> 以下是 print 給使用者的內容。每個 `<...>` 變數由 skill 即時推斷填入；固定段落（H2/H3 結構、執行風格、🧹 清理段落）**不可省略**。
+> 以下是 print 給使用者的內容。每個 `<...>` 變數由 skill 即時推斷填入；固定段落（H2/H3 結構、Plan 區塊、TodoList 區塊、執行風格、開工順序）**不可省略**。
 
 ```markdown
 你好！上個 session（commit <hash>）完成了 <Phase/Task 名稱>。
@@ -91,6 +93,25 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 - <artifact 路徑 2>（<簡述用途>）
 - <測試/驗證狀態，例如「12 tests passing」或「無自動測試，已手動驗證 X」>
 <若有未 commit 變更，加：⚠️ 含未 commit 變更：<檔案>>
+
+## 上個 session 拍板的 Plan
+> 來自上個 session `ExitPlanMode` 通過的 plan，是本次任務的執行藍本。若無則填「（本 session 未經 plan mode）」。
+
+<完整 plan markdown 內容；保留原 H2/H3 結構，不重寫>
+
+## TodoList 接手狀態
+> 來自上個 session 最後一次 TodoWrite。下個 session 開工前先 `TodoWrite` 把下表 pending / in_progress 重建回 task list。
+
+**已完成**（已驗證，列出供脈絡）
+- [x] <completed task 1>
+- [x] <completed task 2>
+
+**進行中**（接手點，需先確認進度）
+- [/] <in_progress task>（<目前卡在哪 / 下一步要做什麼>）
+
+**待辦**（本次 session 要消化的）
+- [ ] <pending task 1>
+- [ ] <pending task 2>
 
 ## 本次目標：<Phase/Task 名稱>
 
@@ -132,19 +153,15 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 - 每完成一步 update TaskList
 - 不確定 API 用法先 context7 查文件再寫
 
-請先讀 `<input artifact 路徑>` 的 schema（`head -3` + 欄位清單），確認與 <下游需求> 對接無遺漏，再開始 Step A。
+### 開工順序（依序執行，不要跳過）
 
----
-
-### 🧹 開工前清理
-
-這份 handoff 來自上個 session，**請在開始 Step A 前刪除以下檔案**（避免 ~/.claude/handoffs/ 堆積）：
-
-```bash
-rm ~/.claude/handoffs/<本次 handoff md 完整檔名>.md
-```
-
-刪除後再開始任務。
+1. **🧹 清理本份 handoff md**（避免 ~/.claude/handoffs/ 堆積）：
+   ```bash
+   rm ~/.claude/handoffs/<本次 handoff md 完整檔名>.md
+   ```
+2. **重建 TodoList**：用 `TodoWrite` 把上方「TodoList 接手狀態」的 in_progress + pending 重建回 task list（completed 不重建，只是脈絡參照）。
+3. **讀 input artifact schema**：`head -3 <input artifact 路徑>` + 欄位清單，確認與 <下游需求> 對接無遺漏。
+4. 開始 Step A。
 ```
 
 ## 變數推斷指引
@@ -160,6 +177,8 @@ rm ~/.claude/handoffs/<本次 handoff md 完整檔名>.md
 | `<禁止 1/2/3>` | Codex debate 共識 + 對話中明確的「不要 X」「禁止 X」 |
 | `<參考 memory>` | `ls ~/.claude/projects/-home-haha-CC-project/memory/` 中與本任務相關的檔 |
 | `<本次 handoff md 完整檔名>` | Step 3 決定的路徑 basename |
+| `<plan markdown>` | 本 session 最近一次 `ExitPlanMode` 通過的 plan 內容；無則填「（本 session 未經 plan mode）」 |
+| `<TodoList completed/in_progress/pending>` | 本 session 最後一次 TodoWrite/TaskCreate 的 todo 清單，按狀態分組 |
 
 ## 推斷不足時的處理
 
