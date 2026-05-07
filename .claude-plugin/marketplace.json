@@ -70,6 +70,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/handoff",
       "category": "productivity"
+    },
+    {
+      "name": "om-daily-work-log",
+      "description": "OM 營運部 coaching loop — 主管產澄清問題卡 + reply 屬下原日報寄出（thread 自動串）；屬下日誌偵測主管疑問並用 CC 回覆，HTML anchor 標記讓主管 /hi 解析閉環。需配合既有 daily-work-log plugin（reuse 其腳本）",
+      "version": "1.0.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/om-daily-work-log",
+      "category": "productivity"
     }
   ]
 }

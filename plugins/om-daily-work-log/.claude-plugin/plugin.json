@@ -1,0 +1,20 @@
+{
+  "name": "om-daily-work-log",
+  "version": "1.0.0",
+  "description": "OM 營運部專用 — 主管/屬下雙向 async coaching loop。屬下端：日誌 + 接收主管 reply 的疑問卡並回覆；主管端：產生澄清問題卡 + reply 屬下日報寄出。需配合既有 daily-work-log plugin（v1.7.2+）的腳本（reuse 不 copy）。",
+  "author": {
+    "name": "df-haha"
+  },
+  "homepage": "https://github.com/df-haha/df-plugin",
+  "metadata": {
+    "depends_on_plugins": [
+      {
+        "name": "daily-work-log",
+        "min_version": "1.7.2",
+        "reason": "reuse daily_work_log.py 的 session 掃描與 send_work_log_email.py 的 Outlook COM 寄信機制"
+      }
+    ],
+    "delivery_method": "outlook_reply",
+    "audience": ["supervisor", "subordinate"]
+  }
+}

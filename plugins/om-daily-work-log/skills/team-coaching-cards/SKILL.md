@@ -1,0 +1,242 @@
+---
+name: team-coaching-cards
+description: 主管端 — 將 team-daily-fetcher 產出的「待釐清疑問」轉換為可寄給屬下的「澄清問題卡」md。每位屬下一張卡，每張卡含主管看到的工作摘要 + 3-5 個 CC 可查證的提問（接 git/spec/tasks 出處）。觸發時機：/hi Phase 3.X、或主管說「產卡」「澄清卡」「coaching cards」「產問題卡」「給屬下出問題」「team coaching」。產卡後詢問主管 review，確認後 reply 屬下原日報寄出。
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Skill, mcp__outlook-local__search_email_by_subject_tool, mcp__outlook-local__list_recent_emails_tool
+---
+
+# Team Coaching Cards — 主管端澄清問題卡產生器
+
+把 team-daily-fetcher 已抓好的屬下日報 + Q2 任務分派對齊度判斷，轉成**可直接 reply 屬下日報的澄清問題卡**。
+
+---
+
+## MANDATORY EXECUTION PROTOCOL
+
+此 skill 包含 6 個 Phase。Phase 1 → 6 必須循序執行。
+
+### 開始前必做
+
+1. `ToolSearch("select:TaskCreate,TaskUpdate,AskUserQuestion")` 載入工具（如未載入）
+2. `TaskCreate` 建 6 個 task：
+   | # | Phase |
+   |---|-------|
+   | 1 | Phase 1：讀資料來源 |
+   | 2 | Phase 2：套用三項禁區規則 |
+   | 3 | Phase 3：每位屬下產卡 |
+   | 4 | Phase 4：寫入卡片 md |
+   | 5 | Phase 5：主管 review |
+   | 6 | Phase 6：reply 屬下原日報寄出 |
+3. 每 Phase 開始 `TaskUpdate` 標 in_progress、結束標 completed
+
+---
+
+## Phase 1：讀資料來源
+
+讀以下三個來源（必讀，缺一不可）：
+
+### 1.1 屬下日報（已由 team-daily-fetcher 抓進 data/daily_reports/）
+```bash
+ls -1 data/daily_reports/{target_date}/*_daily_work_log_{target_date}.md
+```
+對每位屬下：用 Read 工具讀 md 內容，抽：
+- 工作項目清單（依 H2/H3 標題）
+- AI 用量 ccusage 表（看當日成本）
+- 待處理事項
+
+### 1.2 Q2 任務分派（source-of-truth）
+```bash
+Read 人事文件/2026-Q2_任務分派.md
+```
+抽每位屬下的：
+- 任務線清單
+- 06 降本增效對應
+- 主管已知前提（如：q2c-margin = 副總指示、官網優先 = 主管要求）
+
+### 1.3 team-daily-fetcher 已產出的對齊度判斷
+從 daily_proposal/daily_proposal_{target_date}.md 抽「🎯 團隊引導」區塊：
+- 每位屬下的對齊度標記（✅ / ⚠️ 偏離 / ⚪ 必要）
+- 已經識別的「待釐清疑問」條列
+
+> 若 daily_proposal_{target_date}.md 不存在或缺「🎯 團隊引導」區塊 → 提示主管先跑 /hi Phase 1.5，或退出此 skill
+
+---
+
+## Phase 2：套用三項禁區規則（HARD CONSTRAINT）
+
+**絕對不能違反**的三項禁區：
+
+### 禁區 1：語氣 — 提問非質疑
+- ❌ 禁用詞：「為什麼」「為何」「跟誰對齊」「為何未」「跑偏」「失職」
+- ✅ 改用：「請說明」「目前狀態」「想了解」「請查 X 並整理」
+
+### 禁區 2：接受主管已知前提
+從 Q2 任務分派 + Phase 1 對話脈絡識別主管已知前提，**不再追問**：
+- q2c-margin = 副總指示拆 repo（不問「為何拆」）
+- 官網優先 = 主管 5/6 指示（不問「為何先做官網」）
+- 庭誠已整合（不問整合歷程）
+- POS-web 暫緩 = 主管同意（不問「為何停」，但可問「何時切回」）
+
+### 禁區 3：禁問 token / AI 成本
+- ❌ 禁問：「你今天用了多少 token」「為什麼花這麼多錢」「AI 成本是不是太高」
+- 例外：若 team-daily-fetcher 已標記某人 7d 滾動 ≥70%（🔴 高用量），可在卡片末尾加 **soft note**「本週 AI 用量已達 X% 配額，建議節制」，但不列為提問
+
+### Phase 2 自我檢查 checklist
+產卡前對每題跑一次：
+- [ ] 不含「為什麼」「跟誰對齊」
+- [ ] 不問 token / AI 成本（除非 soft note）
+- [ ] 接受主管已知前提
+- [ ] **可用 CC 查證**（題目出處可指向 git log / commit / spec.md / plan.md / tasks.md）
+
+任一題失敗 → 重寫該題
+
+---
+
+## Phase 3：每位屬下產卡
+
+對每位屬下產 1 張卡，每張卡 3-5 題。每題格式：
+
+```markdown
+#### Q{N}. {標題 — 用「目前狀態」「想了解」「請說明」開頭}
+請查 {repo}: {file 1} / {file 2} / {file 3}，整理：
+- {可查證項目 1}
+- {可查證項目 2}
+- {可查證項目 3}
+```
+
+### evidence_hint 三層穩定度（v2-5）
+卡片 frontmatter 的 `evidence_hint` 應指向**穩定錨點**：
+
+| 穩定度 | 形式 | 範例 |
+|--------|------|------|
+| ★★★（推薦） | git:`<commit_sha>:<path>#L<n>-L<m>` | `git:abc1234:src/foo.py#L10-L25` |
+| ★★（可選） | commit hash only | `git:abc1234` |
+| ★（退而求其次） | `<path>#L<n>` 不綁 commit | `tasks.md#L100` — 會漂移，禁用為 sole evidence |
+
+---
+
+## Phase 4：寫入卡片 md
+
+**檔案路徑**：`daily_proposal/team_coaching_cards_{target_date}.md`
+
+> ⚠️ **嚴格區分 reference cards**：此 skill 只寫 `daily_proposal/team_coaching_cards_*.md`，**永不**寫到 `daily_proposal/reference_cards/*.md`（reference cards 是手動鎖定的範本，不被自動覆寫）
+
+### 衝突處理（v2-1 supersede chain）
+若 `daily_proposal/team_coaching_cards_{target_date}.md` 已存在：
+1. 讀現存檔，抽每張卡的 `card_id` + `card_version`
+2. 若主管想**修改某張卡**：
+   - 新卡 `card_version` = 舊卡 + 1
+   - 新卡 `supersedes_card_id` = 舊卡 card_id
+   - 舊卡 `superseded_by_card_id` = 新卡 card_id、`review_status` 改 `superseded`
+3. 若主管想**新增一張卡**（如新加站區 manager）：直接 append，不動現有卡
+
+### 檔案結構（multi-document YAML + markdown）
+
+```markdown
+---
+# Bundle metadata
+target_work_date: {date}
+created_at: {ISO 8601}
+created_by: {supervisor display_name}
+file_type: runtime_cards   # 注意：reference 才標 reference_card_bundle
+final_locked: false        # runtime cards 可被覆寫
+delivery_method: outlook_reply
+---
+
+# 主管澄清問題卡 — {target_date} 盤點
+
+> 使用方式：（複製本檔卡 1/2/3 的 markdown 段落 → 在 Outlook reply 屬下原日報 → 附 .md 檔）
+>
+> 三項禁區檢查（Phase 2 已過濾）
+
+---
+
+```yaml
+# Card 1
+card_id: <UUID v4 — 用 python -c "import uuid; print(uuid.uuid4())">
+card_version: 1
+target_work_date: {date}
+employee:
+  name: {名字}
+  display_name: {OM-XXXXX 名字}
+  employee_code: {OM-XXXXX}
+review_status: draft
+sent_at: null
+replied_at: null
+review_thread_id: null
+review_message_id: null
+reply_message_id: null
+supersedes_card_id: null
+superseded_by_card_id: null
+final_locked: false
+managed_sections:
+  - supervisor_qa
+questions:
+  - id: Q1
+    title: {標題}
+    evidence_hint: "{穩定度 ★★★ 的指向}"
+```
+
+## 卡 N — {名字}
+
+### 主管看到的本週工作
+- {date}：{摘要}
+- ...
+
+### 主管想了解的 N 件事
+
+#### Q1. {標題}
+{內容}
+
+### 回覆建議
+每題用 CC 查證後回 100-200 字，附上 commit hash + 檔案路徑佐證。
+```
+
+---
+
+## Phase 5：主管 review
+
+寫完檔後，**必須**問主管：
+
+```
+卡片已產出在 daily_proposal/team_coaching_cards_{target_date}.md
+- 卡 1（蕭欣萍）：N 題
+- 卡 2（林梅杏）：N 題
+- 卡 3（游宗霖）：N 題
+
+要修改任一題嗎？或全部 OK 寄出？
+```
+
+用 `AskUserQuestion`：
+1. 全部 OK，寄出 → 進 Phase 6
+2. 修改某張卡 → 主管指定卡 N Q M，重產該題（套 Phase 2 三禁區）→ 回 Phase 5
+3. 砍掉某題 → 直接刪 → 回 Phase 5
+4. 跳過寄出 → 結束 skill（卡片仍保留在檔案）
+
+---
+
+## Phase 6：reply 屬下原日報寄出
+
+主管確認後，呼叫 send_coaching_cards.py：
+
+```bash
+python3 ~/.claude/plugins/cache/df-haha-plugins/om-daily-work-log/1.0.0/scripts/send_coaching_cards.py \
+  daily_proposal/team_coaching_cards_{target_date}.md \
+  --mode reply
+```
+
+> `--mode reply`（預設）：用 Outlook Reply 屬下原日報，thread 自動串
+> `--mode compose`（fallback）：找不到原日報時開新郵件
+> `--auto-send`：直接發送（預設**只開草稿**，主管按發送）
+
+腳本完成後：
+- 卡片 frontmatter 自動更新：`review_status: sent`、`sent_at`、`review_thread_id`、`review_message_id`
+- 跳出 Outlook 草稿視窗，主管檢查無誤後按發送
+
+---
+
+## 終止條件
+
+- ✅ 6 個 task 全 completed
+- ✅ 卡片 md 已寫入 daily_proposal/team_coaching_cards_{target_date}.md
+- ✅ 主管確認寄出 OR 主動跳過
+- ✅ 寄出時 frontmatter 已更新 review_status
