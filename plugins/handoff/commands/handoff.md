@@ -4,7 +4,7 @@
 
 ## 使用方式
 
-- `/handoff` — 自動從本次對話歷史推斷脈絡，產出 handoff md + print 完整 prompt
+- `/handoff` — 自動從本次對話歷史推斷脈絡，產出 handoff md → 落盤 → 呼叫 Codex CLI 對草稿做最後審核（只挑實質影響的問題）→ print 完整 prompt
 - `/handoff <自由補述>` — 補充本 session AI 沒抓到的決策共識、特殊禁止事項
 
 ## 適用情境
