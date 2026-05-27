@@ -78,6 +78,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/om-daily-work-log",
       "category": "productivity"
+    },
+    {
+      "name": "coolify-deploy",
+      "description": "Coolify + Docker Compose 部署規則 skill",
+      "version": "1.0.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/coolify-deploy",
+      "category": "development"
     }
   ]
 }

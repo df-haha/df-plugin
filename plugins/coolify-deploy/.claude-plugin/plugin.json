@@ -1,0 +1,6 @@
+{
+  "name": "coolify-deploy",
+  "version": "1.0.0",
+  "description": "Coolify (self-hosted PaaS) + Docker Compose deployment rules: compose authoring, Dockerfile, env/secrets, SERVICE_URL magic env, Adminer/Seq, deploy flow, rollback, domains/TLS.",
+  "author": { "name": "df-haha" }
+}
