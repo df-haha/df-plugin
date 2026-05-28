@@ -73,6 +73,7 @@ Coolify（自架，於自架機器拉 git）
 | Coolify env 注入、build/runtime、機密、APP_ENV 分層、fail-fast、部署前 checklist | `references/env-management.md` |
 | 分支策略 / webhook / migration 時機 / 部署後驗證 / 兩條回滾路徑 / bootstrap | `references/deploy-and-rollback.md` |
 | Log / Metric / Sentry / healthcheck 端點 | `references/observability.md` |
+| 部署失敗要讀 build log / 設「讀 log 用」的 read:sensitive token / 失敗自動撈 log monitor | `references/deployment-logs.md` |
 | 自訂網域 / TLS / HSTS / CORS / cookie domain / preview env | `references/domains-and-tls.md` |
 
 ## Bootstrap checklist（首次 push 到 Coolify 前）
@@ -82,6 +83,7 @@ scaffold 工具通常不產部署檔；未補完就 push 會在 build 階段失�
 - [ ] `docker-compose.yml`（見 `compose.md`）
 - [ ] `backend/Dockerfile`、`frontend/Dockerfile`（見 `dockerfile-*.md`）
 - [ ] Coolify 端 env 注入（`DATABASE_URL` 或 `POSTGRES_*`、`JWT_SECRET_KEY`、`CORS_ORIGINS`… 見 `env-management.md`）
+- [ ]（選配，建議）設「讀 log 用」的 `read:sensitive` API token + 護欄（IP allowlist / 過期 / gitignore），日後部署失敗可用 `scripts/coolify-logs.py` 安全撈 build log（drop hidden + 遮罩）。完整 two-token 模型與風險見 `references/deployment-logs.md`
 
 驗收 3 步：
 
