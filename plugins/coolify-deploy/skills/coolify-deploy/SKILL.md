@@ -48,6 +48,7 @@ Coolify（自架，於自架機器拉 git）
 10. **每個 service 設 `TZ: Asia/Taipei`**；Dockerfile 也裝 `tzdata` 並設 `TZ`。
 11. **DATABASE_URL 是拓撲決策、非預設值**：compose 內建 postgres → inline `postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}`；外部 / RDS / managed DB → **必用** `DATABASE_URL: ${DATABASE_URL}` 整串注入。不寫「預設用哪個」，依 DB 拓撲選（env checklist 同步見 `references/env-management.md`）。
 12. **Adminer 安全底線**：Adminer 無內建存取控制，**正式環境未加 Basic Auth / IP allowlist 就不要生成 adminer**；image 綁版（禁 `adminer:latest`）；**SERVICE_URL 不得貼進文件 / README / 聊天工具**（等同 DB 後門外洩）。
+13. **`NODE_ENV=production` 禁放 compose `environment:`**：Coolify 會把 compose 的 `environment:` **同時**展開成 build-time `--build-arg`，`NODE_ENV=production` 注入 builder stage 會讓 `npm ci` 跳過 devDependencies，導致 `tsc` / `vite` / `next` 等 build 工具找不到（exit 127）。`NODE_ENV=production` 應**只在 Dockerfile runtime stage 用 `ENV` 設定**，不走 compose env 注入。若 builder stage 確需覆寫，加 `ENV NODE_ENV=development` 在 `RUN npm ci` 之前（見 `references/dockerfile-frontend.md` + `references/env-management.md`）。
 
 ## 兩種對外曝露機制（可並存）
 

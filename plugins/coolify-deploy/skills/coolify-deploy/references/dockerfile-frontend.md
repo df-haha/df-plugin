@@ -18,6 +18,12 @@ FROM node:22.13.0-bookworm-slim AS builder
 
 WORKDIR /app
 
+# NODE_ENV=development 確保 npm ci 安裝 devDependencies（含 tsc / vite 等 build 工具）。
+# Coolify 會把 compose 的 environment: 自動展開成 --build-arg，若 compose 設了
+# NODE_ENV=production，builder stage 預設會跳過 devDeps 導致 build 失敗（exit 127）。
+# runtime stage（nginx）不跑 Node，不需改回；NODE_ENV=production 在 runtime 才設或不設均可。
+ENV NODE_ENV=development
+
 COPY package.json package-lock.json ./
 RUN npm ci
 
@@ -92,6 +98,12 @@ FROM node:22.13.0-bookworm-slim AS builder
 
 WORKDIR /app
 
+# NODE_ENV=development 確保 npm ci 安裝 devDependencies（含 tsc / next 等 build 工具）。
+# 理由同 Vite 路線：Coolify 把 compose environment: 自動展開成 --build-arg，
+# 若 compose 有 NODE_ENV=production，npm ci 會 skip devDeps，next build 找不到指令（exit 127）。
+# runtime stage 已設 NODE_ENV=production（第二個 FROM 區塊），不受此影響。
+ENV NODE_ENV=development
+
 COPY package.json package-lock.json ./
 RUN npm ci
 
@@ -148,3 +160,4 @@ CMD ["node", "server.js"]
 - ❌ build-time env 帶機密（`*_PUBLIC_*` / `VITE_*` 進 bundle）
 - ❌ `latest` tag
 - ❌ `.dockerignore` 沒排 `node_modules` / `.env*` / `.git`（會造成巨型 build context）
+- ❌ **builder stage 繼承 `NODE_ENV=production`**：Coolify 會把 compose 的 `environment:` 自動展開成 `--build-arg`，若 compose 設了 `NODE_ENV=production`，`npm ci` / `yarn install` / `pnpm install` 都會**跳過 devDependencies**，導致 `tsc`、`vite`、`next` 等 build 工具找不到（exit code 127）。**務必在 builder stage 第一行加 `ENV NODE_ENV=development`** 覆寫，runtime stage 再設回 `production`。

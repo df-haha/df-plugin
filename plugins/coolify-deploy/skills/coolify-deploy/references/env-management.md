@@ -20,6 +20,18 @@ Coolify Application 設定頁 → **Environment Variables** 頁籤，兩種注�
 - 前端 `*_PUBLIC_*` / `VITE_*` 一旦編譯進 bundle 即視為**公開資料**，**禁**帶任何機密（後端 secret、private key、DB 密碼都不行）。
 - 同一 env 名**禁**同時設 build-time + runtime（優先序模糊會踩雷）。
 
+### 陷阱：compose `environment:` 雙注入（Coolify 特有行為）
+
+Coolify 部署時會把 `docker-compose.yml` 裡**每個 service 的 `environment:` 區塊所有變數自動展開成 `docker build --build-arg`**（build log 顯示「Added N ARG declarations to Dockerfile」）。
+
+**後果**：compose 設了 `NODE_ENV: ${NODE_ENV:-production}` → build 階段就帶著 `NODE_ENV=production` → Node 前端 builder stage 的 `npm ci` / `yarn install` / `pnpm install` 會**跳過 devDependencies** → `tsc`、`vite`、`next` 等 build 工具不存在 → build 失敗（exit code 127，command not found）。
+
+**防範**：
+
+- **禁止**把 `NODE_ENV=production` 放在 compose 的 `environment:` 裡（或在 Coolify env 面板設成 build-time），讓 build stage 繼承到此值。
+- 若因其他原因必須設，則**在 Dockerfile 的 builder stage 最前面加 `ENV NODE_ENV=development`** 明確覆寫，runtime stage 才改回 `ENV NODE_ENV=production`。
+- `NODE_ENV=production` 應**只在 Dockerfile 的 runtime stage 設定**，由 image 本身保證，不依賴 compose env 注入。
+
 ## env 來源優先序
 
 ```
