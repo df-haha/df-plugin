@@ -38,3 +38,34 @@ def test_done_writes_checkpoint(tmp_path):
     assert rec["tracking_file_blob_sha"] == head_blob, (
         f"checkpoint blob {rec['tracking_file_blob_sha']} does not match HEAD blob {head_blob}"
     )
+
+
+def test_done_refuses_dirty_tracking_file(tmp_path):
+    # codex WF3 #2: /done must REFUSE (exit 2) if the tracking file has uncommitted
+    # changes — else it would checkpoint an unpushed review and freshness would
+    # later falsely pass.
+    repo = tmp_path
+    (repo / ".meeting-tracker").mkdir()
+    (repo / "tracking").mkdir()
+    cfg_text = (FIX / "config_valid.md").read_text(encoding="utf-8")
+    (repo / ".meeting-tracker" / "config.md").write_text(cfg_text, encoding="utf-8")
+    (repo / "tracking" / "weekly.md").write_text("# 追蹤\n", encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@t.com")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "init")
+    # dirty the tracking file WITHOUT committing
+    (repo / "tracking" / "weekly.md").write_text(
+        "# 追蹤\n未 commit 的 review 編輯\n", encoding="utf-8")
+
+    r = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/done_checkpoint.py"),
+         "--config", str(repo / ".meeting-tracker/config.md"), "--repo-root", str(repo)],
+        capture_output=True, text=True)
+    assert r.returncode == 2, f"expected refuse (2), got {r.returncode}: {r.stdout}{r.stderr}"
+    # no checkpoint should have been written
+    state_file = repo / "state" / "meeting_tracker_state.json"
+    if state_file.exists():
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        assert not state.get("last_human_reviewed"), "dirty /done must not write checkpoint"

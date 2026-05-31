@@ -27,6 +27,18 @@ def git_head_sha(repo_root) -> str:
     return out.stdout.strip()
 
 
+def git_path_is_clean(repo_root, rel_path) -> bool:
+    """True 若 rel_path 在 index 與 worktree 皆無未提交變更（git status --porcelain 空）。
+
+    /done checkpoint 用：若追蹤檔有未 commit 的 review 變更就拒絕記 checkpoint，
+    避免把「未提交」的人工 review 當成已落 HEAD（否則鮮度檢查會誤判 fresh、漏抓沒 push）。
+    """
+    r = subprocess.run(
+        ["git", "-C", str(repo_root), "status", "--porcelain", "--", str(rel_path)],
+        capture_output=True, text=True, check=False)
+    return r.stdout.strip() == ""
+
+
 def git_is_ancestor(repo_root) -> Callable[[str, str], bool]:
     def _f(maybe_ancestor: str, descendant: str) -> bool:
         r = subprocess.run(["git", "-C", str(repo_root), "merge-base", "--is-ancestor",
