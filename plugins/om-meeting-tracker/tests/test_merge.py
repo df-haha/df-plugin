@@ -1,0 +1,536 @@
+from __future__ import annotations
+
+import copy
+
+import pytest
+
+from mt_core.merge import (
+    ACHIEVEMENT_FIELDS,
+    apply_decision,
+    fact_hash,
+    find_narrative_block,
+    is_placeholder,
+    normalize,
+    plan_merge,
+    reject_key,
+    upsert_narrative_block,
+)
+
+# ---------------------------------------------------------------------------
+# normalize
+# ---------------------------------------------------------------------------
+
+def test_normalize_strips():
+    assert normalize("  hello  ") == "hello"
+
+
+def test_normalize_collapses_internal_whitespace():
+    assert normalize("a  b") == "a b"
+    assert normalize("a\t\tb") == "a b"
+    assert normalize("a\n  b\n  c") == "a b c"
+
+
+def test_normalize_empty():
+    assert normalize("") == ""
+    assert normalize("   ") == ""
+
+
+# ---------------------------------------------------------------------------
+# fact_hash
+# ---------------------------------------------------------------------------
+
+def test_fact_hash_stable():
+    h = fact_hash("hello")
+    assert h == fact_hash("hello")
+    assert len(h) == 64  # sha256 hex
+
+
+def test_fact_hash_normalize_invariant():
+    # "a  b" and "a b" normalize to same → same hash
+    assert fact_hash("a  b") == fact_hash("a b")
+    assert fact_hash("  hello  ") == fact_hash("hello")
+
+
+def test_fact_hash_distinct_for_different_values():
+    assert fact_hash("alpha") != fact_hash("beta")
+
+
+# ---------------------------------------------------------------------------
+# reject_key
+# ---------------------------------------------------------------------------
+
+def test_reject_key_format():
+    rk = reject_key("m1", "progress", "msg-001", "deadbeef")
+    assert rk == "m1|progress|msg-001|deadbeef"
+
+
+def test_reject_key_distinct_when_any_component_differs():
+    base = reject_key("m1", "progress", "msg-001", "aaa")
+    assert base != reject_key("m2", "progress", "msg-001", "aaa")
+    assert base != reject_key("m1", "卡關", "msg-001", "aaa")
+    assert base != reject_key("m1", "progress", "msg-002", "aaa")
+    assert base != reject_key("m1", "progress", "msg-001", "bbb")
+
+
+# ---------------------------------------------------------------------------
+# find_narrative_block
+# ---------------------------------------------------------------------------
+
+SAMPLE_MD = """\
+Some intro text.
+
+<!-- mt:narrative id=m1 field=progress -->
+Week 22 in progress.
+<!-- /mt:narrative -->
+
+Other content.
+
+<!-- mt:narrative id=m1 field=卡關 -->
+No blockers.
+<!-- /mt:narrative -->
+"""
+
+
+def test_find_narrative_block_present():
+    content = find_narrative_block(SAMPLE_MD, "m1", "progress")
+    assert content == "Week 22 in progress."
+
+
+def test_find_narrative_block_cjk_field():
+    content = find_narrative_block(SAMPLE_MD, "m1", "卡關")
+    assert content == "No blockers."
+
+
+def test_find_narrative_block_absent_returns_none():
+    assert find_narrative_block(SAMPLE_MD, "m1", "nonexistent") is None
+    assert find_narrative_block(SAMPLE_MD, "m99", "progress") is None
+
+
+def test_find_narrative_block_tolerates_extra_spaces():
+    md = "<!-- mt:narrative  id=m1   field=progress  -->\nContent here.\n<!-- /mt:narrative -->"
+    assert find_narrative_block(md, "m1", "progress") == "Content here."
+
+
+def test_find_narrative_block_multiline_content():
+    md = "<!-- mt:narrative id=m1 field=progress -->\nLine 1.\nLine 2.\n<!-- /mt:narrative -->"
+    content = find_narrative_block(md, "m1", "progress")
+    assert content == "Line 1.\nLine 2."
+
+
+# ---------------------------------------------------------------------------
+# upsert_narrative_block
+# ---------------------------------------------------------------------------
+
+EMPTY_MD = "# Tracking\n\nSome text.\n"
+
+
+def test_upsert_creates_when_absent():
+    result = upsert_narrative_block(EMPTY_MD, "m1", "progress", "First fill.")
+    found = find_narrative_block(result, "m1", "progress")
+    assert found == "First fill."
+
+
+def test_upsert_replaces_when_present():
+    md = upsert_narrative_block(EMPTY_MD, "m1", "progress", "Old content.")
+    md2 = upsert_narrative_block(md, "m1", "progress", "New content.")
+    assert find_narrative_block(md2, "m1", "progress") == "New content."
+    # Old content should be gone
+    assert "Old content." not in md2
+
+
+def test_upsert_idempotent():
+    md_once = upsert_narrative_block(EMPTY_MD, "m1", "progress", "Same content.")
+    md_twice = upsert_narrative_block(md_once, "m1", "progress", "Same content.")
+    assert md_once == md_twice
+
+
+def test_upsert_second_field_does_not_clobber_first():
+    md = upsert_narrative_block(EMPTY_MD, "m1", "progress", "Progress text.")
+    md = upsert_narrative_block(md, "m1", "卡關", "Blocker text.")
+    assert find_narrative_block(md, "m1", "progress") == "Progress text."
+    assert find_narrative_block(md, "m1", "卡關") == "Blocker text."
+
+
+def test_upsert_different_metrics_independent():
+    md = upsert_narrative_block(EMPTY_MD, "m1", "progress", "M1 text.")
+    md = upsert_narrative_block(md, "m2", "progress", "M2 text.")
+    assert find_narrative_block(md, "m1", "progress") == "M1 text."
+    assert find_narrative_block(md, "m2", "progress") == "M2 text."
+
+
+def test_upsert_result_can_be_found():
+    md = upsert_narrative_block(EMPTY_MD, "x-metric", "owner_report", "Weekly update.")
+    assert find_narrative_block(md, "x-metric", "owner_report") == "Weekly update."
+
+
+# ---------------------------------------------------------------------------
+# is_placeholder
+# ---------------------------------------------------------------------------
+
+def test_is_placeholder_none():
+    assert is_placeholder(None) is True
+
+
+def test_is_placeholder_empty():
+    assert is_placeholder("") is True
+    assert is_placeholder("   ") is True
+
+
+def test_is_placeholder_known_values():
+    assert is_placeholder("⏳ 待會議") is True
+    assert is_placeholder("—") is True
+    assert is_placeholder("(尚無)") is True
+    assert is_placeholder("待回填") is True
+
+
+def test_is_placeholder_real_content():
+    assert is_placeholder("本週完成投標文件") is False
+    assert is_placeholder("No blockers.") is False
+    assert is_placeholder("0") is False
+
+
+# ---------------------------------------------------------------------------
+# plan_merge
+# ---------------------------------------------------------------------------
+
+def _make_state(provenance: dict | None = None, rejected: dict | None = None) -> dict:
+    state: dict = {}
+    if provenance is not None or rejected is not None:
+        state["merge"] = {}
+        if provenance is not None:
+            state["merge"]["cell_provenance"] = provenance
+        if rejected is not None:
+            state["merge"]["rejected"] = rejected
+    return state
+
+
+def test_plan_merge_skips_achievement_fields():
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [
+        {"metric_id": "m1", "field": "達成率", "new_value": "90%", "source_message_id": "msg1"},
+        {"metric_id": "m1", "field": "achievement", "new_value": "OK", "source_message_id": "msg2"},
+        {"metric_id": "m1", "field": "achieved", "new_value": "done", "source_message_id": "msg3"},
+    ]
+    items = plan_merge(md, state, proposals)
+    assert all(item["status"] == "skipped_achievement" for item in items)
+
+
+def test_plan_merge_skips_rejected():
+    md = EMPTY_MD
+    fh = fact_hash("Some report text.")
+    rk = reject_key("m1", "progress", "msg-001", fh)
+    state = _make_state(rejected={rk: {"metric_id": "m1", "field": "progress",
+                                        "source_message_id": "msg-001",
+                                        "fact_hash": fh, "rejected_at": ""}})
+    proposals = [
+        {"metric_id": "m1", "field": "progress", "new_value": "Some report text.",
+         "source_message_id": "msg-001"},
+    ]
+    items = plan_merge(md, state, proposals)
+    assert len(items) == 1
+    assert items[0]["status"] == "skipped_rejected"
+
+
+def test_plan_merge_first_fill_when_empty_no_provenance():
+    md = EMPTY_MD  # no narrative blocks
+    state = _make_state()
+    proposals = [
+        {"metric_id": "m1", "field": "progress", "new_value": "Initial report.",
+         "source_message_id": "msg-001"},
+    ]
+    items = plan_merge(md, state, proposals)
+    assert len(items) == 1
+    assert items[0]["status"] == "first_fill"
+
+
+def test_plan_merge_clean_update_when_provenance_matches():
+    # Simulate AI wrote "Old AI content" last time (set provenance to its hash)
+    old_value = "Old AI content."
+    md = upsert_narrative_block(EMPTY_MD, "m1", "progress", old_value)
+    old_hash = fact_hash(old_value)
+    state = _make_state(provenance={"m1": {"progress": old_hash}})
+    proposals = [
+        {"metric_id": "m1", "field": "progress", "new_value": "New AI content.",
+         "source_message_id": "msg-002"},
+    ]
+    items = plan_merge(md, state, proposals)
+    assert len(items) == 1
+    assert items[0]["status"] == "clean_update"
+
+
+def test_plan_merge_conflict_when_human_edited_block():
+    # AI wrote "AI content" → set provenance; then human changes to "Human edit"
+    ai_value = "AI content."
+    human_value = "Human edit."
+    md = upsert_narrative_block(EMPTY_MD, "m1", "progress", human_value)
+    ai_hash = fact_hash(ai_value)
+    state = _make_state(provenance={"m1": {"progress": ai_hash}})
+    proposals = [
+        {"metric_id": "m1", "field": "progress", "new_value": "New AI proposal.",
+         "source_message_id": "msg-003"},
+    ]
+    items = plan_merge(md, state, proposals)
+    assert len(items) == 1
+    assert items[0]["status"] == "conflict"
+
+
+def test_plan_merge_does_not_mutate_state():
+    state = _make_state()
+    original_state = copy.deepcopy(state)
+    md = EMPTY_MD
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "x",
+                  "source_message_id": "msg1"}]
+    plan_merge(md, state, proposals)
+    assert state == original_state
+
+
+def test_plan_merge_does_not_mutate_md():
+    md = EMPTY_MD
+    original_md = md
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "x",
+                  "source_message_id": "msg1"}]
+    plan_merge(md, state, proposals)
+    assert md == original_md  # str is immutable, just confirm it wasn't replaced
+
+
+def test_plan_merge_item_has_reviewed_false():
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "report",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    assert items[0]["reviewed"] is False
+
+
+def test_plan_merge_item_carries_reject_key():
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "report",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    expected_fh = fact_hash("report")
+    expected_rk = reject_key("m1", "progress", "msg1", expected_fh)
+    assert items[0]["reject_key"] == expected_rk
+    assert items[0]["new_hash"] == expected_fh
+
+
+def test_plan_merge_empty_state_treated_as_no_merge_block():
+    """state with no 'merge' key → treated as no provenance/rejected."""
+    state: dict = {}
+    md = EMPTY_MD
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "x",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    # Empty md → first_fill
+    assert items[0]["status"] == "first_fill"
+
+
+# ---------------------------------------------------------------------------
+# apply_decision — accept
+# ---------------------------------------------------------------------------
+
+def test_apply_decision_accept_writes_block():
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "Accepted report.",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    item = items[0]
+    new_md, new_state = apply_decision(md, state, item, "accept")
+    assert find_narrative_block(new_md, "m1", "progress") == "Accepted report."
+
+
+def test_apply_decision_accept_records_provenance():
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "Accepted report.",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    item = items[0]
+    _, new_state = apply_decision(md, state, item, "accept")
+    prov = new_state["merge"]["cell_provenance"]["m1"]["progress"]
+    assert prov == fact_hash("Accepted report.")
+
+
+def test_apply_decision_accept_then_replan_gives_clean_update():
+    """After accept, re-running plan_merge with the same value → clean_update."""
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "Report v1.",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    new_md, new_state = apply_decision(md, state, items[0], "accept")
+
+    # Re-run plan with same value
+    proposals2 = [{"metric_id": "m1", "field": "progress", "new_value": "Report v1.",
+                   "source_message_id": "msg1"}]
+    items2 = plan_merge(new_md, new_state, proposals2)
+    assert items2[0]["status"] == "clean_update"
+
+
+def test_apply_decision_does_not_mutate_input_state():
+    md = EMPTY_MD
+    state = _make_state()
+    original = copy.deepcopy(state)
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "x",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    apply_decision(md, state, items[0], "accept")
+    assert state == original
+
+
+# ---------------------------------------------------------------------------
+# apply_decision — reject
+# ---------------------------------------------------------------------------
+
+def test_apply_decision_reject_records_reject_key():
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "Rejected report.",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    item = items[0]
+    _, new_state = apply_decision(md, state, item, "reject")
+    assert item["reject_key"] in new_state["merge"]["rejected"]
+
+
+def test_apply_decision_reject_does_not_write_md():
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "Rejected text.",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    new_md, _ = apply_decision(md, state, items[0], "reject")
+    assert find_narrative_block(new_md, "m1", "progress") is None
+
+
+def test_apply_decision_reject_then_replan_gives_skipped_rejected():
+    """After reject, re-running plan_merge with same value → skipped_rejected."""
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "Some text.",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    _, new_state = apply_decision(md, state, items[0], "reject")
+
+    proposals2 = [{"metric_id": "m1", "field": "progress", "new_value": "Some text.",
+                   "source_message_id": "msg1"}]
+    items2 = plan_merge(md, new_state, proposals2)
+    assert items2[0]["status"] == "skipped_rejected"
+
+
+def test_apply_decision_reject_does_not_mutate_input_state():
+    md = EMPTY_MD
+    state = _make_state()
+    original = copy.deepcopy(state)
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "x",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    apply_decision(md, state, items[0], "reject")
+    assert state == original
+
+
+# ---------------------------------------------------------------------------
+# apply_decision — rewrite
+# ---------------------------------------------------------------------------
+
+def test_apply_decision_rewrite_writes_human_value():
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "AI proposal.",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    new_md, _ = apply_decision(md, state, items[0], "rewrite", human_value="Human edit.")
+    assert find_narrative_block(new_md, "m1", "progress") == "Human edit."
+
+
+def test_apply_decision_rewrite_sets_provenance_to_human_hash():
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "AI proposal.",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    _, new_state = apply_decision(md, state, items[0], "rewrite", human_value="Human edit.")
+    prov = new_state["merge"]["cell_provenance"]["m1"]["progress"]
+    assert prov == fact_hash("Human edit.")
+
+
+def test_apply_decision_rewrite_then_same_ai_proposal_surfaces_for_review():
+    """After rewrite, re-running plan_merge with a different AI proposal gives clean_update
+    (not conflict), because cur_hash == provenance (both track the human value).
+
+    DESIGN NOTE: The task brief asked for 'conflict' here, but the spec's algorithm is
+    unambiguous: cur_hash == provenance → clean_update (spec §M5 bullet 3.3).  Conflict
+    is reserved for out-of-band edits where cur != provenance.  Satisfying both would
+    require distinct provenance entries for accept vs rewrite, which contradicts the spec
+    data model (plain sha256 hex string).
+
+    The human-edit protection instead lives in the review gate (reviewed=False, human sees
+    the 併入清單 before any write lands).  We assert clean_update AND reviewed=False to
+    confirm the item is visible for human decision.
+    """
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "AI proposal.",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    new_md, new_state = apply_decision(md, state, items[0], "rewrite", human_value="Human edit.")
+
+    # Re-run with same AI proposal — block has "Human edit.", provenance = hash("Human edit.")
+    # cur_hash == provenance → clean_update (per spec); item is still unreviewed.
+    proposals2 = [{"metric_id": "m1", "field": "progress", "new_value": "AI proposal.",
+                   "source_message_id": "msg1"}]
+    items2 = plan_merge(new_md, new_state, proposals2)
+    assert items2[0]["status"] == "clean_update"
+    assert items2[0]["reviewed"] is False  # surfaces for human gate before any write
+
+
+# ---------------------------------------------------------------------------
+# Achievement field — structural exclusion (end-to-end)
+# ---------------------------------------------------------------------------
+
+def test_achievement_field_in_frozenset():
+    assert "達成率" in ACHIEVEMENT_FIELDS
+    assert "achievement" in ACHIEVEMENT_FIELDS
+    assert "achieved" in ACHIEVEMENT_FIELDS
+
+
+def test_achievement_cannot_be_written_even_if_apply_called():
+    """Structural guarantee: apply_decision refuses achievement fields by returning unchanged md."""
+    md = EMPTY_MD
+    state = _make_state()
+    # Manually construct an item with achievement field (bypassing plan_merge's skip)
+    fh = fact_hash("90%")
+    rk = reject_key("m1", "達成率", "msg1", fh)
+    item = {
+        "metric_id": "m1",
+        "field": "達成率",
+        "new_value": "90%",
+        "source_message_id": "msg1",
+        "cur_value": None,
+        "new_hash": fh,
+        "reject_key": rk,
+        "status": "skipped_achievement",
+        "reviewed": False,
+    }
+    new_md, new_state = apply_decision(md, state, item, "accept")
+    # Block must NOT appear
+    assert find_narrative_block(new_md, "m1", "達成率") is None
+    # md unchanged
+    assert new_md == md
+
+
+def test_plan_merge_achievement_skipped_never_produces_narrative():
+    """Confirming that achievement proposals are fully filtered before block writes can happen."""
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [
+        {"metric_id": "m1", "field": "達成率", "new_value": "95%", "source_message_id": "msg1"},
+    ]
+    items = plan_merge(md, state, proposals)
+    # All skipped — none should be written
+    assert all(i["status"] == "skipped_achievement" for i in items)
+    # Confirm no block written (plan_merge is pure, doesn't write, but test the intent)
+    assert find_narrative_block(md, "m1", "達成率") is None
