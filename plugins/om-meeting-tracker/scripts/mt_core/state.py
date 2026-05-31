@@ -33,6 +33,12 @@ def load_state(path: Path, tenant_id: str) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("schema_version") != SCHEMA_VERSION:
         raise ValueError(f"state schema_version 不符：{data.get('schema_version')!r}")
+    # tenant 隔離：拒絕載入別租戶的 state（避免共用/誤設 state_file 導致 idempotency
+    # key、processed_replies、nudge 跨租戶污染）。
+    if data.get("tenant_id") != tenant_id:
+        raise ValueError(
+            f"state tenant_id 不符：檔內 {data.get('tenant_id')!r} ≠ 請求 {tenant_id!r}"
+        )
     return data
 
 

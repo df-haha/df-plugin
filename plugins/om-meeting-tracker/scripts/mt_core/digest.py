@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
+from html import escape as _esc
 
 from mt_core.reminders import OwnerReminder
 
@@ -27,10 +28,15 @@ def compose_digest(reminder: OwnerReminder, tenant_id: str, week: str,
     token = token or correlation_token(tenant_id, owner.owner_id, week)
     subject = f"[會議追蹤] {owner.name} 本週進度回報 ({week}) [#{token}]"
 
+    # HTML 寄出前對自由文字欄位（name/title）做 escape，避免破版或注入 HTML
+    # （config 雖 repo-controlled，但仍是自由文字；text 版不需 escape）。
+    owner_name_h = _esc(owner.name)
     text = [f"{owner.name} 你好，以下是本週（{week}）需要你回報的指標：", ""]
-    html = [f"<p>{owner.name} 你好，以下是本週（{week}）需要你回報的指標：</p>"]
+    html = [f"<p>{owner_name_h} 你好，以下是本週（{week}）需要你回報的指標：</p>"]
     for metric, _tracked in reminder.metrics:
         dl = metric.deadline.isoformat()
+        title_h = _esc(metric.title)
+        mid_h = _esc(metric.metric_id)
         text += [
             f"■ {metric.title} [#metric:{metric.metric_id}]（deadline {dl}）",
             "  - 目前進度：",
@@ -39,7 +45,7 @@ def compose_digest(reminder: OwnerReminder, tenant_id: str, week: str,
             "",
         ]
         html.append(
-            f"<h4>{metric.title} <span style='color:#888'>[#metric:{metric.metric_id}]</span>"
+            f"<h4>{title_h} <span style='color:#888'>[#metric:{mid_h}]</span>"
             f"（deadline {dl}）</h4>"
             "<ul><li>目前進度：</li><li>卡關：</li><li>預計達成率（會議前估）：</li></ul>"
         )
