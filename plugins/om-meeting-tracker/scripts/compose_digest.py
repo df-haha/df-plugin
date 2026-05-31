@@ -42,6 +42,14 @@ def main(argv: list[str] | None = None) -> int:
     state = load_state_for(cfg, repo_root)
     today = date.fromisoformat(args.today) if args.today else today_tz(cfg.timezone)
 
+    if not args.dry_run:
+        from mt_core.freshness import git_head_sha, git_is_ancestor, check_freshness
+        head = git_head_sha(repo_root)
+        ok, msg = check_freshness(state, head, git_is_ancestor(repo_root))
+        if not ok:
+            print(json.dumps({"skipped_stale": True, "reason": msg}, ensure_ascii=False))
+            return 0
+
     reminders = compute_reminders(cfg, tracked, today, state)
     adapter = None
     if not args.dry_run:

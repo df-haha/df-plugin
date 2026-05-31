@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Write, Edit, AskUserQuestion, ToolSearch, TaskCreate,
 
 # om-meeting-tracker Onboarding Wizard
 
-每位新主管跑一次。互動式，產出該主管 private repo 內可運作的 instance。**全程零大豐 hard-code**——所有部門特定值都問主管。
+每位新主管跑一次。互動式，產出該主管 private repo 內可運作的 instance。**全程零 tenant hard-code**——所有部門特定值都問主管。
 
 ## Phase 0：前置確認（先問清楚再動工）
 用 AskUserQuestion 確認：

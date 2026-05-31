@@ -30,7 +30,7 @@ class PostgresStore:
       CREATE TABLE IF NOT EXISTS meeting_tracker.tenant_state (
           tenant_id text PRIMARY KEY, state jsonb NOT NULL,
           updated_at timestamptz NOT NULL DEFAULT now());
-    ⚠️ 用 meeting_tracker schema，**不可用 cockpit**（harness 紅線標 cockpit 唯讀）。
+    ⚠️ 用專屬 schema（如 meeting_tracker），不要寫進其他既有 / 受保護的 schema。
     """
 
     def __init__(self, tenant_id: str, connect: Callable[[], object] | None = None) -> None:

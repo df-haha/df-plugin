@@ -10,7 +10,7 @@ allowed-tools: Bash, Read, Write, ToolSearch
 
 ## 前置（每次跑）
 
-1. **鮮度檢查**：比對 `config.paths.tracking_file` 的 git blob SHA 與 state 的 `last_human_reviewed.tracking_file_blob_sha`（用 `git ls-files -s <tracking_file>` 取目前 blob SHA）。如果追蹤檔自上次人工 review 後未更新超過設定門檻 → **跳過本次執行並輸出告警**（`[WARN] tracking_file stale — skipping run to avoid drafting on outdated data`），避免在舊資料上產草稿。
+1. **鮮度檢查**（非 dry-run 時，compose_digest.py 自動執行）：取雲端 HEAD commit SHA（`git rev-parse HEAD`），與 state 的 `last_human_reviewed.tracking_file_commit_sha` 比較祖先關係（`git merge-base --is-ancestor`）。若上次人工 review 的 commit 不是 HEAD 的祖先，代表本機變更疑似漏 push → **跳過本次執行**，輸出 `{"skipped_stale": true, "reason": "..."}` 並回傳 exit 0，避免在舊資料上產草稿。首次跑（無 checkpoint）視為 fresh，直接繼續。
 2. **載入 send adapter 憑證**：確認 env 已設定對應變數（`n8n_webhook` adapter 需 `MT_N8N_WEBHOOK_URL` + `MT_N8N_WEBHOOK_SECRET`；`gmail_smtp` adapter 需 `MT_GMAIL_USER` + `MT_GMAIL_APP_PASSWORD`）。缺任一 → 記 run-log 並跳過寄信步驟，其餘步驟（讀信/草擬/PR）繼續跑。
 3. **路徑來自 config**：所有路徑（tracking_file、draft_dir、context_dir、state_file、run_log_dir）一律讀自 config，不 hard-code。
 

@@ -1,0 +1,33 @@
+# ci/meeting-tracker-governance.yml — tenant 把它複製到 <repo>/.github/workflows/
+name: meeting-tracker-governance
+on:
+  pull_request:
+    branches: ["**"]
+jobs:
+  governance:
+    # 只檢查 agent 開的滾動 PR
+    if: startsWith(github.head_ref, 'claude/meeting-tracker/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: pip install PyYAML
+      - name: Compute changed files
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          git diff --name-only "origin/${{ github.base_ref }}...HEAD" > changed.txt
+          echo "---- changed ----"; cat changed.txt
+      - name: Governance check
+        env:
+          MT_PLUGIN: ${{ github.workspace }}/.meeting-tracker/plugin/om-meeting-tracker
+        run: |
+          # MT_PLUGIN 指向 tenant 安裝的 plugin 副本（onboarding 時 vendored 或 submodule-free 複製）
+          python3 "$MT_PLUGIN/scripts/ci_governance_check.py" \
+            --config ".meeting-tracker/config.md" \
+            --repo-root "." \
+            --changed-from changed.txt
