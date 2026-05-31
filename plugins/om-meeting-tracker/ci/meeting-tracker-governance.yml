@@ -22,6 +22,11 @@ jobs:
           git fetch origin "${{ github.base_ref }}"
           git diff --name-only "origin/${{ github.base_ref }}...HEAD" > changed.txt
           echo "---- changed ----"; cat changed.txt
+      - name: Materialize trusted base-ref config
+        run: |
+          git show "origin/${{ github.base_ref }}:.meeting-tracker/config.md" \
+            > /tmp/mt-base-config.md 2>/dev/null \
+            || cp .meeting-tracker/config.md /tmp/mt-base-config.md
       - name: Governance check
         env:
           MT_PLUGIN: ${{ github.workspace }}/.meeting-tracker/plugin/om-meeting-tracker
@@ -29,5 +34,6 @@ jobs:
           # MT_PLUGIN 指向 tenant 安裝的 plugin 副本（onboarding 時 vendored 或 submodule-free 複製）
           python3 "$MT_PLUGIN/scripts/ci_governance_check.py" \
             --config ".meeting-tracker/config.md" \
+            --base-config /tmp/mt-base-config.md \
             --repo-root "." \
             --changed-from changed.txt

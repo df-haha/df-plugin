@@ -43,12 +43,16 @@ def main(argv: list[str] | None = None) -> int:
     today = date.fromisoformat(args.today) if args.today else today_tz(cfg.timezone)
 
     if not args.dry_run:
+        import subprocess
         from mt_core.freshness import git_head_sha, git_is_ancestor, check_freshness
-        head = git_head_sha(repo_root)
-        ok, msg = check_freshness(state, head, git_is_ancestor(repo_root))
-        if not ok:
-            print(json.dumps({"skipped_stale": True, "reason": msg}, ensure_ascii=False))
-            return 0
+        try:
+            head = git_head_sha(repo_root)
+            ok, msg = check_freshness(state, head, git_is_ancestor(repo_root))
+            if not ok:
+                print(json.dumps({"skipped_stale": True, "reason": msg}, ensure_ascii=False))
+                return 0
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print("[warn] freshness check skipped: not a git repo or git error", file=sys.stderr)
 
     reminders = compute_reminders(cfg, tracked, today, state)
     adapter = None

@@ -30,3 +30,11 @@ def test_done_writes_checkpoint(tmp_path):
     state = json.loads((repo / "state" / "meeting_tracker_state.json").read_text(encoding="utf-8"))
     rec = state["last_human_reviewed"]
     assert rec["tracking_file_blob_sha"] and rec["tracking_file_commit_sha"] and rec["at"]
+    # FIX D: verify recorded blob matches what is actually in HEAD (not working-tree)
+    head_blob = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD:tracking/weekly.md"],
+        capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert rec["tracking_file_blob_sha"] == head_blob, (
+        f"checkpoint blob {rec['tracking_file_blob_sha']} does not match HEAD blob {head_blob}"
+    )

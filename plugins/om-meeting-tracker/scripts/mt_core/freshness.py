@@ -10,6 +10,17 @@ def git_blob_sha(repo_root, rel_path) -> str:
     return out.stdout.strip()
 
 
+def git_committed_blob_sha(repo_root, rel_path) -> str:
+    """Return the blob SHA that is actually committed in HEAD for rel_path.
+
+    Uses `git rev-parse HEAD:<rel_path>` so the recorded SHA matches what is
+    in the commit tree — not the potentially-dirty working-tree file.
+    """
+    out = subprocess.run(["git", "-C", str(repo_root), "rev-parse", f"HEAD:{rel_path}"],
+                         capture_output=True, text=True, check=True)
+    return out.stdout.strip()
+
+
 def git_head_sha(repo_root) -> str:
     out = subprocess.run(["git", "-C", str(repo_root), "rev-parse", "HEAD"],
                          capture_output=True, text=True, check=True)
@@ -20,7 +31,13 @@ def git_is_ancestor(repo_root) -> Callable[[str, str], bool]:
     def _f(maybe_ancestor: str, descendant: str) -> bool:
         r = subprocess.run(["git", "-C", str(repo_root), "merge-base", "--is-ancestor",
                             maybe_ancestor, descendant], capture_output=True)
-        return r.returncode == 0
+        if r.returncode == 0:
+            return True
+        if r.returncode == 1:
+            return False
+        # returncode >= 2 (incl. 128) means bad object / git error
+        sha = maybe_ancestor
+        raise ValueError(f"freshness: 無法判斷 commit 祖先關係（bad object?）: {sha}")
     return _f
 
 

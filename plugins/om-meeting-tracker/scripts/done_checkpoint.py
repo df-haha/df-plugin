@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mt_core.config import load_config
 from mt_core.state import set_human_reviewed
 from mt_core.state_store import load_state_for, save_state_for
-from mt_core.freshness import git_blob_sha, git_head_sha
+from mt_core.freshness import git_committed_blob_sha, git_head_sha
 from mt_core.timeutil import now_tz
 
 
@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = (Path(args.repo_root).resolve() if args.repo_root
                  else Path(args.config).resolve().parent.parent)
     state = load_state_for(cfg, repo_root)
-    blob = git_blob_sha(repo_root, cfg.paths.tracking_file)
+    blob = git_committed_blob_sha(repo_root, cfg.paths.tracking_file)
     head = git_head_sha(repo_root)
     set_human_reviewed(state, blob, head, now_tz(cfg.timezone).isoformat())
     save_state_for(cfg, repo_root, state)
