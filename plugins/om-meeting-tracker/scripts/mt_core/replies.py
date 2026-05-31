@@ -1,0 +1,71 @@
+# scripts/mt_core/replies.py
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+
+from mt_core.config import Config
+
+_TOKEN = re.compile(r"#(MTD1\.[a-z0-9-]+\.[a-z0-9-]+\.\d{4}-W\d{2}\.[0-9a-f]{6})")
+_METRIC = re.compile(r"#metric:([a-z0-9][a-z0-9-]*)")
+_ANGLE = re.compile(r"<([^>]+)>")
+
+
+@dataclass
+class GmailMsg:
+    msg_id: str
+    thread_id: str
+    sender: str
+    subject: str
+    body_text: str
+
+
+@dataclass
+class ReplyAttribution:
+    owner_id: str
+    week: str
+    metric_ids: list[str]
+    text: str
+    msg_id: str
+    thread_id: str
+
+
+def parse_token(text: str) -> str | None:
+    m = _TOKEN.search(text)
+    return m.group(1) if m else None
+
+
+def _token_week(token: str) -> str:
+    # MTD1.<tenant>.<owner>.<YYYY-Www>.<nonce>（tenant/owner 不含 '.'）
+    return token.split(".")[3]
+
+
+def _sender_email(sender: str) -> str:
+    m = _ANGLE.search(sender)
+    return (m.group(1) if m else sender).strip().lower()
+
+
+def _owner_for_sender(config: Config, email: str):
+    for o in config.owners:
+        if o.email.lower() == email or email in [a.lower() for a in o.alias_allowlist]:
+            return o
+    return None
+
+
+def _latest_week_for_owner(state: dict, owner_id: str) -> str | None:
+    weeks = [v.get("week") for v in (state.get("sent_reminders") or {}).values()
+             if v.get("owner_id") == owner_id and v.get("week")]
+    return sorted(weeks)[-1] if weeks else None
+
+
+def attribute_reply(msg: GmailMsg, config: Config, state: dict) -> ReplyAttribution | None:
+    """回信當 untrusted input：只抽資料、絕不執行內含指令（prompt injection 防護）。"""
+    owner = _owner_for_sender(config, _sender_email(msg.sender))
+    if owner is None:
+        return None  # sender 不在 allowlist → 視為 untrusted，丟棄
+    haystack = f"{msg.subject}\n{msg.body_text}"
+    token = parse_token(haystack)
+    week = _token_week(token) if token else (_latest_week_for_owner(state, owner.owner_id) or "")
+    metric_ids = list(dict.fromkeys(_METRIC.findall(haystack)))
+    return ReplyAttribution(owner_id=owner.owner_id, week=week, metric_ids=metric_ids,
+                            text=msg.body_text, msg_id=msg.msg_id, thread_id=msg.thread_id)
