@@ -24,7 +24,7 @@ python3 scripts/compose_digest.py --config <config_path> --repo-root <repo_root>
 
 - 讀 config + tracking_file，計算今天應提醒的 owner / metric（依 cadence + RAG + deadline + 久未催規則）。
 - 每個 owner 組成一封彙整信（`mt_core.digest.compose_digest`）：每個指標一個填空區塊，含 correlation token `[#MTD1.<tenant>.<owner>.<week>.<nonce>]` 與 `[#metric:<metric_id>]` 標記；達成率**不預填**。
-- idempotency：同一 idempotency key（`MT:<tenant>:<metric_id>:<week>:<date>`）已在 state 記錄為已寄 → **跳過不重寄**。
+- idempotency：digest 送信 key = `reminder_key(tenant, "digest:<owner>", week, date)` → `MT:<tenant>:digest:<owner>:<week>:<date>`（每 owner 每日一封，非每 metric）。已在 state 記錄為 `status="sent"` → **跳過不重寄**；`status="pending"`（上次 crash）→ 重送並帶同一 key（寄送端去重）。
 - 寄信結果記入 state（`sent_reminders`）+ state 落地持久化。
 
 ### 2. 讀回信（Gmail connector，每跑重抓整週）
@@ -48,13 +48,15 @@ python3 scripts/collect_replies.py --config <config_path> --repo-root <repo_root
 **歸因邏輯**（`mt_core.replies.attribute_reply`）：
 
 - sender 必須命中 owner 的 `email` 或 `alias_allowlist`；不符 → 記 untrusted-sender，略過。
-- correlation token 解出 owner_id + week；sender owner 與 token owner 不符 → 以 sender 為準、記 mismatch。
-- 無 token（改主旨/CC 代回）→ fallback：sender → owner，week 用 sent_reminders 最近一筆。
-- **late reply**（token week ≠ 本週）→ 歸入 **token 的週**，寫回那一週的 draft，不誤記本週。
+- correlation token **只在 tenant == config.tenant_id 且 token-owner == 認證 sender 時**才採信其週（涵蓋 late reply 補回正確週）；跨 tenant / 屬於別 owner 的 token（轉寄、錯帶）→ 不採信其週、標 mismatch。
+- 無可信 token（改主旨 / CC 代回）→ fallback：sender 最近一筆 sent_reminders 的週；再無（首跑 / 無歷史）→ 用**本週**（CLI 以 `--today` 推算的 current_week 傳入），不致 week 空白被丟。
+- metric 標記 `[#metric:<id>]` 只認 **sender 名下、config 有定義**的指標；其餘忽略（防越權塞別人格子）。
 
 **dedup 只決定「新回報 / 已記錄」標記**——所有可信回信都作為 render 輸入（`processed_replies` 只用於計數與新回報標記，不排除 render 輸入）。因此 draft regenerate 後當週 draft 含**全部**本週回報，不因 dedup 而消失。
 
-draft 路徑：`<draft_dir>/meeting_draft_week_<YYYY-Www>.md`（每週一份；`YYYY-Www` 用 ISO week，非 calendar year，避免年界錯週）。達成率欄留白 / `⏳ 待會議`；每筆標來源 `(source: owner email YYYY-MM-DD)`；未收到回報的 owner/metric 列入「⚠️ 待回填」block。
+**本次只寫「本週」draft**：collect_replies 僅 regenerate `current_week` 的 draft（依 `--today`）。late reply（token week 為過去週）會被**計入 summary 的 `late_replies_recorded` 且記入 state**，但**不會 regenerate 過去週的 draft**——避免用「本週重抓」的不完整批次覆寫主管可能已 review 過的舊週 draft。過去週若需補，由主管手動以該週為 `--today` 重跑。
+
+draft 路徑：`<draft_dir>/meeting_draft_week_<YYYY-Www>.md`（每週一份；`YYYY-Www` 用 ISO week，非 calendar year，避免年界錯週）。達成率欄留白 / `⏳ 待會議`；每筆標來源 `(source: owner email)`；未收到回報的 owner/metric 列入「⚠️ 待回填」block。
 
 ### 4. 滾動 PR（每週一個，每日更新）
 

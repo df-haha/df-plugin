@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
@@ -35,7 +34,10 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(Path(args.config))
     repo_root = (Path(args.repo_root).resolve() if args.repo_root
                  else Path(args.config).resolve().parent.parent)
-    tracking_path = repo_root / cfg.paths.tracking_file
+    tracking_path = (repo_root / cfg.paths.tracking_file).resolve()
+    if not str(tracking_path).startswith(str(repo_root)):
+        print(f"[error] tracking_file escapes repo-root: {tracking_path}", file=sys.stderr)
+        return 2
     tracked = parse_metrics(tracking_path.read_text(encoding="utf-8")) if tracking_path.exists() else []
     state = load_state_for(cfg, repo_root)
     today = date.fromisoformat(args.today) if args.today else today_tz(cfg.timezone)
@@ -44,25 +46,23 @@ def main(argv: list[str] | None = None) -> int:
     raw = json.loads(Path(args.inbox_json).read_text(encoding="utf-8"))
     msgs = [GmailMsg(m["msg_id"], m["thread_id"], m["sender"], m["subject"], m["body_text"])
             for m in raw]
-    all_attrs, summary = collect_replies(cfg, msgs, state)
+    # current_week 透傳：無 token + 無歷史的可信回信歸到本週（Codex WF2 #1），不致 week="" 被丟。
+    all_attrs, summary = collect_replies(cfg, msgs, state, current_week=week)
 
-    # 依 token 週分組，各週 draft 各自 regenerate（late reply 回到原 token 週，不誤記本週）。
-    # 本週 draft 一定產生（即使零回報→列待回填）。
-    by_week: dict[str, list] = defaultdict(list)
-    for a in all_attrs:
-        if a.week:
-            by_week[a.week].append(a)
-    by_week.setdefault(week, [])
-    written = []
-    for wk, reps in by_week.items():
-        draft = render_draft(cfg, tracked, wk, reports=reps)
-        dp = repo_root / cfg.paths.draft_dir / f"meeting_draft_week_{wk}.md"
-        dp.parent.mkdir(parents=True, exist_ok=True)
-        dp.write_text(draft, encoding="utf-8")
-        written.append(str(dp.relative_to(repo_root)))
+    # FIX 1: only write the CURRENT week's draft.
+    # Late replies (token week != current week) are surfaced in the summary but do NOT
+    # clobber past-week drafts that the human may have already reviewed.
+    current_reps = [a for a in all_attrs if a.week == week]
+    late_reps = [a for a in all_attrs if a.week and a.week != week]
+
+    draft = render_draft(cfg, tracked, week, reports=current_reps)
+    dp = repo_root / cfg.paths.draft_dir / f"meeting_draft_week_{week}.md"
+    dp.parent.mkdir(parents=True, exist_ok=True)
+    dp.write_text(draft, encoding="utf-8")
 
     save_state_for(cfg, repo_root, state)
-    summary["drafts_written"] = written
+    summary["drafts_written"] = [str(dp.relative_to(repo_root))]
+    summary["late_replies_recorded"] = len(late_reps)
     print(json.dumps(summary, ensure_ascii=False))
     return 0
 

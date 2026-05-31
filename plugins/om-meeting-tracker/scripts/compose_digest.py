@@ -34,7 +34,10 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(Path(args.config))
     repo_root = (Path(args.repo_root).resolve() if args.repo_root
                  else Path(args.config).resolve().parent.parent)
-    tracking_path = repo_root / cfg.paths.tracking_file
+    tracking_path = (repo_root / cfg.paths.tracking_file).resolve()
+    if not str(tracking_path).startswith(str(repo_root)):
+        print(f"[error] tracking_file escapes repo-root: {tracking_path}", file=sys.stderr)
+        return 2
     tracked = parse_metrics(tracking_path.read_text(encoding="utf-8")) if tracking_path.exists() else []
     state = load_state_for(cfg, repo_root)
     today = date.fromisoformat(args.today) if args.today else today_tz(cfg.timezone)

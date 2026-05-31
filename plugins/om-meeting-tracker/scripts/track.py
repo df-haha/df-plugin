@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mt_core.config import load_config
 from mt_core.tracking import parse_metrics
-from mt_core.state import load_state   # M2.8 會 rewire 成 state_store.load_state_for
+from mt_core.state_store import load_state_for   # backend-aware（git_branch / postgres）
 from mt_core.reminders import compute_reminders
 from mt_core.digest import compose_digest
 from mt_core.draft import render_draft
@@ -36,9 +36,12 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(Path(args.config))
     repo_root = (Path(args.repo_root).resolve() if args.repo_root
                  else Path(args.config).resolve().parent.parent)
-    tracking_path = repo_root / cfg.paths.tracking_file
+    tracking_path = (repo_root / cfg.paths.tracking_file).resolve()
+    if not str(tracking_path).startswith(str(repo_root)):
+        print(f"[error] tracking_file escapes repo-root: {tracking_path}", file=sys.stderr)
+        return 2
     tracked = parse_metrics(tracking_path.read_text(encoding="utf-8")) if tracking_path.exists() else []
-    state = load_state(repo_root / cfg.paths.state_file, cfg.tenant_id)  # M2.8 rewire → load_state_for(cfg, repo_root)
+    state = load_state_for(cfg, repo_root)  # backend-aware（Codex WF2 #2：postgres 也正確）
 
     today = date.fromisoformat(args.today) if args.today else today_tz(cfg.timezone)
     week = iso_week_str(today)

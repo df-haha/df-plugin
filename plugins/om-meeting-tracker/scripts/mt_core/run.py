@@ -62,17 +62,21 @@ def send_digests(config, reminders, state: dict, adapter, today: date,
     return summary
 
 
-def collect_replies(config, msgs: list[GmailMsg], state: dict) -> tuple[list, dict]:
+def collect_replies(config, msgs: list[GmailMsg], state: dict,
+                    *, current_week: str | None = None) -> tuple[list, dict]:
     """回傳 (本批所有可信回信的 attribution → 供 render, summary)。
 
     ⚠️ P0-3 修正：dedup（already_processed_reply）只決定「是否計為新 / record」，
     **不從 render 輸入排除舊回報**。否則 Routine 每跑重抓整週 Gmail 時，上次已處理的回信
     會被 dedup 掉，draft regenerate 後當週舊回報會消失。故所有可信回信都進 all_attrs。
+
+    Codex WF2 #1 修正：`current_week` 透傳給 attribute_reply，讓「無 token 且 state 無歷史」
+    的可信回信（首跑 / CC 代回）落到本週、不致 week="" 而被 render 分組丟棄。
     """
     all_attrs: list = []
     summary: dict = {"processed_new": 0, "already_seen": 0, "untrusted": 0}
     for m in msgs:
-        attr = attribute_reply(m, config, state)
+        attr = attribute_reply(m, config, state, current_week=current_week)
         if attr is None:
             summary["untrusted"] += 1
             continue
