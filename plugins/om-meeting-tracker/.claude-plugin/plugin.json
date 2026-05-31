@@ -1,0 +1,9 @@
+{
+  "name": "om-meeting-tracker",
+  "version": "0.1.0",
+  "description": "部門會議進度追蹤 — 寄提醒、收回信、草擬準會議版追蹤表（department-agnostic，config 驅動，零 hard-code）。",
+  "author": {
+    "name": "haha"
+  },
+  "keywords": ["meeting", "tracker", "reminder", "ops"]
+}
