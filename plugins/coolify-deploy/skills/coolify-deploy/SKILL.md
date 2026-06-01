@@ -65,6 +65,7 @@ Coolify（自架，於自架機器拉 git）
 
 | 任務 | 讀這份 |
 |------|--------|
+| 首次 DB 搬遷（外部 PaaS → compose 內建 DB，跨版本、不開 port） | `references/db-migration.md` |
 | 寫 / 改 `docker-compose.yml`（含最小範本、dev 變體、檔案儲存規範） | `references/compose.md` |
 | 要 Coolify 自動分配的對外 URL（SERVICE_URL / SERVICE_FQDN） | `references/service-url.md` |
 | 加 Adminer / Seq、Seq CLEF logging、雙向 Lint 一致性檢查 | `references/optional-services.md` |
