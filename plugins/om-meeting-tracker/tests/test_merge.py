@@ -351,7 +351,8 @@ def test_apply_decision_accept_records_provenance():
     item = items[0]
     _, new_state = apply_decision(md, state, item, "accept")
     prov = new_state["merge"]["cell_provenance"]["m1"]["progress"]
-    assert prov == fact_hash("Accepted report.")
+    assert prov["hash"] == fact_hash("Accepted report.")
+    assert prov["origin"] == "ai"
 
 
 def test_apply_decision_accept_then_replan_gives_clean_update():
@@ -454,22 +455,21 @@ def test_apply_decision_rewrite_sets_provenance_to_human_hash():
     items = plan_merge(md, state, proposals)
     _, new_state = apply_decision(md, state, items[0], "rewrite", human_value="Human edit.")
     prov = new_state["merge"]["cell_provenance"]["m1"]["progress"]
-    assert prov == fact_hash("Human edit.")
+    assert prov["hash"] == fact_hash("Human edit.")
+    assert prov["origin"] == "human"
 
 
-def test_apply_decision_rewrite_then_same_ai_proposal_surfaces_for_review():
-    """After rewrite, re-running plan_merge with a different AI proposal gives clean_update
-    (not conflict), because cur_hash == provenance (both track the human value).
+def test_apply_decision_rewrite_then_different_ai_proposal_surfaces_conflict():
+    """After a human rewrite, a DIFFERENT AI proposal must surface as `conflict`.
 
-    DESIGN NOTE: The task brief asked for 'conflict' here, but the spec's algorithm is
-    unambiguous: cur_hash == provenance → clean_update (spec §M5 bullet 3.3).  Conflict
-    is reserved for out-of-band edits where cur != provenance.  Satisfying both would
-    require distinct provenance entries for accept vs rewrite, which contradicts the spec
-    data model (plain sha256 hex string).
-
-    The human-edit protection instead lives in the review gate (reviewed=False, human sees
-    the 併入清單 before any write lands).  We assert clean_update AND reviewed=False to
-    confirm the item is visible for human decision.
+    DESIGN (spec §機制 3): provenance carries origin (ai|human). A human-rewritten cell
+    is human-owned; a differing AI proposal against it is a `conflict` so it gets loud
+    review attention rather than blending into routine `clean_update`s (which a
+    time-pressed human, triaging by label before the weekly meeting, may rubber-stamp).
+    This is the structural guard against silently overwriting a human's explicit edit —
+    the core purpose of the merge contract (the 82/50/90 inflation trauma). The data
+    model grows from a bare sha256 string to {hash, origin}; a back-compat shim reads
+    legacy bare strings as origin='ai'.
     """
     md = EMPTY_MD
     state = _make_state()
@@ -478,13 +478,44 @@ def test_apply_decision_rewrite_then_same_ai_proposal_surfaces_for_review():
     items = plan_merge(md, state, proposals)
     new_md, new_state = apply_decision(md, state, items[0], "rewrite", human_value="Human edit.")
 
-    # Re-run with same AI proposal — block has "Human edit.", provenance = hash("Human edit.")
-    # cur_hash == provenance → clean_update (per spec); item is still unreviewed.
+    # AI proposes a value different from the human edit → conflict (origin=human).
     proposals2 = [{"metric_id": "m1", "field": "progress", "new_value": "AI proposal.",
                    "source_message_id": "msg1"}]
     items2 = plan_merge(new_md, new_state, proposals2)
+    assert items2[0]["status"] == "conflict"
+    assert items2[0]["reviewed"] is False  # still surfaces for the human gate
+
+
+def test_apply_decision_rewrite_then_same_value_proposal_is_clean_noop():
+    """Companion: after a human rewrite, an AI proposal that MATCHES the human value is a
+    no-op `clean_update` (new_hash == stored hash), NOT a conflict — origin-aware logic
+    must not over-fire when there is nothing to change."""
+    md = EMPTY_MD
+    state = _make_state()
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "AI proposal.",
+                  "source_message_id": "msg1"}]
+    items = plan_merge(md, state, proposals)
+    new_md, new_state = apply_decision(md, state, items[0], "rewrite", human_value="Human edit.")
+
+    # AI proposes the SAME value the human wrote → nothing to change → clean_update.
+    proposals2 = [{"metric_id": "m1", "field": "progress", "new_value": "Human edit.",
+                   "source_message_id": "msg1"}]
+    items2 = plan_merge(new_md, new_state, proposals2)
     assert items2[0]["status"] == "clean_update"
-    assert items2[0]["reviewed"] is False  # surfaces for human gate before any write
+
+
+def test_plan_merge_legacy_bare_string_provenance_treated_as_ai():
+    """Back-compat shim: legacy provenance stored as a bare sha256 string (pre-origin) is
+    read as origin='ai'. A differing AI proposal against it stays `clean_update` — the
+    human-rewrite protection only applies to entries written with origin='human' after
+    the migration (acknowledged migration loss for legacy state, recorded in spec §機制 2)."""
+    old_value = "Legacy AI content."
+    md = upsert_narrative_block(EMPTY_MD, "m1", "progress", old_value)
+    state = _make_state(provenance={"m1": {"progress": fact_hash(old_value)}})  # bare string
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": "Different AI content.",
+                  "source_message_id": "msg2"}]
+    items = plan_merge(md, state, proposals)
+    assert items[0]["status"] == "clean_update"
 
 
 # ---------------------------------------------------------------------------

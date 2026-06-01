@@ -169,6 +169,21 @@ def is_placeholder(cur: str | None) -> bool:
     return stripped in _PLACEHOLDER_EXACT
 
 
+def _read_provenance(stored: object) -> dict | None:
+    """Normalize a stored provenance entry to {'hash', 'origin'}.
+
+    Back-compat shim: legacy entries are bare sha256 hex strings (pre-origin) and are
+    read as origin='ai' — so a legacy human-rewritten cell loses its human protection
+    until the next rewrite (acknowledged migration loss, spec §機制 2). Returns None when
+    no provenance is stored.
+    """
+    if stored is None:
+        return None
+    if isinstance(stored, str):
+        return {"hash": stored, "origin": "ai"}
+    return stored
+
+
 # ---------------------------------------------------------------------------
 # plan_merge — pure, no mutations
 # ---------------------------------------------------------------------------
@@ -229,15 +244,21 @@ def plan_merge(md: str, state: dict, proposals: list[dict]) -> list[dict]:
 
         # (3) Determine current block content and status.
         cur = find_narrative_block(md, mid, field)
-        stored_hash = provenance.get(mid, {}).get(field)
+        stored = _read_provenance(provenance.get(mid, {}).get(field))
 
-        if stored_hash is not None:
-            # Provenance exists: check if human edited the block.
+        if stored is not None:
+            stored_hash = stored["hash"]
             cur_hash = fact_hash(cur) if cur is not None else fact_hash("")
-            if cur_hash == stored_hash:
-                status = "clean_update"
-            else:
+            if cur_hash != stored_hash:
+                # Block content drifted from what we recorded → out-of-band edit.
                 status = "conflict"
+            elif stored["origin"] == "human" and fh != stored_hash:
+                # Human-owned cell + a DIFFERING AI proposal → loud conflict (not a
+                # routine clean_update), so an explicit human edit can't be
+                # rubber-stamped away under review-time pressure.
+                status = "conflict"
+            else:
+                status = "clean_update"
         elif is_placeholder(cur):
             # No provenance and cur is empty/placeholder → first fill.
             status = "first_fill"
@@ -294,7 +315,9 @@ def apply_decision(
     if decision == "accept":
         new_md = upsert_narrative_block(md, mid, field, item["new_value"])
         new_state["merge"]["cell_provenance"].setdefault(mid, {})
-        new_state["merge"]["cell_provenance"][mid][field] = item["new_hash"]
+        new_state["merge"]["cell_provenance"][mid][field] = {
+            "hash": item["new_hash"], "origin": "ai",
+        }
         return new_md, new_state
 
     elif decision == "reject":
@@ -315,7 +338,9 @@ def apply_decision(
         new_md = upsert_narrative_block(md, mid, field, human_value)
         h = fact_hash(human_value)
         new_state["merge"]["cell_provenance"].setdefault(mid, {})
-        new_state["merge"]["cell_provenance"][mid][field] = h
+        new_state["merge"]["cell_provenance"][mid][field] = {
+            "hash": h, "origin": "human",
+        }
         return new_md, new_state
 
     else:

@@ -69,6 +69,21 @@ def _parse_draft_proposals(draft_md: str, title_to_metric_id: dict[str, str]) ->
             report_text = match.group(1).strip()
             if _PLACEHOLDER_TEXT in report_text:
                 continue
+            # NOTE (#3, codex P7 — consciously DEFERRED to M3.6 live integration):
+            # source_message_id is synthesized as "<metric_id>|<week>" because the real
+            # Gmail reply id is dropped at the draft-rendering boundary — render_draft
+            # only emits r.text (draft.py:50); the real id lives upstream in
+            # ReplyAttribution.msg_id but is only trustworthy once the Gmail connector
+            # populates it, which cannot be verified without live mail. fact_hash in
+            # reject_key already provides fact-level identity, so the only behavioral
+            # delta is suppressing a re-report of an already-rejected identical fact
+            # within the same week (desirable/neutral; single-owner-per-metric config
+            # rules out the multi-owner over-suppression edge).
+            # Fix recipe (M3.6): declare msg_id on the Report Protocol (draft.py:8-12),
+            # embed it at draft.py:50, parse it back here via _REPORT_LINE (merge_draft.py:39).
+            # Migration caveat: switching synthetic->real changes reject_key, so
+            # synthetic-era merge.rejected entries won't match new proposals (one-time
+            # re-surface of previously-rejected items — a decision, not a surprise).
             src_msg_id = f"{metric_id}|{week}"
             proposals.append({
                 "metric_id": metric_id,
