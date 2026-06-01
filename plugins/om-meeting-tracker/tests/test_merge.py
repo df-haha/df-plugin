@@ -678,3 +678,22 @@ def test_reject_key_no_collision_when_field_source_boundary_shifts():
     k1 = reject_key("m", "f|msg", "s", "h")
     k2 = reject_key("m", "f", "msg|s", "h")
     assert k1 != k2
+
+
+def test_plan_merge_legacy_raw_reject_key_still_matches():
+    """Migration (codex P7 re-review): a rejected entry persisted with the pre-escape raw
+    pipe-joined key — which happens whenever source_message_id contains a pipe, e.g. the
+    synthetic 'metric_id|week' — must still be honored by the sticky-reject check via a
+    read-only legacy fallback. New writes always use the escaped reject_key."""
+    md = EMPTY_MD
+    src = "m1|2026-W22"  # synthetic source_message_id contains a pipe
+    value = "Some rejected fact."
+    fh = fact_hash(value)
+    legacy_rk = f"m1|progress|{src}|{fh}"  # OLD raw format (pre-#6 escaping)
+    state = _make_state(rejected={legacy_rk: {"metric_id": "m1", "field": "progress",
+                                              "source_message_id": src, "fact_hash": fh,
+                                              "rejected_at": ""}})
+    proposals = [{"metric_id": "m1", "field": "progress", "new_value": value,
+                  "source_message_id": src}]
+    items = plan_merge(md, state, proposals)
+    assert items[0]["status"] == "skipped_rejected"

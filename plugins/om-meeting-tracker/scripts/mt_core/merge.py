@@ -226,8 +226,12 @@ def plan_merge(md: str, state: dict, proposals: list[dict]) -> list[dict]:
             })
             continue
 
-        # (2) Sticky-reject check.
-        if rk in rejected:
+        # (2) Sticky-reject check. Read-only legacy fallback matches entries persisted
+        # before reject_key components were percent-escaped (#6): the synthetic
+        # source_message_id 'metric_id|week' contains a pipe, so a pre-escape state would
+        # otherwise silently lose its sticky-rejects. New writes always use escaped `rk`.
+        legacy_rk = f"{mid}|{field}|{src_msg_id}|{fh}"
+        if rk in rejected or legacy_rk in rejected:
             cur = find_narrative_block(md, mid, field)
             items.append({
                 "metric_id": mid,
