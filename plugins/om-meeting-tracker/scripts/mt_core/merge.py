@@ -32,9 +32,39 @@ def fact_hash(s: str) -> str:
     return hashlib.sha256(normalize(s).encode("utf-8")).hexdigest()
 
 
+_ACHIEVEMENT_NORMALIZED: frozenset[str] = frozenset(
+    normalize(a).casefold() for a in ACHIEVEMENT_FIELDS
+)
+
+
+def is_achievement_field(field: str) -> bool:
+    """True if `field` normalizes to a known achievement field.
+
+    Normalization = strip + collapse whitespace + casefold, so case/whitespace
+    variants ('Achievement', ' achievement ', 'ACHIEVED') cannot bypass the
+    structural exclusion. CJK casefold is identity, so 達成率 is unaffected.
+    """
+    return normalize(field).casefold() in _ACHIEVEMENT_NORMALIZED
+
+
+def _esc_key_component(s: str) -> str:
+    """Percent-escape '%' and '|' so pipe-joined reject keys can't collide when a
+    component itself contains a pipe (e.g. metric_id 'a|b' vs field 'b|c')."""
+    return s.replace("%", "%25").replace("|", "%7C")
+
+
 def reject_key(metric_id: str, field: str, source_message_id: str, fh: str) -> str:
-    """Composite reject key: <metric_id>|<field>|<source_message_id>|<fact_hash>."""
-    return f"{metric_id}|{field}|{source_message_id}|{fh}"
+    """Composite reject key: <metric_id>|<field>|<source_message_id>|<fact_hash>.
+
+    Components are percent-escaped so a pipe inside any component cannot shift the
+    field boundaries and collide with a different tuple.
+    """
+    return "|".join((
+        _esc_key_component(metric_id),
+        _esc_key_component(field),
+        _esc_key_component(source_message_id),
+        _esc_key_component(fh),
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -64,12 +94,34 @@ def _block_pattern(metric_id: str, field: str) -> re.Pattern[str]:
     )
 
 
+_MARKER_TOKEN = re.compile(r"<!--\s*/?\s*mt:narrative")
+
+
+def _reject_marker_in_content(content: str) -> None:
+    """Refuse content that itself contains an mt:narrative marker — writing it would
+    corrupt block boundaries (premature close, smuggled open). Guards both markers."""
+    if _MARKER_TOKEN.search(content):
+        raise ValueError(
+            "narrative content may not contain an mt:narrative marker "
+            "(would corrupt block boundaries)"
+        )
+
+
 def find_narrative_block(md: str, metric_id: str, field: str) -> str | None:
-    """Return content between the marker pair, stripped of leading/trailing newlines, or None."""
-    m = _block_pattern(metric_id, field).search(md)
-    if m is None:
+    """Return content between the marker pair, stripped of leading/trailing newlines, or None.
+
+    Fail-loud: if more than one block exists for the same (metric_id, field), the
+    tracking file is corrupt and we raise rather than silently using the first match.
+    """
+    matches = list(_block_pattern(metric_id, field).finditer(md))
+    if len(matches) > 1:
+        raise ValueError(
+            f"duplicate narrative blocks for id={metric_id} field={field} "
+            f"({len(matches)} found); tracking file is corrupt"
+        )
+    if not matches:
         return None
-    return m.group(1).strip("\n")
+    return matches[0].group(1).strip("\n")
 
 
 def upsert_narrative_block(md: str, metric_id: str, field: str, content: str) -> str:
@@ -77,14 +129,24 @@ def upsert_narrative_block(md: str, metric_id: str, field: str, content: str) ->
 
     Idempotent: upsert(upsert(md, mid, f, c), mid, f, c) == upsert(md, mid, f, c).
     """
+    _reject_marker_in_content(content)
     pattern = _block_pattern(metric_id, field)
     replacement = (
         _open_marker(metric_id, field) + "\n" + content + "\n" + _CLOSE_MARKER
     )
 
-    if pattern.search(md):
-        # Replace the full match (open marker + content + close marker) with updated replacement.
-        new_md = pattern.sub(replacement, md, count=1)
+    matches = list(pattern.finditer(md))
+    if len(matches) > 1:
+        # Fail-loud: a corrupt file with duplicate blocks would leave stale copies.
+        raise ValueError(
+            f"duplicate narrative blocks for id={metric_id} field={field} "
+            f"({len(matches)} found); refusing to upsert into a corrupt file"
+        )
+
+    if matches:
+        # Replace via a function so backreferences / escapes in `content`
+        # (e.g. r'\1', r'\g<0>', 'C:\\new') are treated literally by re.sub.
+        new_md = pattern.sub(lambda _m: replacement, md, count=1)
     else:
         # Append: ensure the md ends with a newline, then add the block.
         sep = "" if md.endswith("\n") else "\n"
@@ -135,7 +197,7 @@ def plan_merge(md: str, state: dict, proposals: list[dict]) -> list[dict]:
         rk = reject_key(mid, field, src_msg_id, fh)
 
         # (1) Structural exclusion of achievement fields.
-        if field in ACHIEVEMENT_FIELDS:
+        if is_achievement_field(field):
             items.append({
                 "metric_id": mid,
                 "field": field,
@@ -221,7 +283,7 @@ def apply_decision(
     new_state = copy.deepcopy(state)
 
     # Structural exclusion — achievement fields can never be written.
-    if field in ACHIEVEMENT_FIELDS:
+    if is_achievement_field(field):
         return md, new_state
 
     # Ensure merge sub-structure exists in new_state.

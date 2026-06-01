@@ -534,3 +534,116 @@ def test_plan_merge_achievement_skipped_never_produces_narrative():
     assert all(i["status"] == "skipped_achievement" for i in items)
     # Confirm no block written (plan_merge is pure, doesn't write, but test the intent)
     assert find_narrative_block(md, "m1", "達成率") is None
+
+
+# ===========================================================================
+# Codex BLOCK fixes (P7 review) — RED first
+# ===========================================================================
+
+# --- #1: re.sub replacement-template injection (content treated literally) ---
+
+def test_upsert_replace_path_content_with_backref_chars_literal():
+    """Replace path: content with \\1, \\g<0>, backslash paths must round-trip literally."""
+    md = upsert_narrative_block(EMPTY_MD, "m1", "progress", "placeholder")
+    tricky = r"see \1 and \g<0> at C:\new\tab path"
+    md2 = upsert_narrative_block(md, "m1", "progress", tricky)
+    assert find_narrative_block(md2, "m1", "progress") == tricky
+
+
+def test_upsert_append_path_content_with_backref_chars_literal():
+    """Append path (no existing block): content must also be treated literally."""
+    tricky = r"value \1 \2 \g<name> end"
+    md = upsert_narrative_block(EMPTY_MD, "m1", "progress", tricky)
+    assert find_narrative_block(md, "m1", "progress") == tricky
+
+
+# --- #2: content containing narrative markers must be rejected (both markers) ---
+
+def test_upsert_rejects_content_with_close_marker():
+    with pytest.raises(ValueError):
+        upsert_narrative_block(EMPTY_MD, "m1", "progress",
+                               "evil <!-- /mt:narrative --> tail")
+
+
+def test_upsert_rejects_content_with_open_marker():
+    with pytest.raises(ValueError):
+        upsert_narrative_block(EMPTY_MD, "m1", "progress",
+                               "evil <!-- mt:narrative id=x field=y --> tail")
+
+
+def test_apply_decision_accept_rejects_marker_content():
+    md = EMPTY_MD
+    state = _make_state()
+    fh = fact_hash("bad")
+    item = {"metric_id": "m1", "field": "progress",
+            "new_value": "bad <!-- /mt:narrative --> smuggle",
+            "source_message_id": "msg1", "cur_value": None, "new_hash": fh,
+            "reject_key": "k", "status": "first_fill", "reviewed": False}
+    with pytest.raises(ValueError):
+        apply_decision(md, state, item, "accept")
+
+
+# --- #4: achievement exclusion — case/whitespace variants and aliases ---
+
+def test_plan_merge_skips_achievement_case_whitespace_variants():
+    md = EMPTY_MD
+    state = _make_state()
+    for f in ["Achievement", "ACHIEVEMENT", " achievement ", "Achieved", "ACHIEVED"]:
+        items = plan_merge(md, state,
+                           [{"metric_id": "m1", "field": f, "new_value": "90%",
+                             "source_message_id": "x"}])
+        assert items[0]["status"] == "skipped_achievement", f
+
+
+def test_apply_decision_refuses_achievement_variant():
+    md = EMPTY_MD
+    state = _make_state()
+    fh = fact_hash("90%")
+    item = {"metric_id": "m1", "field": " Achievement ", "new_value": "90%",
+            "source_message_id": "x", "cur_value": None, "new_hash": fh,
+            "reject_key": "k", "status": "skipped_achievement", "reviewed": False}
+    new_md, _ = apply_decision(md, state, item, "accept")
+    assert new_md == md
+    assert find_narrative_block(new_md, "m1", " Achievement ") is None
+
+
+def test_achievement_cjk_still_excluded_after_normalize():
+    """CJK 達成率 must stay excluded (casefold is identity for CJK)."""
+    md = EMPTY_MD
+    state = _make_state()
+    items = plan_merge(md, state,
+                       [{"metric_id": "m1", "field": "達成率", "new_value": "90%",
+                         "source_message_id": "x"}])
+    assert items[0]["status"] == "skipped_achievement"
+
+
+# --- #5: duplicate blocks must fail loud (not silently use first match) ---
+
+_DUP_MD = (
+    "<!-- mt:narrative id=m1 field=progress -->\nFirst.\n<!-- /mt:narrative -->\n\n"
+    "<!-- mt:narrative id=m1 field=progress -->\nSecond.\n<!-- /mt:narrative -->\n"
+)
+
+
+def test_find_narrative_block_raises_on_duplicate():
+    with pytest.raises(ValueError):
+        find_narrative_block(_DUP_MD, "m1", "progress")
+
+
+def test_upsert_raises_on_duplicate():
+    with pytest.raises(ValueError):
+        upsert_narrative_block(_DUP_MD, "m1", "progress", "new content")
+
+
+# --- #6: reject_key component-pipe collision ---
+
+def test_reject_key_no_collision_when_metric_field_boundary_shifts():
+    k1 = reject_key("a|b", "c", "msg", "h")
+    k2 = reject_key("a", "b|c", "msg", "h")
+    assert k1 != k2
+
+
+def test_reject_key_no_collision_when_field_source_boundary_shifts():
+    k1 = reject_key("m", "f|msg", "s", "h")
+    k2 = reject_key("m", "f", "msg|s", "h")
+    assert k1 != k2
