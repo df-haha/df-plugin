@@ -697,3 +697,23 @@ def test_plan_merge_legacy_raw_reject_key_still_matches():
                   "source_message_id": src}]
     items = plan_merge(md, state, proposals)
     assert items[0]["status"] == "skipped_rejected"
+
+
+def test_plan_merge_legacy_raw_reject_key_validates_payload():
+    """The read-only legacy fallback must validate the stored payload, not just the raw
+    key string — two different tuples can raw-join to the same legacy key (the very
+    collision #6 fixed), so an unvalidated string match could skip the WRONG proposal.
+
+    tuple1 (field='b|c', src='d') and tuple2 (field='b', src='c|d') both raw-join to
+    'a|b|c|d|<fh>'. A legacy reject stored for tuple1 must NOT suppress a tuple2 proposal."""
+    md = EMPTY_MD
+    value = "Colliding value."
+    fh = fact_hash(value)
+    legacy_rk = f"a|b|c|d|{fh}"  # raw-join of BOTH tuples
+    state = _make_state(rejected={legacy_rk: {"metric_id": "a", "field": "b|c",
+                                              "source_message_id": "d", "fact_hash": fh,
+                                              "rejected_at": ""}})  # payload = tuple1
+    proposals = [{"metric_id": "a", "field": "b", "new_value": value,
+                  "source_message_id": "c|d"}]  # tuple2 — never rejected
+    items = plan_merge(md, state, proposals)
+    assert items[0]["status"] != "skipped_rejected"
