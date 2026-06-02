@@ -43,14 +43,15 @@ ls -1 data/daily_reports/{target_date}/*_daily_work_log_{target_date}.md
 - AI 用量 ccusage 表（看當日成本）
 - 待處理事項
 
-### 1.2 Q2 任務分派（source-of-truth）
+### 1.2 任務分派 / 追蹤文件（source-of-truth；config 驅動）
 ```bash
-Read 人事文件/2026-Q2_任務分派.md
+# 讀 config.paths.tracking_files 列出的任務/進度文件（若 config 有設定）
+Read <config.paths.tracking_files 的每個檔>
 ```
 抽每位屬下的：
 - 任務線清單
-- 06 降本增效對應
-- 主管已知前提（如：q2c-margin = 副總指示、官網優先 = 主管要求）
+- tracking_files 追蹤項目對應（若 config 有設定）
+- 主管已知前提（如：某專案架構 = 上級已拍板、某任務優先序 = 主管要求）
 
 ### 1.3 team-daily-fetcher 已產出的對齊度判斷
 從 daily_proposal/daily_proposal_{target_date}.md 抽「🎯 團隊引導」區塊：
@@ -70,11 +71,11 @@ Read 人事文件/2026-Q2_任務分派.md
 - ✅ 改用：「請說明」「目前狀態」「想了解」「請查 X 並整理」
 
 ### 禁區 2：接受主管已知前提
-從 Q2 任務分派 + Phase 1 對話脈絡識別主管已知前提，**不再追問**：
-- q2c-margin = 副總指示拆 repo（不問「為何拆」）
-- 官網優先 = 主管 5/6 指示（不問「為何先做官網」）
-- 庭誠已整合（不問整合歷程）
-- POS-web 暫緩 = 主管同意（不問「為何停」，但可問「何時切回」）
+從 tracking_files / 任務分派文件 + Phase 1 對話脈絡識別主管已知前提，**不再追問**：
+- 某專案的架構/技術選型 = 上級已拍板（不問「為何這樣決定」）
+- 某任務的優先序 = 主管已指示（不問「為何先做這個」）
+- 某模組已整合完成（不問整合歷程）
+- 某工作暫緩 = 主管已同意（不問「為何停」，但可問「何時切回」）
 
 ### 禁區 3：禁問 token / AI 成本
 - ❌ 禁問：「你今天用了多少 token」「為什麼花這麼多錢」「AI 成本是不是太高」
@@ -198,10 +199,10 @@ questions:
 寫完檔後，**必須**問主管：
 
 ```
-卡片已產出在 daily_proposal/team_coaching_cards_{target_date}.md
-- 卡 1（蕭欣萍）：N 題
-- 卡 2（林梅杏）：N 題
-- 卡 3（游宗霖）：N 題
+卡片已產出在 {daily_proposal_dir}/team_coaching_cards_{target_date}.md
+- 卡 1（{成員 1}）：N 題
+- 卡 2（{成員 2}）：N 題
+- 卡 3（{成員 3}）：N 題
 
 要修改任一題嗎？或全部 OK 寄出？
 ```

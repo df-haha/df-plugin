@@ -21,30 +21,20 @@ from pathlib import Path
 TZ_GMT8 = timezone(timedelta(hours=8))
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 
-# 目錄名 → 可讀專案名（手動映射已知專案）
-PROJECT_NAME_MAP = {
-    "-home-haha-CC-project-AI-Copilot": "AI_Copilot",
-    "-home-haha-CC-project-recycle-supply-tracker": "recycle-supply-tracker",
-    "-home-haha-CC-project-ops-db-master": "ops-db-master",
-    "-home-haha-CC-project-recycling-recognition": "recycling-recognition",
-    "-home-haha-CC-project-ZeroPOS": "ZeroPOS",
-    "-home-haha-CC-project-zeroPOSAdmin": "zeroPOSAdmin",
-    "-home-haha-CC-project-pet-bottle-vision-master": "pet-bottle-vision-master",
-    "-home-haha-CC-project": "CC_project (root)",
-    "-home-haha-CC-project---": "CC_project (misc)",
-    "-home-haha-CC-project-recycle-q2c": "recycle-q2c",
-    "-home-haha-CC-project-recycle-station-crm-master": "recycle-station-crm",
-    "-home-haha-CC-project-recycling-ops-starter": "recycling-ops-starter",
-    "-home-haha-CC-project-recycling-project-docs": "recycling-project-docs",
-    "-home-haha-CC-project-gov-dashboard": "gov-dashboard",
-    "-home-haha-CC-project-gov-dashboard-gov-dashboard": "gov-dashboard (sub)",
-    "-home-haha-CC-project-docai": "docai",
-    "-home-haha-CC-project-gooaye": "gooaye",
-    "-home-haha-CC-project-chiang": "chiang",
-    "-home-haha-CC-project-vibe-n8n": "vibe-n8n",
-    "-home-haha-CC-project-remoteCC": "remoteCC",
-    "-home-haha-CC-project-remoteCC2": "remoteCC2",
-}
+# 目錄名 → 可讀專案名（可選覆寫；預設空 = 一律走 dir_to_project_name() 演算法推導）。
+# tenant 要自訂友善名可設 env OM_PROJECT_NAME_MAP（JSON 物件），零 hard-code。
+def _load_project_name_map() -> dict:
+    raw = os.environ.get("OM_PROJECT_NAME_MAP", "").strip()
+    if not raw:
+        return {}
+    try:
+        m = json.loads(raw)
+        return m if isinstance(m, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+PROJECT_NAME_MAP = _load_project_name_map()
 
 
 def dir_to_project_name(dirname: str) -> str:

@@ -175,8 +175,8 @@ python3 ~/.claude/plugins/cache/df-haha-plugins/daily-work-log/1.7.2/scripts/dai
 1. 顯示題目給屬下：「主管問 Q{N}: {title}\n{body}」
 2. **執行查證指令**（從 evidence_hint 推 git/spec/tasks 路徑）：
    ```bash
-   # 範例：evidence_hint = "recycle-q2c repo: spec.md / plan.md / tasks.md"
-   cd /path/to/recycle-q2c
+   # 範例：evidence_hint = "<專案 repo>: spec.md / plan.md / tasks.md"
+   cd /path/to/<專案 repo>
    git log --since="{previous_date} 00:00" --until="{target_date} 23:59" --oneline
    Read spec.md / plan.md / tasks.md 相關段落
    ```

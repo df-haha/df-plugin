@@ -471,7 +471,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_work_log_email.py daily_proposal/dail
 ```
 
 腳本會自動：
-- 讀取 md 檔並轉換為正式郵件 HTML（微軟正黑體、大豐綠配色）
+- 讀取 md 檔並轉換為正式郵件 HTML（微軟正黑體、品牌綠配色）
 - 郵件標題：`每日工作報告 YYYY/MM/DD`
 - 收件者：讀取 config 的 `outlook_email`
 - 透過 Outlook COM 開啟草稿視窗（**不會自動發送**）
