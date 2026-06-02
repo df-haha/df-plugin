@@ -42,7 +42,7 @@
     {
       "name": "daily-work-log",
       "description": "跨專案工作/週報產生器 — 掃描 Claude Code / Codex / Gemini session，彙整日/週工作進度，追蹤 Claude Code 訂閱 7d/5h 用量（官方 endpoint），半自動 commit/push 協助（每 repo 逐一確認），支援 SDD spec drift 偵測（屬下週報）、AI 小白 vs 老手雙檔 signal 分析，透過 Outlook 寄出並夾帶 md 附件",
-      "version": "1.7.2",
+      "version": "1.7.3",
       "author": { "name": "df-haha" },
       "source": "./plugins/daily-work-log",
       "category": "productivity"
@@ -73,10 +73,18 @@
     },
     {
       "name": "om-daily-work-log",
-      "description": "OM 營運部 coaching loop — 主管產澄清問題卡 + reply 屬下原日報寄出（thread 自動串）；屬下日誌偵測主管疑問並用 CC 回覆，HTML anchor 標記讓主管 /hi 解析閉環。需配合既有 daily-work-log plugin（reuse 其腳本）",
-      "version": "1.0.0",
+      "description": "營運主管 coaching loop — 主管產澄清問題卡，compose/reply 兩路寄出（directive marker 契約，嚴格 email 比對防串錯人）；屬下日誌 directive-first 偵測主管催辦信並用 CC 回覆，HTML anchor 標記讓主管 /hi 解析閉環。需配合 daily-work-log plugin（reuse 其腳本）",
+      "version": "1.1.0",
       "author": { "name": "df-haha" },
       "source": "./plugins/om-daily-work-log",
+      "category": "productivity"
+    },
+    {
+      "name": "om-daily-cockpit",
+      "description": "營運主管每日駕駛艙 — /hi 整合郵件分流 + 團隊日報追蹤 + async coaching directive loop +（可選）情報/標案/社群雷達。department-agnostic、config 驅動、零 hard-code；相依 om-daily-work-log。MVP 核心預設可跑，產業特化模組換成自己來源後再啟用",
+      "version": "0.1.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/om-daily-cockpit",
       "category": "productivity"
     },
     {
