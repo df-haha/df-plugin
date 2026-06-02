@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -30,11 +31,10 @@ TZ_GMT8 = timezone(timedelta(hours=8))
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 DEFAULT_CONFIG_PATH = Path.home() / ".claude" / "daily-work-log" / "config.json"
 
-SKIP_DIRS = {
-    "-home",
-    "-mnt-c-Users-haha-huang",
-    "-home-haha--claude-mem-observer-sessions",
-    "-home-hahahuang--claude-mem-observer-sessions",
+# 跳過非專案目錄（home root 等噪音）。tenant 特定目錄用 env OM_SKIP_PROJECT_DIRS
+# （逗號分隔）擴充；observer-sessions 類目錄於使用端以 suffix 比對。預設零 hard-code。
+SKIP_DIRS = {"-home"} | {
+    s.strip() for s in os.environ.get("OM_SKIP_PROJECT_DIRS", "").split(",") if s.strip()
 }
 
 

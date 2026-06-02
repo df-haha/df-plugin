@@ -12,6 +12,7 @@ Usage:
 """
 
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone, timedelta
@@ -201,13 +202,18 @@ def scan_sessions(target_date: datetime) -> dict:
     all_times = []
     skipped_dirs = []
 
+    # 跳過非專案目錄（home root / observer sessions 等噪音）。
+    # tenant 特定目錄用 env OM_SKIP_PROJECT_DIRS（逗號分隔）擴充，預設零 hard-code。
+    skip_dirs = {"-home"} | {
+        s.strip() for s in os.environ.get("OM_SKIP_PROJECT_DIRS", "").split(",") if s.strip()
+    }
+
     for proj_dir in sorted(PROJECTS_DIR.iterdir()):
         if not proj_dir.is_dir():
             continue
 
-        # 跳過非專案目錄
         dirname = proj_dir.name
-        if dirname in ["-home", "-mnt-c-Users-haha-huang", "-home-haha--claude-mem-observer-sessions"]:
+        if dirname in skip_dirs or dirname.endswith("-observer-sessions"):
             skipped_dirs.append(dirname)
             continue
 
@@ -260,10 +266,22 @@ def scan_codex_sessions(target_date: datetime) -> list:
     day_end = day_start + timedelta(days=1)
     date_parts = target_date.strftime("%Y/%m/%d").split("/")
 
+    # WSL（Linux 端）codex sessions
     search_dirs = [
         Path.home() / ".codex" / "sessions" / date_parts[0] / date_parts[1] / date_parts[2],
-        Path(f"/mnt/c/Users/haha.huang/.codex/sessions/{date_parts[0]}/{date_parts[1]}/{date_parts[2]}"),
     ]
+    # Windows Desktop codex sessions（WSL 掛載）：env OM_WINDOWS_USER 指定優先，
+    # 否則自動偵測 /mnt/c/Users/*/.codex —— 零 hard-code、零設定即可運作。
+    win_user = os.environ.get("OM_WINDOWS_USER", "").strip()
+    users_root = Path("/mnt/c/Users")
+    if win_user:
+        win_user_dirs = [users_root / win_user]
+    elif users_root.exists():
+        win_user_dirs = [p for p in users_root.glob("*") if (p / ".codex").is_dir()]
+    else:
+        win_user_dirs = []
+    for ud in win_user_dirs:
+        search_dirs.append(ud / ".codex" / "sessions" / date_parts[0] / date_parts[1] / date_parts[2])
 
     sessions = []
     seen_ids: set[str] = set()
