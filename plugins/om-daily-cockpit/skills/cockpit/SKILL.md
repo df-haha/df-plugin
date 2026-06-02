@@ -39,14 +39,17 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, ToolSearch, TaskCreat
 
 ### 1.3 情報（可選；`config.modules.intel.enabled`）
 
-**若 `intel.enabled=false` → 跳過整段。** 否則依 `intel.storage`：
-- `quick_only`：`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/intel_crawler.py --config <cfg> quick`（不落 DB）
-- `sqlite` / `postgres`：先查既有當日資料，無則 `scan` 落該後端，再讀回。
+**若 `intel.enabled=false` → 跳過整段（MVP 預設）。**
+否則先確認 crawler 存在：`test -f ${CLAUDE_PLUGIN_ROOT}/scripts/intel_crawler.py`。
+> ⚠️ **crawler runtime 不隨 plugin 打包**（產業特定）。檔案不存在 → 提示主管「intel 模組已啟用但未提供
+> `scripts/intel_crawler.py`，請放入自家產業爬蟲後再跑」，並跳過本段，**不**讓它變成 file-not-found 崩潰。
+若存在，依 `intel.storage`：`quick_only` 即抓即用不落 DB；`sqlite`/`postgres` 先查既有當日資料、無則 scan 落該後端再讀回。
 套用 **intel-scan skill** 的 First-Principles 框架分析。來源/關鍵字一律取自 `config.modules.intel`。
 
 ### 1.4 標案（可選；`config.modules.tender.enabled`）
 
-**若 `tender.enabled=false` → 跳過。** 否則同 1.3 的 storage 邏輯，跑 `gov_tender_tracker.py --config`，關鍵字取自 config。
+**若 `tender.enabled=false` → 跳過。** 否則同 1.3：先 `test -f` 確認 `scripts/gov_tender_tracker.py` 存在
+（同屬 tenant 自備 runtime，缺則提示並跳過），再依 storage 邏輯跑，關鍵字取自 config。
 
 ### 1.2 任務（可選，若 tenant 接了 Todoist/其他）
 
@@ -72,13 +75,15 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, ToolSearch, TaskCreat
 吃「待釐清疑問」結構化資料 → 每位成員產 1 張澄清卡（card_id UUID + state machine frontmatter）→
 寫到 `{config.paths.daily_proposal_dir}/team_coaching_cards_{target_date}.md`。
 
-**寄送由主管確認**（出現在 Phase 4「💡 待確認提案」）。確認寄出：
+**寄送由主管確認**（出現在 Phase 4「💡 待確認提案」）。確認寄出時，先定位相依 plugin
+om-daily-work-log 的腳本（不寫死 marketplace 名/版本，取最新版）：
 ```bash
-python3 ~/.claude/plugins/.../om-daily-work-log/scripts/send_coaching_cards.py \
-  {daily_proposal_dir}/team_coaching_cards_{target_date}.md \
+SCC=$(ls ~/.claude/plugins/cache/*/om-daily-work-log/*/scripts/send_coaching_cards.py 2>/dev/null | sort -V | tail -1)
+python3 "$SCC" {daily_proposal_dir}/team_coaching_cards_{target_date}.md \
   --subject-prefix "{config.directive.subject_prefix}"
 ```
 預設 `--mode reply`（接屬下原日報，找不到自動轉 compose）+ 只開草稿；加 `--auto-send` 才直接寄。
+> 若 `$SCC` 為空 → 提示主管確認 om-daily-work-log plugin（≥1.1.0）已安裝。
 
 ---
 

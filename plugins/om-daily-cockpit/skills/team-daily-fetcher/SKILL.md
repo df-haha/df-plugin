@@ -14,8 +14,8 @@ allowed-tools: Bash, Read, Glob, mcp__outlook-local__get_folder_list_tool, mcp__
 | 資訊 | 來源 |
 |------|------|
 | 成員名單 + Outlook 帳號/資料夾 + Category + 路徑 | oc-config（`--config` 或 `OM_DAILY_COCKPIT_CONFIG`） |
-| 目標日期（最近工作日） | `python3 scripts/last_workday.py` |
-| 附件原檔 | `python3 scripts/fetch_daily_reports.py --config <cfg>`（PowerShell + Outlook COM） |
+| 目標日期（最近工作日） | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/last_workday.py` |
+| 附件原檔 | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/fetch_daily_reports.py --config <cfg>`（PowerShell + Outlook COM） |
 | Body 文字 | Outlook MCP `get_email_by_number_tool(mode="basic")` |
 | 任務/進度交叉比對（可選） | `config.paths.tracking_files`（清單，空則跳過對齊度分析） |
 
@@ -24,8 +24,8 @@ allowed-tools: Bash, Read, Glob, mcp__outlook-local__get_folder_list_tool, mcp__
 ### Step 1：載入 config、算 target_date
 
 ```bash
-python3 scripts/oc_core/config.py --validate <cfg>   # 確認 config 合法
-python3 scripts/last_workday.py                       # e.g. 2026-04-21
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/oc_core/config.py --validate <cfg>   # 確認 config 合法
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/last_workday.py                       # e.g. 2026-04-21
 ```
 
 從 config 取：`team.members[]`（顯示名 + member_id + email/alias）、`email.account`、
@@ -41,7 +41,7 @@ python3 scripts/last_workday.py                       # e.g. 2026-04-21
 ### Step 3：PowerShell 抓附件 + 加 Category
 
 ```bash
-python3 scripts/fetch_daily_reports.py --config <cfg>
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/fetch_daily_reports.py --config <cfg>
 ```
 
 輸出 JSON（stderr 有進度訊息）。關心欄位：`results[]`（含 `attachment_saved`、`already_processed`）、

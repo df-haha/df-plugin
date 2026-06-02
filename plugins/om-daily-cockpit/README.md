@@ -61,6 +61,13 @@ export OM_DAILY_COCKPIT_CONFIG=<你的>/config.md
 
 寄送採**嚴格 email 比對**：多屬下同主旨時不會串錯人；reply 找不到原日報會自動轉 compose 開新信。
 
+## 已知限制
+
+- **日報主旨慣例**：coaching loop 的 reply 路徑（`om-daily-work-log`）目前**假設屬下日報主旨為中文
+  「每日工作報告 YYYY/MM/DD」**。非中文團隊的 reply-match 需把 `report_subject_pattern` 覆寫成自己的
+  慣例（compose fallback 仍可運作，只是 reply 接信會 degrade）。這是語言慣例假設，非 tenant 識別洩漏。
+- **產業 crawler 自備**：intel/tender/fb 啟用需自備對應 `scripts/<module>_crawler.py`（見下方 MVP 邊界）。
+
 ## 可選模組 storage 後端（Phase 4.5）
 
 intel/tender/fb 啟用前須選 `storage`：
