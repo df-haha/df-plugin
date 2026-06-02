@@ -45,6 +45,29 @@ CARD_YAML_BLOCK = re.compile(
 )
 TPE = timezone(timedelta(hours=8))
 
+# --- directive 契約（主管端寫、屬下端讀的共享協定）------------------------
+# subject_prefix 可由 cockpit config 經 --subject-prefix 覆寫；marker 為語言中性 HTML 註解。
+DEFAULT_SUBJECT_PREFIX = "【每日追蹤】"
+DIRECTIVE_MARKER_RE = re.compile(
+    r"<!--\s*OM_DIRECTIVE\s+(?P<meta>[^>]+?)-->", re.DOTALL
+)
+
+
+def build_directive_marker(directive_id: str, target_date: str, employee_id: str, source: str) -> str:
+    """組 directive anchor（屬下端用 subject 前綴/此 marker 搜當日催辦信）。
+
+    source: "reply"（接屬下原日報）| "compose"（找不到原日報時開新信）。
+    """
+    return (
+        f"<!-- OM_DIRECTIVE directive_id={directive_id} target_date={target_date} "
+        f"employee_id={employee_id} source={source} -->"
+    )
+
+
+def build_compose_subject(subject_prefix: str, name: str, target_date: str) -> str:
+    """compose 模式新信主旨：前綴 + 屬下名 + 目標日期。"""
+    return f"{subject_prefix} {name} {target_date}"
+
 
 def parse_bundle(md_path: Path) -> tuple[dict, list[dict], str]:
     """切 bundle md：抽 bundle frontmatter + 每張卡 (yaml + body)。
@@ -90,18 +113,28 @@ def previous_workday(date_str: str) -> str:
     return (d - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
-def render_card_html(card: dict, body_md: str) -> str:
-    """把單張卡的 markdown body 轉 HTML。"""
+def render_card_html(card: dict, body_md: str, target_date: str, source: str = "reply") -> str:
+    """把單張卡的 markdown body 轉 HTML，並嵌入 directive marker。
+
+    target_date：屬下日報的目標日期（取代原寫死的 "5/6"）。
+    source：reply | compose，寫入 directive marker 供屬下端辨識。
+    """
     yaml_data = card["yaml"]
     employee = yaml_data.get("employee", {})
     name = employee.get("name", "屬下")
+    employee_id = (
+        employee.get("employee_id") or employee.get("id") or employee.get("member_id") or name
+    )
+    directive_id = yaml_data.get("card_id", "N/A")
+    marker = build_directive_marker(directive_id, target_date, str(employee_id), source)
 
     # 簡單 markdown → HTML（H2/H3/H4 + bullet + paragraph）
     html_lines = [
+        marker,  # directive anchor（HTML 註解，屬下端據此搜當日催辦信）
         '<div style="font-family: \'Microsoft JhengHei\', sans-serif; font-size: 14px; '
         'color: #333; line-height: 1.7; max-width: 720px;">',
         f"<p>{name} 您好，</p>",
-        '<p>看了您 5/6 的日報，整理幾個想了解的點。請用 Claude Code（CC）查 git/spec/tasks '
+        f'<p>看了您 {target_date} 的日報，整理幾個想了解的點。請用 Claude Code（CC）查 git/spec/tasks '
         "後組織回覆，明日日報附上即可。</p>",
         '<hr style="border: 0; border-top: 1px solid #ddd; margin: 16px 0;">',
     ]
@@ -199,72 +232,69 @@ def to_windows_path(posix_path: Path) -> str:
         return abs_path
 
 
-def open_reply_draft(
-    employee_name: str,
-    previous_date: str,
-    html_body: str,
-    attachment_path: Path | None,
-    auto_send: bool = False,
-) -> dict:
-    """
-    用 PowerShell + Outlook COM 找屬下的 previous-workday 日報，呼叫 .Reply() 開草稿。
-
-    回傳 {"status": "sent"|"draft"|"failed", "entry_id": str, "conversation_id": str, "error": str}
-    """
-    # subject pattern: 「每日工作報告 YYYY/MM/DD」
-    subject_pattern = f"每日工作報告 {previous_date.replace('-', '/')}"
-
-    attach_line = ""
+def _attach_ps_line(var: str, attachment_path: Path | None) -> str:
+    """組附件 PS 行（找不到附件回空字串）。"""
     if attachment_path is not None and attachment_path.exists():
-        win_path = to_windows_path(attachment_path)
-        ps_escaped = win_path.replace("'", "''")
-        attach_line = f"$reply.Attachments.Add('{ps_escaped}') | Out-Null"
+        ps_escaped = to_windows_path(attachment_path).replace("'", "''")
+        return f"${var}.Attachments.Add('{ps_escaped}') | Out-Null"
+    return ""
 
-    action_line = "$reply.Send()" if auto_send else "$reply.Display()"
-    final_status = "sent" if auto_send else "draft"
 
-    # PowerShell：找匹配 subject + sender name 的最新郵件 → Reply
-    ps_script = f"""
+def build_reply_ps(
+    employee_name: str,
+    employee_email: str,
+    report_subject_pattern: str,
+    inbox_folder: str,
+    html_body: str,
+    attach_line: str,
+    action_line: str,
+    final_status: str,
+) -> str:
+    """純函式：組 reply PS 腳本。
+
+    嚴格 email 比對（有 email → 只認 SenderEmailAddress 相等，**不** fallback GetFirst，
+    避免多屬下同主旨串錯人）；無 email 時退回 SenderName.EndsWith。找不到回 status='not_found'。
+    """
+    return f"""
 $ErrorActionPreference = 'Stop'
 try {{
     $outlook = New-Object -ComObject Outlook.Application
     $namespace = $outlook.GetNamespace('MAPI')
-
-    # 找「每日工作報告」資料夾（在 Inbox 下）
     $inbox = $namespace.GetDefaultFolder(6)  # olFolderInbox
     $targetFolder = $null
     foreach ($f in $inbox.Folders) {{
-        if ($f.Name -eq '每日工作報告') {{
-            $targetFolder = $f
-            break
-        }}
+        if ($f.Name -eq '{inbox_folder}') {{ $targetFolder = $f; break }}
     }}
     if ($targetFolder -eq $null) {{ $targetFolder = $inbox }}
 
-    # 用 Items.Restrict 找匹配 subject + sender 的郵件（最新一封）
-    $filter = "[Subject] = '{subject_pattern}'"
+    $filter = "[Subject] = '{report_subject_pattern}'"
     $items = $targetFolder.Items.Restrict($filter)
     $items.Sort('[ReceivedTime]', $true)
 
+    $email = '{employee_email}'
+    $name = '{employee_name}'
     $matchedMail = $null
-    foreach ($item in $items) {{
-        if ($item.SenderName -like '*{employee_name}*' -or $item.Subject -like '*{employee_name}*') {{
-            $matchedMail = $item
-            break
+    # 1) 嚴格 email 比對（首選）
+    if ($email -ne '') {{
+        foreach ($item in $items) {{
+            try {{ $addr = [string]$item.SenderEmailAddress }} catch {{ $addr = '' }}
+            if ($addr -ieq $email) {{ $matchedMail = $item; break }}
+        }}
+    }} else {{
+        # 2) 無 email 才退回精確 name 後綴比對（不用 *name* 子字串，避免串錯）
+        foreach ($item in $items) {{
+            if ([string]$item.SenderName -ne '' -and ([string]$item.SenderName).EndsWith($name)) {{
+                $matchedMail = $item; break
+            }}
         }}
     }}
-
-    # Fallback：找不到匹配 sender，取第一封 subject 對的
-    if ($matchedMail -eq $null -and $items.Count -gt 0) {{
-        $matchedMail = $items.GetFirst()
-    }}
+    # 注意：找不到 sender 時**不**取「第一封 subject 對的信」—— 寧可 not_found 轉 compose，不賭一把串錯人。
 
     if ($matchedMail -eq $null) {{
-        Write-Output (ConvertTo-Json @{{ status='failed'; error='找不到原日報郵件 (subject={subject_pattern}, sender={employee_name})' }} -Compress)
+        Write-Output (ConvertTo-Json @{{ status='not_found'; error='找不到原日報（嚴格比對 email={employee_email}）' }} -Compress)
         exit 0
     }}
 
-    # 寫 HTML 到 temp
     if (-not (Test-Path "C:\\temp")) {{ New-Item -ItemType Directory -Path "C:\\temp" | Out-Null }}
     $htmlContent = @"
 {html_body}
@@ -272,44 +302,115 @@ try {{
     [System.IO.File]::WriteAllText("C:\\temp\\coaching_card.html", $htmlContent, [System.Text.Encoding]::UTF8)
     $body = [System.IO.File]::ReadAllText("C:\\temp\\coaching_card.html", [System.Text.Encoding]::UTF8)
 
-    # Reply
     $reply = $matchedMail.Reply()
     $reply.HTMLBody = $body + $reply.HTMLBody  # prepend
     {attach_line}
     {action_line}
 
-    # 取 EntryID + ConversationID
     $entryId = ''
     $convId = ''
     try {{ $entryId = $reply.EntryID }} catch {{}}
     try {{ $convId = $reply.ConversationID }} catch {{}}
-
     Remove-Item "C:\\temp\\coaching_card.html" -ErrorAction SilentlyContinue
-
     Write-Output (ConvertTo-Json @{{ status='{final_status}'; entry_id=$entryId; conversation_id=$convId }} -Compress)
 }} catch {{
     Write-Output (ConvertTo-Json @{{ status='failed'; error=$_.Exception.Message }} -Compress)
 }}
 """
 
+
+def build_compose_ps(
+    employee_email: str,
+    subject: str,
+    html_body: str,
+    attach_line: str,
+    action_line: str,
+    final_status: str,
+) -> str:
+    """純函式：組 compose（開新信）PS 腳本。directive marker 已在 html_body 內。"""
+    return f"""
+$ErrorActionPreference = 'Stop'
+try {{
+    $outlook = New-Object -ComObject Outlook.Application
+    if (-not (Test-Path "C:\\temp")) {{ New-Item -ItemType Directory -Path "C:\\temp" | Out-Null }}
+    $htmlContent = @"
+{html_body}
+"@
+    [System.IO.File]::WriteAllText("C:\\temp\\coaching_card.html", $htmlContent, [System.Text.Encoding]::UTF8)
+    $body = [System.IO.File]::ReadAllText("C:\\temp\\coaching_card.html", [System.Text.Encoding]::UTF8)
+
+    $mail = $outlook.CreateItem(0)  # olMailItem
+    $mail.To = '{employee_email}'
+    $mail.Subject = '{subject}'
+    $mail.HTMLBody = $body
+    {attach_line}
+    {action_line}
+
+    $entryId = ''
+    try {{ $entryId = $mail.EntryID }} catch {{}}
+    Remove-Item "C:\\temp\\coaching_card.html" -ErrorAction SilentlyContinue
+    Write-Output (ConvertTo-Json @{{ status='{final_status}'; entry_id=$entryId; conversation_id='' }} -Compress)
+}} catch {{
+    Write-Output (ConvertTo-Json @{{ status='failed'; error=$_.Exception.Message }} -Compress)
+}}
+"""
+
+
+def _run_ps(ps_script: str) -> dict:
+    """跑 PS 腳本 + parse 最後一行 JSON。"""
     result = subprocess.run(
         ["powershell.exe", "-NoProfile", "-Command", ps_script],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
-
     output = result.stdout.strip()
     if not output:
-        return {
-            "status": "failed",
-            "error": f"PS 無輸出 / stderr: {result.stderr[:500]}",
-        }
+        return {"status": "failed", "error": f"PS 無輸出 / stderr: {result.stderr[:500]}"}
     try:
         return json.loads(output.splitlines()[-1])
     except json.JSONDecodeError:
         return {"status": "failed", "error": f"PS 輸出非 JSON: {output[:500]}"}
+
+
+def open_reply_draft(
+    employee_name: str,
+    employee_email: str,
+    previous_date: str,
+    html_body: str,
+    attachment_path: Path | None,
+    auto_send: bool = False,
+    report_subject_pattern: str | None = None,
+    inbox_folder: str = "每日工作報告",
+) -> dict:
+    """找屬下 previous-workday 日報 → .Reply() 開草稿（嚴格 email 比對）。
+
+    回傳 status: sent | draft | not_found | failed。not_found 由 caller 轉 compose。
+    """
+    subject_pattern = report_subject_pattern or f"每日工作報告 {previous_date.replace('-', '/')}"
+    attach_line = _attach_ps_line("reply", attachment_path)
+    action_line = "$reply.Send()" if auto_send else "$reply.Display()"
+    final_status = "sent" if auto_send else "draft"
+    ps = build_reply_ps(
+        employee_name, employee_email, subject_pattern, inbox_folder,
+        html_body, attach_line, action_line, final_status,
+    )
+    return _run_ps(ps)
+
+
+def open_compose_draft(
+    employee_email: str,
+    subject: str,
+    html_body: str,
+    attachment_path: Path | None,
+    auto_send: bool = False,
+) -> dict:
+    """開新信給屬下（reply 找不到原日報時使用）。directive marker 已嵌在 html_body。"""
+    if not employee_email:
+        return {"status": "failed", "error": "compose 需要屬下 email（card.employee.email 缺）"}
+    attach_line = _attach_ps_line("mail", attachment_path)
+    action_line = "$mail.Send()" if auto_send else "$mail.Display()"
+    final_status = "sent" if auto_send else "draft"
+    ps = build_compose_ps(employee_email, subject, html_body, attach_line, action_line, final_status)
+    return _run_ps(ps)
 
 
 def update_card_in_bundle(
@@ -336,9 +437,12 @@ def update_card_in_bundle(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("md_file")
-    parser.add_argument("--mode", choices=["reply", "compose"], default="reply")
+    parser.add_argument("--mode", choices=["reply", "compose"], default="reply",
+                        help="reply=接屬下原日報；compose=直接開新催辦信（含 directive marker）")
     parser.add_argument("--auto-send", action="store_true")
     parser.add_argument("--target-date")
+    parser.add_argument("--subject-prefix", default=DEFAULT_SUBJECT_PREFIX,
+                        help="compose 模式新信主旨前綴（cockpit 可由 config 注入）")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -391,26 +495,38 @@ def main():
             print(f"[SKIP] 卡 {idx + 1} ({name}) 已被 supersede，跳過")
             continue
 
+        email_addr = employee.get("email", "")
         # 寫 md slice
         slice_path = write_card_md_slice(card, card["body_md"], slice_dir)
-        # 渲染 HTML
-        html_body = render_card_html(card, card["body_md"])
+        compose_subject = build_compose_subject(args.subject_prefix, name, target_date)
 
         if args.dry_run:
-            print(f"[DRY-RUN] 卡 {idx + 1} ({name}) → reply 屬下 5/6 日報")
-            print(f"[DRY-RUN]   subject 將自動變 Re: 每日工作報告 {target_date.replace('-', '/')}")
+            if args.mode == "compose":
+                print(f"[DRY-RUN] 卡 {idx + 1} ({name}) → compose 新信 to={email_addr or '（缺 email）'}")
+                print(f"[DRY-RUN]   subject: {compose_subject}")
+            else:
+                print(f"[DRY-RUN] 卡 {idx + 1} ({name}) → reply 屬下 {target_date} 日報"
+                      f"（嚴格 email={email_addr or '（缺，退回 name 比對）'}；找不到則轉 compose）")
+                print(f"[DRY-RUN]   subject 將自動變 Re: 每日工作報告 {target_date.replace('-', '/')}")
+            preview = render_card_html(card, card["body_md"], target_date, source=args.mode)
             print(f"[DRY-RUN]   附件: {slice_path}")
-            print(f"[DRY-RUN]   HTML 預覽（前 200 字）: {html_body[:200]}")
+            print(f"[DRY-RUN]   directive marker: {DIRECTIVE_MARKER_RE.search(preview).group(0)}")
             continue
 
-        # 開 Reply 草稿
-        result = open_reply_draft(
-            employee_name=name,
-            previous_date=target_date,
-            html_body=html_body,
-            attachment_path=slice_path,
-            auto_send=args.auto_send,
-        )
+        # 路由：compose 直接開新信；reply 找不到原日報則 fallback compose（不串錯人）
+        if args.mode == "compose":
+            html_body = render_card_html(card, card["body_md"], target_date, source="compose")
+            result = open_compose_draft(email_addr, compose_subject, html_body, slice_path, args.auto_send)
+        else:
+            html_body = render_card_html(card, card["body_md"], target_date, source="reply")
+            result = open_reply_draft(
+                employee_name=name, employee_email=email_addr, previous_date=target_date,
+                html_body=html_body, attachment_path=slice_path, auto_send=args.auto_send,
+            )
+            if result.get("status") == "not_found":
+                print(f"[INFO] 卡 {idx + 1} ({name}) reply 找不到原日報 → 轉 compose", file=sys.stderr)
+                html_body = render_card_html(card, card["body_md"], target_date, source="compose")
+                result = open_compose_draft(email_addr, compose_subject, html_body, slice_path, args.auto_send)
 
         if result.get("status") in ("sent", "draft"):
             print(

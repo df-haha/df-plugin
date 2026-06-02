@@ -1,6 +1,6 @@
 ---
 name: om-daily-work-log
-description: OM 營運部專用日誌產生器（基於 daily-work-log plugin 擴展）。除了通用日誌功能外，自動偵測 Outlook 中主管 reply 屬下原日報的「澄清問題卡」郵件，引導屬下用 CC 查 git/spec/tasks 後在新一日日報的「## 主管疑問回覆」區塊（HTML anchor 標記）填答。觸發時機：屬下說「日誌」「工作日誌」「彙整工作進度」「整理今天的工作」「日報」「工作報告」（OM 屬下機器優先觸發此 skill 而非通用 daily-work-log）。
+description: OM 營運部專用日誌產生器（基於 daily-work-log plugin 擴展）。除了通用日誌功能外，自動偵測主管 compose/reply 的催辦信（directive marker 契約，繞過 reply-chain 限制），引導屬下用 CC 查 git/spec/tasks 後在新一日日報的「## 主管疑問回覆」區塊（HTML anchor 標記）填答。觸發時機：屬下說「日誌」「工作日誌」「彙整工作進度」「整理今天的工作」「日報」「工作報告」（OM 屬下機器優先觸發此 skill 而非通用 daily-work-log）。
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, Skill, mcp__outlook-local__list_recent_emails_tool, mcp__outlook-local__get_folder_list_tool, mcp__outlook-local__search_email_by_subject_tool, mcp__outlook-local__get_email_by_number_tool
 ---
 
@@ -35,42 +35,48 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
 
 ---
 
-## Phase 0：偵測主管疑問郵件
+## Phase 0：偵測主管催辦信（directive-first）
 
 ### 目標
-找出主管最近 reply 屬下原日報的「澄清問題卡」。
+找出主管當日寄來的「澄清問題卡 / 催辦信」。**主要走 Outlook MCP 依 directive 契約搜尋**——
+同時涵蓋主管 **compose 開的新信**與 **reply 屬下日報**兩種來源；reply-chain 腳本退為 fallback。
 
-### 執行
+> ⚠️ 為何不只用 reply-chain：主管 compose 的新催辦信是獨立 thread、沒有指向原日報的
+> ConversationID，舊的「寄件備份→ConversationID 串 reply」路徑**永遠搜不到 compose 信**。
+> directive marker 契約讓兩種來源都搜得到。
+
+### Directive 契約（主管端 send_coaching_cards.py 寄出時一律帶）
+- **主旨前綴**：`【每日追蹤】`（部門可於 cockpit config 自訂；屬下端用「前綴比對」放寬）
+- **HTML anchor marker**（body 內，compose 與 reply 都有）：
+  ```
+  <!-- OM_DIRECTIVE directive_id=<id> target_date=<YYYY-MM-DD> employee_id=<id> source=compose|reply -->
+  ```
+
+### 執行（主要：Claude + Outlook MCP）
+1. `ToolSearch("select:mcp__outlook-local__search_email_by_subject_tool,mcp__outlook-local__list_recent_emails_tool,mcp__outlook-local__get_email_by_number_tool")`
+2. 搜當日信：`search_email_by_subject_tool(subject="【每日追蹤】")`（前綴比對），
+   或 `list_recent_emails_tool(days=1)` 後過濾主旨含前綴者。
+3. 對候選信 `get_email_by_number_tool(email_number=N, mode="basic")` 取 body，抽 marker：
+   ```python
+   import re
+   M = re.compile(r"<!--\s*OM_DIRECTIVE\s+(?P<meta>[^>]+?)-->")
+   META = re.compile(r"(\w+)=(\S+)")   # directive_id / target_date / employee_id / source
+   ```
+4. 取 `target_date` 命中今日目標日、`employee_id` 為自己者的**最新一封**。
+5. 從 body 的 `## Q1 / ## Q2 …` 標題 + 內容抽出問題清單（`directive_id` 即原 card_id）。
+
+### Fallback（MCP 搜不到或不穩時）
+跑 reply-chain 腳本（只認 reply 來源，抓不到 compose 催辦信）：
 ```bash
 python3 ~/.claude/plugins/cache/df-haha-plugins/om-daily-work-log/1.0.0/scripts/handle_supervisor_questions.py \
-  {target_date} \
-  --output-json
+  {target_date} --output-json
 ```
-
-腳本流程：
-1. 計算 `previous_workday`（從 target_date 倒推上一個工作日；遇連假往前找）
-2. 用 Outlook MCP 搜屬下「寄件備份」中主旨 `每日工作報告 {previous_workday/replace - to /}`
-3. 找該封日報的 **conversation 中後續的 reply**（用 ConversationID 串）
-4. 抽 reply 的 **附件 .md** → fallback 到 reply body 解析 question 區塊
-5. 輸出 JSON：
-   ```json
-   {
-     "has_supervisor_email": true,
-     "previous_date": "2026-05-06",
-     "card_id": "be23c883-...",
-     "card_version": 1,
-     "review_thread_id": "<ConversationID>",
-     "review_message_id": "<EntryID>",
-     "questions": [
-       {"id": "Q1", "title": "M7 報表中心 - 目前狀態", "body": "...", "evidence_hint": "..."},
-       {"id": "Q2", ...}
-     ]
-   }
-   ```
+輸出 JSON：`has_supervisor_email` / `previous_date` / `card_id` / `review_thread_id` /
+`review_message_id` / `questions[]`（`{id, title, body, evidence_hint}`）。
 
 ### 結果分支
-- `has_supervisor_email: true` → 顯示給屬下：「主管 {previous_date} 寄了 N 個問題：Q1...、Q2...，待會引導你回覆」 → 進 Phase 1
-- `has_supervisor_email: false` → 顯示「未偵測到主管疑問卡，本日日報跳過 Phase 3-4」→ 進 Phase 1
+- 偵測到催辦信 → 顯示：「主管寄了 N 個問題（來源：{source}）：Q1…、Q2…，待會引導你回覆」→ 進 Phase 1
+- 無 → 「未偵測到主管催辦信，本日日報跳過 Phase 3-4」→ 進 Phase 1
 
 ---
 
