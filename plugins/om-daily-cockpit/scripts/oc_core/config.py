@@ -68,12 +68,20 @@ class EmailCfg:
     account: str
     daily_report_folder: str
     processed_category: str
+    # 可選：Outlook inbox 顯示名（locale 相依，中文 Outlook 為「收件匣」）。
+    inbox_name: str = "Inbox"
+    # 可選：日報附件檔名 / 主旨日期 regex。預設語言中性（只抓日期），各 tenant 可覆寫。
+    attachment_pattern: str = r"daily_work_log_(\d{4}-\d{2}-\d{2})\.md"
+    report_subject_pattern: str = r"(\d{4})[/-](\d{2})[/-](\d{2})"
 
 
 @dataclass
 class Paths:
     archive_dir: str
     daily_proposal_dir: str
+    # 可選：團隊任務/進度追蹤文件相對路徑清單，供 team-daily-fetcher 交叉比對對齊度。
+    # 空 = 跳過對齊度分析（純做寄送/格式檢查）。
+    tracking_files: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -242,6 +250,9 @@ def _build_config(d: dict) -> Config:
         account,
         _require_str(em, "daily_report_folder"),
         _require_str(em, "processed_category"),
+        inbox_name=str(em.get("inbox_name") or EmailCfg.inbox_name),
+        attachment_pattern=str(em.get("attachment_pattern") or EmailCfg.attachment_pattern),
+        report_subject_pattern=str(em.get("report_subject_pattern") or EmailCfg.report_subject_pattern),
     )
 
     # paths
@@ -250,7 +261,10 @@ def _build_config(d: dict) -> Config:
         if not p.get(k):
             raise ConfigError(f"paths.{k} 必填")
         _check_path(k, str(p[k]))
-    paths = Paths(p["archive_dir"], p["daily_proposal_dir"])
+    tracking_files = [str(x) for x in (p.get("tracking_files") or [])]
+    for tf in tracking_files:
+        _check_path("tracking_files", tf)
+    paths = Paths(p["archive_dir"], p["daily_proposal_dir"], tracking_files)
 
     # directive
     dr = d.get("directive") or {}

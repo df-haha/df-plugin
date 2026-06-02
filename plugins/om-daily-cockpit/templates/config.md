@@ -27,12 +27,18 @@ team:
 email:
   adapter: outlook_local         # MVP 只支援 outlook_local（PowerShell + Outlook COM）
   account: <你的 Outlook 帳號 email>
-  daily_report_folder: <收日報的資料夾名，如 每日工作報告>
-  processed_category: <已處理標記類別，如 AI 已處理>
+  daily_report_folder: <收日報的子資料夾名>
+  processed_category: <已處理標記類別>
+  # --- 以下可選（不填用預設）---
+  inbox_name: Inbox              # Outlook inbox 顯示名；中文版 Outlook 填「收件匣」
+  # attachment_pattern: <日報附件檔名 regex；預設 daily_work_log_<date>.md>
+  # report_subject_pattern: <主旨日期 regex；預設語言中性 (\d{4})[/-](\d{2})[/-](\d{2})>
 
 paths:
   archive_dir: <日報歸檔目錄相對路徑，如 data/daily_reports>
   daily_proposal_dir: <每日提案/卡片輸出目錄，如 daily_proposal>
+  # 可選：任務/進度追蹤文件清單，供 team-daily-fetcher 交叉比對對齊度（空 = 跳過對齊分析）
+  tracking_files: []             # 如 [docs/team_tracking.md, docs/q2_assignments.md]
 
 directive:
   subject_prefix: <催辦信主旨前綴，如 "【每日追蹤】">
