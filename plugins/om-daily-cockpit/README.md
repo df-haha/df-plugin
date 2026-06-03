@@ -17,7 +17,13 @@
 
 ## 安裝
 
-1. 安裝相依 plugin：`om-daily-work-log`（≥1.2.0，已自給自足，內建日誌/寄信功能）。
+> **前置（Outlook 整合需要）**：郵件分流（主管端）與 coaching loop（屬下端 `om-daily-work-log`）都走
+> **outlook-local MCP**，需 **Windows 10+ + Outlook Desktop（桌面版）+ Python 3.8+** 與
+> [outlook-local MCP server](https://github.com/marlonluo2018/outlook-mcp-server)。
+> 屬下裝完 `om-daily-work-log` 後對 Claude 說「**work-log setup**」跑 onboarding 引導安裝；
+> 主管端則在下方 cockpit onboarding 的「接 Outlook MCP」步驟設定。
+
+1. 安裝相依 plugin：`om-daily-work-log`（≥1.3.0，已自給自足，內建日誌/寄信功能）。
 2. 安裝核心 Python 相依：`pip install PyYAML`。
 3. 跑 onboarding：對 Claude 說「cockpit setup」（或執行 `cockpit-onboarding` skill），它會引導你：
    填 config → 設 secrets env → 接 Outlook MCP → 驗證 → 跑 `/hi --quick`。

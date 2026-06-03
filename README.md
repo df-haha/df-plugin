@@ -26,5 +26,5 @@ claude plugin install first-principles
 | **ai-review** | AI 二次審查 — 使用 Codex CLI 或 Gemini CLI 對程式碼/計畫/技術決策進行獨立審查，支援單審或 Codex+Gemini 雙重對審 |
 | **evaluate-business-idea** | 五維深度系統評估框架 — 為軟體/SaaS/服務點子打分，判定深度系統 vs 免洗系統，含市場/GitHub/法規調查 SOP 與 idea 資料夾模板 |
 | **handoff** | 跨 session 複雜任務交接 — 自動從本次對話收集 commit / 決策共識 / 待辦 / 相關 memory，產出結構化 handoff prompt 並落盤至 `~/.claude/handoffs/`，過程中呼叫 Codex CLI 對草稿做最後一道把關（只挑實質影響的問題），含自我清理段落避免堆積 |
-| **om-daily-work-log** | OM 營運部雙向 async coaching loop — 主管端產澄清問題卡並 reply 屬下原日報（Outlook ConversationID 自動串 thread，無需維護屬下 email）；屬下端日誌偵測主管 reply、用 CC 查 git/spec/tasks 後在 HTML anchor 區塊回覆，主管下次 /hi 解析閉環。需配合 daily-work-log plugin（reuse 不 copy） |
+| **om-daily-work-log** | OM 營運部雙向 async coaching loop（員工只裝這一個，自給自足）— 屬下端日誌偵測主管催辦信、用 CC 查 git/spec/tasks 後在 HTML anchor 區塊回覆；主管端產澄清問題卡 compose/reply 寄出，下次 /hi 解析閉環。日誌/寄信 vendored，無須額外裝 plugin。**前置**：Windows + Outlook Desktop + Python 3.8+ + [outlook-local MCP server](https://github.com/marlonluo2018/outlook-mcp-server)（裝完對 Claude 說「work-log setup」跑 onboarding 引導安裝） |
 | **coolify-deploy** | Coolify（自架 PaaS）+ Docker Compose 部署規則 skill — compose 撰寫、Dockerfile、env/機密、SERVICE_URL magic env、Adminer/Seq 選配服務、部署流程、回滾、網域/TLS，整條 CD 生命週期的調和規則 |

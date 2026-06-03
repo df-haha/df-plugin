@@ -41,10 +41,15 @@ def dir_to_project_name(dirname: str) -> str:
     """將 Claude projects 目錄名轉換為可讀專案名。"""
     if dirname in PROJECT_NAME_MAP:
         return PROJECT_NAME_MAP[dirname]
-    # Fallback: 去掉常見前綴
-    for prefix in ["-home-haha-CC-project-", "-home-haha-", "-home-"]:
+    # Fallback: 去掉使用者 home 目錄前綴（動態推導，零 hard-code）。
+    # Claude Code 的 projects 目錄名 = 把 cwd 路徑的 "/" 換成 "-"，故 home 前綴同樣推導，
+    # 不寫死任何使用者名/路徑（tenant 要更友善的顯示名可用 env OM_PROJECT_NAME_MAP 覆寫）。
+    home_prefix = str(Path.home()).replace("/", "-")  # 例：/home/alice → -home-alice
+    # 只取「home_prefix + 分隔線」與通用 -home- 兩種前綴；刻意不含裸 home_prefix，
+    # 否則使用者名含連字號時可能誤切到另一位使用者的目錄（例 -home-john-doe 誤命中 -home-john-does-x）。
+    for prefix in (home_prefix + "-", "-home-"):
         if dirname.startswith(prefix):
-            name = dirname[len(prefix):]
+            name = dirname[len(prefix):].lstrip("-")
             if name:
                 return name
     return dirname

@@ -24,7 +24,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
 | # | Phase |
 |---|-------|
 | 1 | Phase 0：偵測主管疑問郵件 |
-| 2 | Phase 1：呼叫既有 daily-work-log 日誌產出 |
+| 2 | Phase 1：內建日誌產出（掃描 JSON → 渲染 md → 寫檔） |
 | 3 | Phase 2：日報 markdown 載入 + anchor 偵測 |
 | 4 | Phase 3：插入「主管疑問回覆」區塊 |
 | 5 | Phase 4：引導屬下用 CC 查證並回答 |
@@ -36,6 +36,17 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
 ---
 
 ## Phase 0：偵測主管催辦信（directive-first）
+
+### Phase 0 preflight：確認 outlook-local MCP 已就緒（硬性，不可跳過）
+
+本 skill 的偵測（Phase 0）與寄信（Phase 6）都依賴 outlook-local MCP。**開工第一件事**先確認它在：
+
+1. `ToolSearch("select:mcp__outlook-local__list_recent_emails_tool")`
+2. **抓不到 → 立即停止本 skill**，告訴屬下（把觸發詞講白）：
+   > 未偵測到 **outlook-local** MCP，無法自動讀主管催辦信／寄日報。
+   > 請先跑 **work-log onboarding**——對我說「**work-log setup**」或「**設定 daily work-log**」，
+   > 它會引導你安裝 outlook-local MCP server 並設好你的 `member_id`，設好再回來說「日報」。
+3. **抓得到 → 繼續**下方偵測流程。
 
 ### 目標
 找出主管當日寄來的「澄清問題卡 / 催辦信」。**主要走 Outlook MCP 依 directive 契約搜尋**——
@@ -58,7 +69,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
 > 自訂 `directive.subject_prefix`，屬下端不一定知道實際值）。主旨前綴只當「縮小掃描範圍」的軟過濾。
 
 1. `ToolSearch("select:mcp__outlook-local__search_email_by_subject_tool,mcp__outlook-local__list_recent_emails_tool,mcp__outlook-local__get_email_by_number_tool")`
-2. **掃近期信**：`list_recent_emails_tool(days=2)`（涵蓋週末/補寄；天數寧多勿少）。
+2. **掃近期信**：`list_recent_emails_tool(days=7)`（放寬到一週，涵蓋連假/請假/補寄；天數寧多勿少，靠 marker 精準命中）。
    逐封 `get_email_by_number_tool(email_number=N, mode="basic")` 取 body，抽 marker：
    ```python
    import re
@@ -87,15 +98,93 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/handle_supervisor_questions.py \
 
 ---
 
-## Phase 1：產出日誌（本 plugin 內建）
+## Phase 1：產出日誌（本 plugin 內建：掃描 → 渲染 → 寫檔）
 
-日誌功能已**內建**於本 plugin（vendored 自 daily-work-log，員工只需裝這一個 plugin）：
+日誌功能已**內建**於本 plugin（vendored 自 daily-work-log，員工只需裝這一個 plugin）。
+分三步：跑腳本拿 JSON → 用 JSON 渲染成 md → 寫檔。
+
+> ⚠️ **腳本只輸出 JSON 到 stdout，不會自己寫 md**。必須由你（模型）依下方模板把 JSON 渲染成
+> `daily_proposal/daily_work_log_{target_date}.md`，否則 Phase 2（anchor 偵測）/ Phase 6（寄信）
+> 會因為檔案不存在而失敗。
+
+### 1-1. 跑掃描腳本，**擷取 stdout 的 JSON**
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/daily_work_log.py {target_date} --with-cost
 ```
-> 掃描員工自己的 Claude Code / Codex session 紀錄，彙整當日工作 + AI 用量，寫到
-> `daily_proposal/daily_work_log_{target_date}.md`。無須額外安裝 daily-work-log plugin。
+> 掃描員工自己的 Claude Code / Codex / Gemini session，彙整當日工作 + AI 用量，**印出 JSON**。
+> JSON 結構：`date` / `projects.{名稱}.sessions[]`（含 `topic_hints` / `first_user_msg` / 起訖時間）/
+> `stats`（`earliest` / `latest` / `total_projects` / `providers`）/（`--with-cost` 時）`cost`。
+> 無須額外安裝 daily-work-log plugin。
+
+### 1-2. 把 JSON 渲染成日報 md（**必做**，路徑 `daily_proposal/daily_work_log_{target_date}.md`）
+
+依下方模板，**只用 1-1 的 JSON** 渲染（本 plugin 未 vendored git-status / usage-tracker /
+session-detail 腳本，故不引用它們；缺的欄位就省略或標 N/A，不要腦補）。**`## 待處理事項` heading
+必留**——Phase 3 的 anchor 區塊靠它定位插入。
+
+```markdown
+# {target_date} 工作日誌
+
+> 日期：{target_date}（{星期}）
+> 工作時段：{stats.earliest} → {stats.latest}
+> 涉及專案：{stats.total_projects} 個
+> 今日 AI 使用費用：${cost.daily.totalCost｜無資料時標 N/A（ccusage 未安裝）}
+
+---
+
+## 一、{專案名（白話）}
+
+### {工作主題（白話描述）}
+- {從該專案 sessions 的 topic_hints / first_user_msg 歸納「實際做了什麼」}
+- {著重成果：完成/產出/解決了什麼；未完成的講進度與下一步}
+
+## 二、{下一個專案（白話）}
+- ...
+
+---
+
+## 今日產出
+
+| # | 項目 | 狀態 |
+|---|------|------|
+| 1 | {白話描述產出物} | 完成 |
+| 2 | {白話描述} | 進行中（{卡在哪}） |
+
+---
+
+## 待處理事項
+
+- [ ] {需後續處理的事；沒有就寫「無」}
+
+---
+
+## AI 使用費用明細
+
+| 專案 | 使用的 AI 模型 | 費用 | 備註（原始 repo 名）|
+|------|---------------|------|----------------------|
+| {專案名（白話）} | {Claude Opus / Sonnet …} | ${cost} | {projects key} |
+| **合計** | | **${cost.daily.totalCost}** | |
+
+> 無 `cost` 區塊時，整段標「AI 使用費用：N/A（ccusage 未安裝）」，不要捏造數字。
+
+<!-- Part 2: 技術執行細節（供主管的 AI 助理解析，非人工閱讀區）-->
+# 技術執行細節
+
+> 統計：Claude {providers.claude} / Codex {providers.codex} / Gemini {providers.gemini} sessions｜時段 {earliest} → {latest}
+
+## 各專案 session 摘要
+### {專案名}（{session_count} sessions）
+- {逐 session：起訖時間 + topic_hints 摘要，據實記錄，不誇大}
+```
+
+### 1-3. 寫作紀律（保守原則，非常重要）
+
+- **做多少寫多少**：只記 session 裡**實際觀察到**的動作，不用「優化/完善/重構/深入研究」這種誇大詞。
+- **Part 1 白話**：主管是非技術職——不要出現 commit / push / git / MCP / API / token / cache / session /
+  plugin / hook / repo 這些詞；改用 程式 / 系統 / 網站 / 檔案 / 更新 / 修正 / 測試 / 上線 / 同步。
+- **狀態三分**：完成（有產物且驗證過）/ 進行中（動了未交付）/ 中斷（被打斷或報錯未修）。
+- **不捏造數字**：費用一律來自 `cost` 區塊；沒有就標 N/A。
 
 ---
 
@@ -248,7 +337,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_work_log_email.py \
 | 問題 | 解法 |
 |------|------|
 | Phase 0 找不到主管郵件 | 確認 Outlook MCP 連線；確認屬下「寄件備份」資料夾有 previous_workday 日報 |
-| Phase 1 日誌沒產出 | 確認 `${CLAUDE_PLUGIN_ROOT}/scripts/daily_work_log.py` 可執行（內建，無須額外裝 plugin） |
+| Phase 1 日誌 md 沒產出 | 腳本只印 JSON——確認你有依 1-2 模板把 JSON 渲染並**寫檔**到 `daily_proposal/daily_work_log_{date}.md`（最常見漏做步驟） |
 | Phase 3 找不到 `## 待處理事項` heading | fallback 到末尾並標 anomaly（已內建） |
 | Phase 4 evidence_hint 找不到對應 repo | 屬下手動指定 repo 路徑，或標 Q{N} 為「待下次回覆」 |
 | Phase 6 Outlook COM 失敗 | 屬下手動 attach md 並寄送 |
