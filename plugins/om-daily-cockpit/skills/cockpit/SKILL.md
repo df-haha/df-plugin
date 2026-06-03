@@ -80,9 +80,13 @@ om-daily-work-log 的腳本（不寫死 marketplace 名/版本，取最新版）
 ```bash
 SCC=$(ls ~/.claude/plugins/cache/*/om-daily-work-log/*/scripts/send_coaching_cards.py 2>/dev/null | sort -V | tail -1)
 python3 "$SCC" {daily_proposal_dir}/team_coaching_cards_{target_date}.md \
-  --subject-prefix "{config.directive.subject_prefix}"
+  --subject-prefix "{config.directive.subject_prefix}" \
+  --report-folder "{config.email.daily_report_folder}"
+  # 非中文團隊另加 --report-subject "<你的日報主旨模板，用 {date} 佔位>"
 ```
 預設 `--mode reply`（接屬下原日報，找不到自動轉 compose）+ 只開草稿；加 `--auto-send` 才直接寄。
+> ⚠️ **前置**：team-coaching-cards 產的卡片其 `employee.email` + `member_id` 必須來自 config.team.members
+> （compose / reply-fallback 的嚴格 email 比對需要）——orchestrator 產卡時務必帶入。
 > 若 `$SCC` 為空 → 提示主管確認 om-daily-work-log plugin（≥1.1.0）已安裝。
 
 ---

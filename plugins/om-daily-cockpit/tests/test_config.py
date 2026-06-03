@@ -143,6 +143,22 @@ def test_bad_member_email(tmp_path):
         load_config(_write_md(tmp_path, d))
 
 
+def test_alias_collides_with_other_member_primary(tmp_path):
+    """Codex F4：b 的 alias = a 的主 email → 必須拒絕（否則 member_by_email 串錯人）。"""
+    d = copy.deepcopy(BASE)
+    d["team"]["members"][1]["alias_allowlist"] = ["a.chen@acme.example"]
+    with pytest.raises(ConfigError, match="alias email 與其他成員重複"):
+        load_config(_write_md(tmp_path, d))
+
+
+def test_alias_collides_with_other_member_alias(tmp_path):
+    """Codex F4：b 的 alias = a 的 alias → 必須拒絕。"""
+    d = copy.deepcopy(BASE)
+    d["team"]["members"][1]["alias_allowlist"] = ["achen@personal.example"]  # = a-chen 既有 alias
+    with pytest.raises(ConfigError, match="重複"):
+        load_config(_write_md(tmp_path, d))
+
+
 def test_no_members(tmp_path):
     d = copy.deepcopy(BASE)
     d["team"]["members"] = []

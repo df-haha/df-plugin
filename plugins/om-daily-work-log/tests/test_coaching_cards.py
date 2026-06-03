@@ -76,6 +76,17 @@ def test_reply_ps_strict_email_no_getfirst():
     assert "not_found" in ps                       # 找不到回 not_found 供轉 compose
 
 
+def test_reply_ps_honors_custom_folder_and_subject():
+    """Codex F2：自訂 report folder / subject 須被嵌入 PS（非預設 tenant 才找得到原日報）。"""
+    ps = scc.build_reply_ps(
+        "A Chen", "a.chen@acme.example", "Daily Report 2026/06/02",
+        "Custom Folder", "<b>hi</b>", "", "$reply.Display()", "draft",
+    )
+    assert "Custom Folder" in ps
+    assert "Daily Report 2026/06/02" in ps
+    assert "每日工作報告" not in ps          # 不應殘留中文預設
+
+
 def test_reply_ps_name_fallback_when_no_email():
     """無 email 時退回 EndsWith 精確比對，仍不可用 *name* 子字串。"""
     ps = scc.build_reply_ps(

@@ -443,6 +443,10 @@ def main():
     parser.add_argument("--target-date")
     parser.add_argument("--subject-prefix", default=DEFAULT_SUBJECT_PREFIX,
                         help="compose 模式新信主旨前綴（cockpit 可由 config 注入）")
+    parser.add_argument("--report-folder", default="每日工作報告",
+                        help="reply 模式屬下原日報所在資料夾（cockpit 由 config.email.daily_report_folder 注入）")
+    parser.add_argument("--report-subject", default=None,
+                        help="reply 比對日報主旨模板（用 {date} 當日期佔位；省略＝『每日工作報告 YYYY/MM/DD』）")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -480,6 +484,12 @@ def main():
     slice_dir.mkdir(exist_ok=True)
 
     print(f"[INFO] 解析到 {len(cards)} 張卡片，寄送模式={args.mode}, auto_send={args.auto_send}")
+
+    # reply 比對用的日報主旨：有模板就把 {date} 換成 slash 日期，否則交 open_reply_draft 用預設
+    report_subject = (
+        args.report_subject.replace("{date}", target_date.replace("-", "/"))
+        if args.report_subject else None
+    )
 
     new_full_text = full_text
     for idx, card in enumerate(cards):
@@ -522,6 +532,7 @@ def main():
             result = open_reply_draft(
                 employee_name=name, employee_email=email_addr, previous_date=target_date,
                 html_body=html_body, attachment_path=slice_path, auto_send=args.auto_send,
+                report_subject_pattern=report_subject, inbox_folder=args.report_folder,
             )
             if result.get("status") == "not_found":
                 print(f"[INFO] 卡 {idx + 1} ({name}) reply 找不到原日報 → 轉 compose", file=sys.stderr)

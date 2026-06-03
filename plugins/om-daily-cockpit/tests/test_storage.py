@@ -110,6 +110,21 @@ def test_factory_sqlite(tmp_path):
     assert str(tmp_path) in str(s.db_path)
 
 
+def test_postgres_recent_ensures_table():
+    """Codex F3：PG recent() 首跑須先建表（鏡像 SQLite），否則 undefined-table。
+
+    無 DB 環境 → 用結構檢查（recent 原始碼含 _ddl 呼叫）+ 驗 _qualified 引號。
+    """
+    import inspect
+
+    from oc_core.storage import PostgresStorage
+
+    s = PostgresStorage("postgresql://x/y", schema="public")
+    assert s._qualified("intel") == '"public"."intel_items"'
+    assert "CREATE TABLE IF NOT EXISTS" in s._ddl(s._qualified("intel"))
+    assert "_ddl" in inspect.getsource(PostgresStorage.recent), "recent() 必須先 ensure table"
+
+
 def test_factory_postgres_requires_env(tmp_path, monkeypatch):
     monkeypatch.delenv("OM_COCKPIT_DATABASE_URL", raising=False)
     cfg = _cfg(tmp_path)

@@ -157,7 +157,10 @@ card_id: <UUID v4 — 用 python -c "import uuid; print(uuid.uuid4())">
 card_version: 1
 target_work_date: {date}
 employee:
+  member_id: {config.team.members[].member_id}   # 對應 cockpit config 的成員 slug（穩定）
   name: {名字}
+  email: {config.team.members[].email}            # 必填！send_coaching_cards 的 compose/reply-fallback
+                                                  # 需要它做嚴格 email 比對；缺則該卡無法寄出
   display_name: {OM-XXXXX 名字}
   employee_code: {OM-XXXXX}
 review_status: draft
@@ -220,8 +223,8 @@ questions:
 主管確認後，呼叫 send_coaching_cards.py：
 
 ```bash
-python3 ~/.claude/plugins/cache/df-haha-plugins/om-daily-work-log/1.0.0/scripts/send_coaching_cards.py \
-  daily_proposal/team_coaching_cards_{target_date}.md \
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_coaching_cards.py \
+  {daily_proposal_dir}/team_coaching_cards_{target_date}.md \
   --mode reply
 ```
 

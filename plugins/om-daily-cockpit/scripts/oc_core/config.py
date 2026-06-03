@@ -231,8 +231,14 @@ def _build_config(d: dict) -> Config:
         seen_email.add(email.lower())
         aliases = m.get("alias_allowlist") or []
         for a in aliases:
-            if not _EMAIL.match(str(a)):
-                raise ConfigError(f"member {mid} alias 非法 email：{a!r}")
+            al = str(a)
+            if not _EMAIL.match(al):
+                raise ConfigError(f"member {mid} alias 非法 email：{al!r}")
+            # alias 也納入全域 email 唯一性檢查——否則一人 alias 撞他人 email/alias 時
+            # member_by_email 會串錯人，破壞「嚴格防串錯」保證。
+            if al.lower() in seen_email:
+                raise ConfigError(f"member {mid} alias email 與其他成員重複：{al!r}")
+            seen_email.add(al.lower())
         members.append(Member(mid, m["name"], email, [str(a) for a in aliases]))
     if not members:
         raise ConfigError("至少要一個 team.member")

@@ -107,17 +107,21 @@ class PostgresStorage:
     def _qualified(self, table: str) -> str:
         return f'"{self.schema}"."{_safe_table(table)}"'
 
+    @staticmethod
+    def _ddl(q: str) -> str:
+        return (
+            f"CREATE TABLE IF NOT EXISTS {q} "
+            f"(id SERIAL PRIMARY KEY, url TEXT UNIQUE, title TEXT, summary TEXT, "
+            f"published_at TEXT, created_at TIMESTAMPTZ DEFAULT now())"
+        )
+
     def store(self, table: str, items: list[dict]) -> int:
         if not items:
             _safe_table(table)
             return 0
         q = self._qualified(table)
         with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                f"CREATE TABLE IF NOT EXISTS {q} "
-                f"(id SERIAL PRIMARY KEY, url TEXT UNIQUE, title TEXT, summary TEXT, "
-                f"published_at TEXT, created_at TIMESTAMPTZ DEFAULT now())"
-            )
+            cur.execute(self._ddl(q))
             n = 0
             for it in items:
                 cur.execute(
@@ -131,6 +135,7 @@ class PostgresStorage:
     def recent(self, table: str, since_iso: str) -> list[dict]:
         q = self._qualified(table)
         with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(self._ddl(q))  # 首跑時表未建 → 先確保存在（鏡像 SQLite，避免 undefined-table）
             cur.execute(
                 f"SELECT url, title, summary, published_at FROM {q} "
                 f"WHERE created_at >= %s ORDER BY published_at DESC",

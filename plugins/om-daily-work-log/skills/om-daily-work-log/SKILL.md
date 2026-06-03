@@ -68,7 +68,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
 ### Fallback（MCP 搜不到或不穩時）
 跑 reply-chain 腳本（只認 reply 來源，抓不到 compose 催辦信）：
 ```bash
-python3 ~/.claude/plugins/cache/df-haha-plugins/om-daily-work-log/1.0.0/scripts/handle_supervisor_questions.py \
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/handle_supervisor_questions.py \
   {target_date} --output-json
 ```
 輸出 JSON：`has_supervisor_email` / `previous_date` / `card_id` / `review_thread_id` /
@@ -84,19 +84,13 @@ python3 ~/.claude/plugins/cache/df-haha-plugins/om-daily-work-log/1.0.0/scripts/
 
 ### 重要：reuse 不 copy
 
-直接呼叫 daily-work-log plugin 安裝路徑的腳本：
+直接呼叫 daily-work-log 依賴 plugin 的腳本（marketplace 名 + 版本皆 wildcard，取最新版，不寫死）：
 
 ```bash
-python3 ~/.claude/plugins/cache/df-haha-plugins/daily-work-log/1.7.2/scripts/daily_work_log.py \
-  {target_date} \
-  --with-cost
+DWL=$(ls ~/.claude/plugins/cache/*/daily-work-log/*/scripts/daily_work_log.py 2>/dev/null | sort -V | tail -1)
+python3 "$DWL" {target_date} --with-cost
 ```
-
-> **路徑解析**：實際版本可能不是 1.7.2，用 `ls ~/.claude/plugins/cache/df-haha-plugins/daily-work-log/` 取最新版號
-> ```bash
-> DWL_VERSION=$(ls ~/.claude/plugins/cache/df-haha-plugins/daily-work-log/ | sort -V | tail -1)
-> python3 ~/.claude/plugins/cache/df-haha-plugins/daily-work-log/$DWL_VERSION/scripts/daily_work_log.py {target_date} --with-cost
-> ```
+> 若 `$DWL` 為空 → 提示確認 daily-work-log plugin（≥1.7.3）已安裝。
 
 ### Fallback
 若 daily-work-log plugin 未安裝：
@@ -228,9 +222,8 @@ python3 ~/.claude/plugins/cache/df-haha-plugins/daily-work-log/1.7.2/scripts/dai
 ### 重要：reuse 不 copy
 
 ```bash
-DWL_VERSION=$(ls ~/.claude/plugins/cache/df-haha-plugins/daily-work-log/ | sort -V | tail -1)
-python3 ~/.claude/plugins/cache/df-haha-plugins/daily-work-log/$DWL_VERSION/scripts/send_work_log_email.py \
-  daily_proposal/daily_work_log_{target_date}.md
+SWE=$(ls ~/.claude/plugins/cache/*/daily-work-log/*/scripts/send_work_log_email.py 2>/dev/null | sort -V | tail -1)
+python3 "$SWE" daily_proposal/daily_work_log_{target_date}.md
 ```
 
 主管會在「每日工作報告」資料夾收到屬下日報。
