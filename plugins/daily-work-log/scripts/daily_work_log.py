@@ -250,6 +250,20 @@ def scan_sessions(target_date: datetime) -> dict:
     return result
 
 
+def _detect_windows_user() -> str:
+    """偵測當前 Windows 使用者名（WSL）。失敗回空字串 → 跳過 Windows codex（不掃任何 profile）。"""
+    try:
+        out = subprocess.run(
+            ["cmd.exe", "/c", "echo %USERNAME%"],
+            capture_output=True, text=True, timeout=10,
+        )
+        name = out.stdout.strip()
+        # cmd 未展開時會回字面 "%USERNAME%"；含 % 視為失敗
+        return name if name and "%" not in name else ""
+    except Exception:
+        return ""
+
+
 def scan_codex_sessions(target_date: datetime) -> list:
     """掃描 Codex CLI (WSL + Windows Desktop) 的 session JSONL 檔案。"""
     day_start = target_date
@@ -264,12 +278,12 @@ def scan_codex_sessions(target_date: datetime) -> list:
     # 否則自動偵測 /mnt/c/Users/*/.codex —— 零 hard-code、零設定即可運作。
     win_user = os.environ.get("OM_WINDOWS_USER", "").strip()
     users_root = Path("/mnt/c/Users")
-    if win_user:
-        win_user_dirs = [users_root / win_user]
-    elif users_root.exists():
-        win_user_dirs = [p for p in users_root.glob("*") if (p / ".codex").is_dir()]
-    else:
-        win_user_dirs = []
+    # 只取**當前**使用者的 profile（env 指定 > 偵測），**絕不** glob 全部 profile——
+    # 否則多使用者機台會把別人的 Codex session 算進你的日報（隱私/準確性 regression）。
+    if not win_user:
+        win_user = _detect_windows_user()
+    candidate = users_root / win_user if win_user else None
+    win_user_dirs = [candidate] if candidate and (candidate / ".codex").is_dir() else []
     for ud in win_user_dirs:
         search_dirs.append(ud / ".codex" / "sessions" / date_parts[0] / date_parts[1] / date_parts[2])
 

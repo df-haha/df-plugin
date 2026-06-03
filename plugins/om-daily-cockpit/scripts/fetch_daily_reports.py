@@ -124,7 +124,16 @@ def main() -> int:
         return 1
 
     base_dir = Path(args.base_dir).resolve() if args.base_dir else Path.cwd()
-    target_date = args.date or get_last_workday().isoformat()
+    if args.date:
+        target_date = args.date
+    else:
+        # 用 config 的 timezone 算上一個工作日（非台灣時區 tenant 跨日界才正確）
+        from zoneinfo import ZoneInfo
+        try:
+            tz = ZoneInfo(cfg.timezone)
+        except Exception:
+            tz = None
+        target_date = get_last_workday(tz=tz).isoformat()
     output = run(cfg, target_date, base_dir, dry_run=args.dry_run)
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0

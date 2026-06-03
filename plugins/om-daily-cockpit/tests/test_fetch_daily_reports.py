@@ -93,3 +93,16 @@ def test_subject_pattern_language_neutral(tmp_path):
     cfg = _cfg(tmp_path)
     assert "每日工作報告" not in cfg.email.report_subject_pattern
     assert r"(\d{4})" in cfg.email.report_subject_pattern
+
+
+def test_last_workday_accepts_timezone():
+    """Codex R4-F2：get_last_workday 接受 tz 參數（非台灣時區 tenant 才算得對）。"""
+    from datetime import date
+    from zoneinfo import ZoneInfo
+
+    import last_workday
+
+    # ref-based 計算：2026-06-03(三) → 上一工作日 2026-06-02(二)；tz 參數須存在且不報錯
+    assert last_workday.get_last_workday(
+        ref=date(2026, 6, 3), tz=ZoneInfo("America/New_York")
+    ) == date(2026, 6, 2)

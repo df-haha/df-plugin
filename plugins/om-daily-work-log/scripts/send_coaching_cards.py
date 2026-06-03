@@ -366,12 +366,14 @@ def build_compose_ps(
     attach_line: str,
     action_line: str,
     final_status: str,
+    outlook_account: str = "",
 ) -> str:
     """純函式：組 compose（開新信）PS 腳本。directive marker 已在 html_body 內。
 
-    email / subject 經 _psq 跳脫，避免單引號（O'Connor / Today's）破壞 PS 語法。
+    email / subject / account 經 _psq 跳脫。有 outlook_account 時設 SendUsingAccount，
+    避免多帳號 setup 從錯誤信箱寄出（尤其 --auto-send）。
     """
-    email_q, subject_q = _psq(employee_email), _psq(subject)
+    email_q, subject_q, acct_q = _psq(employee_email), _psq(subject), _psq(outlook_account)
     return f"""
 $ErrorActionPreference = 'Stop'
 try {{
@@ -387,6 +389,12 @@ try {{
     $mail.To = '{email_q}'
     $mail.Subject = '{subject_q}'
     $mail.HTMLBody = $body
+    $account = '{acct_q}'
+    if ($account -ne '') {{
+        foreach ($acc in $outlook.Session.Accounts) {{
+            if ([string]$acc.SmtpAddress -ieq $account) {{ $mail.SendUsingAccount = $acc; break }}
+        }}
+    }}
     {attach_line}
     {action_line}
 
@@ -449,14 +457,21 @@ def open_compose_draft(
     html_body: str,
     attachment_path: Path | None,
     auto_send: bool = False,
+    outlook_account: str = "",
 ) -> dict:
-    """開新信給屬下（reply 找不到原日報時使用）。directive marker 已嵌在 html_body。"""
+    """開新信給屬下（reply 找不到原日報時使用）。directive marker 已嵌在 html_body。
+
+    有 outlook_account 時設 SendUsingAccount，多帳號 setup 不會從錯誤信箱寄出。
+    """
     if not employee_email:
         return {"status": "failed", "error": "compose 需要屬下 email（card.employee.email 缺）"}
     attach_line = _attach_ps_line("mail", attachment_path)
     action_line = "$mail.Send()" if auto_send else "$mail.Display()"
     final_status = "sent" if auto_send else "draft"
-    ps = build_compose_ps(employee_email, subject, html_body, attach_line, action_line, final_status)
+    ps = build_compose_ps(
+        employee_email, subject, html_body, attach_line, action_line, final_status,
+        outlook_account=outlook_account,
+    )
     return _run_ps(ps)
 
 
@@ -574,7 +589,8 @@ def main():
         # 路由：compose 直接開新信；reply 找不到原日報則 fallback compose（不串錯人）
         if args.mode == "compose":
             html_body = render_card_html(card, card["body_md"], target_date, source="compose")
-            result = open_compose_draft(email_addr, compose_subject, html_body, slice_path, args.auto_send)
+            result = open_compose_draft(email_addr, compose_subject, html_body, slice_path,
+                                        args.auto_send, outlook_account=args.report_account)
         else:
             html_body = render_card_html(card, card["body_md"], target_date, source="reply")
             result = open_reply_draft(
@@ -586,7 +602,8 @@ def main():
             if result.get("status") == "not_found":
                 print(f"[INFO] 卡 {idx + 1} ({name}) reply 找不到原日報 → 轉 compose", file=sys.stderr)
                 html_body = render_card_html(card, card["body_md"], target_date, source="compose")
-                result = open_compose_draft(email_addr, compose_subject, html_body, slice_path, args.auto_send)
+                result = open_compose_draft(email_addr, compose_subject, html_body, slice_path,
+                                            args.auto_send, outlook_account=args.report_account)
 
         if result.get("status") in ("sent", "draft"):
             print(

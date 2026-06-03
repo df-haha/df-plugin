@@ -163,6 +163,21 @@ def test_compose_ps_creates_new_mail():
     assert "$mail.Subject = '【每日追蹤】 A Chen 2026-06-02'" in ps
 
 
+def test_compose_ps_sets_send_using_account():
+    """Codex R4-F3：有 account → 設 SendUsingAccount（多帳號從正確信箱寄）。"""
+    ps = scc.build_compose_ps(
+        "a@x.example", "S", "h", "", "$mail.Send()", "sent",
+        outlook_account="boss@acme.example",
+    )
+    assert "SendUsingAccount" in ps
+    assert "boss@acme.example" in ps
+
+
+def test_compose_ps_account_guarded_when_empty():
+    ps = scc.build_compose_ps("a@x.example", "S", "h", "", "$mail.Display()", "draft")
+    assert "$account = ''" in ps   # 空 account → if guard 不誤設
+
+
 def test_open_compose_requires_email():
     """缺 email 不可開新信（防寄到空地址）。"""
     res = scc.open_compose_draft("", "subj", "<b>x</b>", None, False)

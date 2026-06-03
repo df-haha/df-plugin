@@ -40,13 +40,14 @@ def _load_holidays() -> set[date]:
     return {date.fromisoformat(d) for d in data.get("holidays", [])}
 
 
-def get_last_workday(ref: date | None = None) -> date:
+def get_last_workday(ref: date | None = None, tz=None) -> date:
     """Return the most recent workday strictly before ``ref``.
 
-    ``ref`` defaults to today in Taipei time.
+    ``ref`` defaults to today in ``tz`` (a tzinfo; falls back to Taipei when None).
+    傳入 config 的 timezone 後，非台灣時區 tenant 在跨日界/週末也會算出正確日期。
     """
     if ref is None:
-        ref = datetime.now(TAIPEI_TZ).date()
+        ref = datetime.now(tz or TAIPEI_TZ).date()
     holidays = _load_holidays()
     candidate = ref - timedelta(days=1)
     while candidate.weekday() >= 5 or candidate in holidays:
