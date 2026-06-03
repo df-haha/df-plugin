@@ -113,6 +113,18 @@ def previous_workday(date_str: str) -> str:
     return (d - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
+def resolve_report_subject(template: str | None, iso_date: str) -> str | None:
+    """把 reply 主旨模板的日期佔位換掉：{date}=ISO 原樣、{date_slash}=YYYY/MM/DD。
+
+    並存兩種佔位符讓 ISO 主旨與 slash 主旨團隊都能精確比對（Outlook Restrict 是 exact match）。
+    """
+    if not template:
+        return None
+    return (
+        template.replace("{date_slash}", iso_date.replace("-", "/")).replace("{date}", iso_date)
+    )
+
+
 def render_card_html(card: dict, body_md: str, target_date: str, source: str = "reply") -> str:
     """把單張卡的 markdown body 轉 HTML，並嵌入 directive marker。
 
@@ -232,10 +244,15 @@ def to_windows_path(posix_path: Path) -> str:
         return abs_path
 
 
+def _psq(value: str) -> str:
+    """PowerShell 單引號字串內值的跳脫（' → ''）。防 O'Connor / Today's 之類值破壞語法或注入。"""
+    return str(value).replace("'", "''")
+
+
 def _attach_ps_line(var: str, attachment_path: Path | None) -> str:
     """組附件 PS 行（找不到附件回空字串）。"""
     if attachment_path is not None and attachment_path.exists():
-        ps_escaped = to_windows_path(attachment_path).replace("'", "''")
+        ps_escaped = _psq(to_windows_path(attachment_path))
         return f"${var}.Attachments.Add('{ps_escaped}') | Out-Null"
     return ""
 
@@ -258,14 +275,18 @@ def build_reply_ps(
     避免多屬下同主旨串錯人）；無 email 時退回 SenderName.EndsWith。找不到回 status='not_found'。
     多帳號：有 outlook_account 時導覽該帳號 store 的 inbox（鏡像 fetch_daily_reports.ps1），
     否則退回 GetDefaultFolder(6)；避免在非預設帳號 setup 永遠找不到原日報而退 compose。
+    Exchange 內部信 SenderEmailAddress 是 legacyDN（/O=...），會多解一次 PrimarySmtpAddress 再比。
+    所有內插值經 _psq 跳脫，避免單引號破壞 PS 語法。
     """
+    acct, iname, folder = _psq(outlook_account), _psq(inbox_name), _psq(inbox_folder)
+    subj, email_q, name_q = _psq(report_subject_pattern), _psq(employee_email), _psq(employee_name)
     return f"""
 $ErrorActionPreference = 'Stop'
 try {{
     $outlook = New-Object -ComObject Outlook.Application
     $namespace = $outlook.GetNamespace('MAPI')
-    $account = '{outlook_account}'
-    $inboxName = '{inbox_name}'
+    $account = '{acct}'
+    $inboxName = '{iname}'
     $inbox = $null
     if ($account -ne '') {{
         try {{
@@ -276,22 +297,28 @@ try {{
     if ($inbox -eq $null) {{ $inbox = $namespace.GetDefaultFolder(6) }}  # fallback：預設帳號 inbox
     $targetFolder = $null
     foreach ($f in $inbox.Folders) {{
-        if ($f.Name -eq '{inbox_folder}') {{ $targetFolder = $f; break }}
+        if ($f.Name -eq '{folder}') {{ $targetFolder = $f; break }}
     }}
     if ($targetFolder -eq $null) {{ $targetFolder = $inbox }}
 
-    $filter = "[Subject] = '{report_subject_pattern}'"
+    $filter = "[Subject] = '{subj}'"
     $items = $targetFolder.Items.Restrict($filter)
     $items.Sort('[ReceivedTime]', $true)
 
-    $email = '{employee_email}'
-    $name = '{employee_name}'
+    $email = '{email_q}'
+    $name = '{name_q}'
     $matchedMail = $null
-    # 1) 嚴格 email 比對（首選）
+    # 1) 嚴格 email 比對（首選）。Exchange 內部信會多解 PrimarySmtpAddress 再比。
     if ($email -ne '') {{
         foreach ($item in $items) {{
             try {{ $addr = [string]$item.SenderEmailAddress }} catch {{ $addr = '' }}
             if ($addr -ieq $email) {{ $matchedMail = $item; break }}
+            try {{
+                if ([string]$item.SenderEmailType -eq 'EX') {{
+                    $smtp = [string]$item.Sender.GetExchangeUser().PrimarySmtpAddress
+                    if ($smtp -ieq $email) {{ $matchedMail = $item; break }}
+                }}
+            }} catch {{}}
         }}
     }} else {{
         # 2) 無 email 才退回精確 name 後綴比對（不用 *name* 子字串，避免串錯）
@@ -304,7 +331,7 @@ try {{
     # 注意：找不到 sender 時**不**取「第一封 subject 對的信」—— 寧可 not_found 轉 compose，不賭一把串錯人。
 
     if ($matchedMail -eq $null) {{
-        Write-Output (ConvertTo-Json @{{ status='not_found'; error='找不到原日報（嚴格比對 email={employee_email}）' }} -Compress)
+        Write-Output (ConvertTo-Json @{{ status='not_found'; error='找不到原日報（嚴格比對 email）' }} -Compress)
         exit 0
     }}
 
@@ -340,7 +367,11 @@ def build_compose_ps(
     action_line: str,
     final_status: str,
 ) -> str:
-    """純函式：組 compose（開新信）PS 腳本。directive marker 已在 html_body 內。"""
+    """純函式：組 compose（開新信）PS 腳本。directive marker 已在 html_body 內。
+
+    email / subject 經 _psq 跳脫，避免單引號（O'Connor / Today's）破壞 PS 語法。
+    """
+    email_q, subject_q = _psq(employee_email), _psq(subject)
     return f"""
 $ErrorActionPreference = 'Stop'
 try {{
@@ -353,8 +384,8 @@ try {{
     $body = [System.IO.File]::ReadAllText("C:\\temp\\coaching_card.html", [System.Text.Encoding]::UTF8)
 
     $mail = $outlook.CreateItem(0)  # olMailItem
-    $mail.To = '{employee_email}'
-    $mail.Subject = '{subject}'
+    $mail.To = '{email_q}'
+    $mail.Subject = '{subject_q}'
     $mail.HTMLBody = $body
     {attach_line}
     {action_line}
@@ -462,7 +493,7 @@ def main():
     parser.add_argument("--report-folder", default="每日工作報告",
                         help="reply 模式屬下原日報所在資料夾（cockpit 由 config.email.daily_report_folder 注入）")
     parser.add_argument("--report-subject", default=None,
-                        help="reply 比對日報主旨模板（用 {date} 當日期佔位；省略＝『每日工作報告 YYYY/MM/DD』）")
+                        help="reply 比對日報主旨模板（{date}=ISO、{date_slash}=YYYY/MM/DD；省略＝『每日工作報告 {date_slash}』）")
     parser.add_argument("--report-account", default="",
                         help="reply 找原日報的 Outlook 帳號（cockpit 由 config.email.account 注入；空＝預設帳號）")
     parser.add_argument("--report-inbox", default="Inbox",
@@ -505,11 +536,8 @@ def main():
 
     print(f"[INFO] 解析到 {len(cards)} 張卡片，寄送模式={args.mode}, auto_send={args.auto_send}")
 
-    # reply 比對用的日報主旨：有模板就把 {date} 換成 slash 日期，否則交 open_reply_draft 用預設
-    report_subject = (
-        args.report_subject.replace("{date}", target_date.replace("-", "/"))
-        if args.report_subject else None
-    )
+    # reply 比對用的日報主旨：{date}=ISO、{date_slash}=YYYY/MM/DD（見 resolve_report_subject）
+    report_subject = resolve_report_subject(args.report_subject, target_date)
 
     new_full_text = full_text
     for idx, card in enumerate(cards):

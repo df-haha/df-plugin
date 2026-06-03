@@ -117,6 +117,42 @@ def test_reply_ps_name_fallback_when_no_email():
 
 # --- build_compose_ps ---------------------------------------------------
 
+def test_reply_ps_escapes_single_quotes():
+    """Codex R3-F3：含單引號的值不破壞 PS 語法（' → '')。"""
+    ps = scc.build_reply_ps(
+        "O'Connor", "a@x.example", "Sub's", "Fol'der", "h", "", "$reply.Display()", "draft",
+        outlook_account="boss@acme.example", inbox_name="收件匣",
+    )
+    assert "O''Connor" in ps
+    assert "Sub''s" in ps
+    assert "Fol''der" in ps
+
+
+def test_reply_ps_resolves_exchange_smtp():
+    """Codex R3-F1：Exchange legacyDN → 多解 PrimarySmtpAddress 再比。"""
+    ps = scc.build_reply_ps(
+        "A", "a@x.example", "S", "F", "h", "", "$reply.Display()", "draft",
+    )
+    assert "GetExchangeUser().PrimarySmtpAddress" in ps
+    assert "SenderEmailType" in ps
+
+
+def test_compose_ps_escapes_single_quotes():
+    """Codex R3-F3：compose 的 email/subject 含單引號也不破壞。"""
+    ps = scc.build_compose_ps(
+        "o'brien@x.example", "Today's Follow-up", "h", "", "$mail.Display()", "draft",
+    )
+    assert "o''brien@x.example" in ps
+    assert "Today''s Follow-up" in ps
+
+
+def test_resolve_report_subject_placeholders():
+    """Codex R3-F2：{date}=ISO、{date_slash}=slash，兩種日期格式都精確。"""
+    assert scc.resolve_report_subject("Daily Report {date}", "2026-06-02") == "Daily Report 2026-06-02"
+    assert scc.resolve_report_subject("每日工作報告 {date_slash}", "2026-06-02") == "每日工作報告 2026/06/02"
+    assert scc.resolve_report_subject(None, "2026-06-02") is None
+
+
 def test_compose_ps_creates_new_mail():
     ps = scc.build_compose_ps(
         "a.chen@acme.example", "【每日追蹤】 A Chen 2026-06-02",
