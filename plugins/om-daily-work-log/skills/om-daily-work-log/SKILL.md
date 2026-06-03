@@ -7,7 +7,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
 # OM 營運部日誌 + 主管疑問回覆閉環
 
 屬下端 skill，負責：
-1. 沿用既有 daily-work-log plugin 的日誌產出功能（reuse 不 copy）
+1. 內建日誌產出功能（vendored 自 daily-work-log，員工只裝這一個 plugin 即可）
 2. **新增**：偵測主管 reply 的「澄清問題卡」→ 引導屬下回覆 → 寫進日報的 anchor-bound 區塊
 
 ---
@@ -29,7 +29,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
 | 4 | Phase 3：插入「主管疑問回覆」區塊 |
 | 5 | Phase 4：引導屬下用 CC 查證並回答 |
 | 6 | Phase 5：屬下 review 日報整體 |
-| 7 | Phase 6：呼叫既有 send_work_log_email.py 寄出 |
+| 7 | Phase 6：內建 send_work_log_email.py 寄出 |
 
 3. 每 Phase 開始 / 結束都 TaskUpdate
 
@@ -87,22 +87,15 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/handle_supervisor_questions.py \
 
 ---
 
-## Phase 1：呼叫既有 daily-work-log 日誌產出
+## Phase 1：產出日誌（本 plugin 內建）
 
-### 重要：reuse 不 copy
-
-直接呼叫 daily-work-log 依賴 plugin 的腳本（marketplace 名 + 版本皆 wildcard，取最新版，不寫死）：
+日誌功能已**內建**於本 plugin（vendored 自 daily-work-log，員工只需裝這一個 plugin）：
 
 ```bash
-DWL=$(ls ~/.claude/plugins/cache/*/daily-work-log/*/scripts/daily_work_log.py 2>/dev/null | sort -V | tail -1)
-python3 "$DWL" {target_date} --with-cost
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/daily_work_log.py {target_date} --with-cost
 ```
-> 若 `$DWL` 為空 → 提示確認 daily-work-log plugin（≥1.7.3）已安裝。
-
-### Fallback
-若 daily-work-log plugin 未安裝：
-- 顯示錯誤：「請先安裝 daily-work-log plugin：`/plugin install daily-work-log@df-haha-plugins`」
-- 退出 skill
+> 掃描員工自己的 Claude Code / Codex session 紀錄，彙整當日工作 + AI 用量，寫到
+> `daily_proposal/daily_work_log_{target_date}.md`。無須額外安裝 daily-work-log plugin。
 
 ---
 
@@ -224,14 +217,14 @@ python3 "$DWL" {target_date} --with-cost
 
 ---
 
-## Phase 6：寄出（reuse 既有 send_work_log_email.py）
-
-### 重要：reuse 不 copy
+## Phase 6：寄出（本 plugin 內建 send_work_log_email.py）
 
 ```bash
-SWE=$(ls ~/.claude/plugins/cache/*/daily-work-log/*/scripts/send_work_log_email.py 2>/dev/null | sort -V | tail -1)
-python3 "$SWE" daily_proposal/daily_work_log_{target_date}.md
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_work_log_email.py \
+  daily_proposal/daily_work_log_{target_date}.md --to {主管 email}
 ```
+> 收件人（主管 email）用 `--to` 指定，或事先設在 `~/.claude/daily-work-log/config.json` 的 `outlook_email`。
+> 寄信功能已內建，無須額外安裝 daily-work-log plugin。
 
 主管會在「每日工作報告」資料夾收到屬下日報。
 - subject: `每日工作報告 {target_date 用 / 分隔}`
@@ -255,7 +248,7 @@ python3 "$SWE" daily_proposal/daily_work_log_{target_date}.md
 | 問題 | 解法 |
 |------|------|
 | Phase 0 找不到主管郵件 | 確認 Outlook MCP 連線；確認屬下「寄件備份」資料夾有 previous_workday 日報 |
-| Phase 1 daily-work-log plugin 未安裝 | `/plugin install daily-work-log@df-haha-plugins` |
+| Phase 1 日誌沒產出 | 確認 `${CLAUDE_PLUGIN_ROOT}/scripts/daily_work_log.py` 可執行（內建，無須額外裝 plugin） |
 | Phase 3 找不到 `## 待處理事項` heading | fallback 到末尾並標 anomaly（已內建） |
 | Phase 4 evidence_hint 找不到對應 repo | 屬下手動指定 repo 路徑，或標 Q{N} 為「待下次回覆」 |
 | Phase 6 Outlook COM 失敗 | 屬下手動 attach md 並寄送 |

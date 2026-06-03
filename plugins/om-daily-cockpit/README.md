@@ -17,7 +17,7 @@
 
 ## 安裝
 
-1. 安裝相依 plugin：`om-daily-work-log`（≥1.1.0）+ `daily-work-log`（≥1.7.3）。
+1. 安裝相依 plugin：`om-daily-work-log`（≥1.2.0，已自給自足，內建日誌/寄信功能）。
 2. 安裝核心 Python 相依：`pip install PyYAML`。
 3. 跑 onboarding：對 Claude 說「cockpit setup」（或執行 `cockpit-onboarding` skill），它會引導你：
    填 config → 設 secrets env → 接 Outlook MCP → 驗證 → 跑 `/hi --quick`。

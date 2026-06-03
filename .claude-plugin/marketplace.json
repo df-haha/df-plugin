@@ -72,9 +72,8 @@
       "category": "productivity"
     },
     {
-      "name": "om-daily-work-log",
-      "description": "營運主管 coaching loop — 主管產澄清問題卡，compose/reply 兩路寄出（directive marker 契約，嚴格 email 比對防串錯人）；屬下日誌 directive-first 偵測主管催辦信並用 CC 回覆，HTML anchor 標記讓主管 /hi 解析閉環。需配合 daily-work-log plugin（reuse 其腳本）",
-      "version": "1.1.0",
+      "description": "營運主管 coaching loop（員工只裝這一個，自給自足）— 主管產澄清問題卡，compose/reply 兩路寄出（directive marker 契約，嚴格 email 比對防串錯人）；屬下日誌 directive-first 偵測主管催辦信並用 CC 回覆，HTML anchor 標記讓主管 /hi 解析閉環。日誌與寄信 vendored 自 daily-work-log，無須額外安裝",
+      "version": "1.2.0",
       "author": { "name": "df-haha" },
       "source": "./plugins/om-daily-work-log",
       "category": "productivity"

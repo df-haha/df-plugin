@@ -43,7 +43,7 @@ config 的 `services.*_env` 只是「環境變數名稱」。引導主管把真�
 ## Phase 3：接 Outlook MCP + 相依 plugin
 
 1. 確認 `outlook-local` MCP 可用（`ToolSearch("select:mcp__outlook-local__list_recent_emails_tool")` → 試讀近 1 日信）。
-2. 確認相依 plugin 已安裝：`om-daily-work-log`（≥1.1.0）+ `daily-work-log`（≥1.7.3）。
+2. 確認相依 plugin 已安裝：`om-daily-work-log`（≥1.2.0，自給自足，員工端只需這一個）。
 3. 安裝 Python 相依：核心只需 `pip install PyYAML`；啟用 postgres storage / 情報模組再裝 `psycopg2-binary requests feedparser`。
 
 ## Phase 4：驗收（跑核心）
