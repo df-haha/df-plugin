@@ -49,6 +49,7 @@ Coolify（自架，於自架機器拉 git）
 11. **DATABASE_URL 是拓撲決策、非預設值**：compose 內建 postgres → inline `postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}`；外部 / RDS / managed DB → **必用** `DATABASE_URL: ${DATABASE_URL}` 整串注入。不寫「預設用哪個」，依 DB 拓撲選（env checklist 同步見 `references/env-management.md`）。
 12. **Adminer 安全底線**：Adminer 無內建存取控制，**正式環境未加 Basic Auth / IP allowlist 就不要生成 adminer**；image 綁版（禁 `adminer:latest`）；**SERVICE_URL 不得貼進文件 / README / 聊天工具**（等同 DB 後門外洩）。
 13. **`NODE_ENV=production` 禁放 compose `environment:`**：Coolify 會把 compose 的 `environment:` **同時**展開成 build-time `--build-arg`，`NODE_ENV=production` 注入 builder stage 會讓 `npm ci` 跳過 devDependencies，導致 `tsc` / `vite` / `next` 等 build 工具找不到（exit 127）。`NODE_ENV=production` 應**只在 Dockerfile runtime stage 用 `ENV` 設定**，不走 compose env 注入。若 builder stage 確需覆寫，加 `ENV NODE_ENV=development` 在 `RUN npm ci` 之前（見 `references/dockerfile-frontend.md` + `references/env-management.md`）。
+14. **Multi-service compose 禁同 `mount_path` 的 bind mount**：Coolify `file_storages` 表對 `(application_id, mount_path)` 有 unique-like 限制——同 app 內若兩 service 想各自 bind mount 到同一容器路徑（典型：兩個 postgres 都 mount `./migrations/...:/docker-entrypoint-initdb.d`），**後加的會被靜默 drop**（compose YAML 寫了、Coolify storage list 看不到、容器目錄是空的）。改 **build-time `COPY` 進該 service 自家的 Dockerfile** 繞過（見 `references/compose.md` §「Coolify storage 機制的 3 個非顯而易見行為」quirk 3）。
 
 ## 兩種對外曝露機制（可並存）
 
@@ -65,7 +66,7 @@ Coolify（自架，於自架機器拉 git）
 
 | 任務 | 讀這份 |
 |------|--------|
-| 首次 DB 搬遷（外部 PaaS → compose 內建 DB，跨版本、不開 port） | `references/db-migration.md` |
+| 首次 DB 搬遷（外部 PaaS → compose 內建 DB，跨版本、不開 port）／ 後續重建 DB volume 跑 fresh initdb（volume rename pattern） | `references/db-migration.md` |
 | 寫 / 改 `docker-compose.yml`（含最小範本、dev 變體、檔案儲存規範） | `references/compose.md` |
 | 要 Coolify 自動分配的對外 URL（SERVICE_URL / SERVICE_FQDN） | `references/service-url.md` |
 | 加 Adminer / Seq、Seq CLEF logging、雙向 Lint 一致性檢查 | `references/optional-services.md` |

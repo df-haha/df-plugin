@@ -32,6 +32,28 @@ Coolify 部署時會把 `docker-compose.yml` 裡**每個 service 的 `environmen
 - 若因其他原因必須設，則**在 Dockerfile 的 builder stage 最前面加 `ENV NODE_ENV=development`** 明確覆寫，runtime stage 才改回 `ENV NODE_ENV=production`。
 - `NODE_ENV=production` 應**只在 Dockerfile 的 runtime stage 設定**，由 image 本身保證，不依賴 compose env 注入。
 
+### 陷阱：compose `environment:` 禁用 `${VAR:?}` 必填語法
+
+Docker Compose v2 支援 `${VAR:?error}` 語法（VAR 未設或為空時 parse fail），這在純 docker compose 環境是合理的 fail-fast，但 Coolify 環境**禁用**。理由：
+
+1. **Coolify 的 env 預處理層複雜**：Coolify 把 UI 設定的 env 同時當 `--build-arg` 與 runtime env 注入（見上方 NODE_ENV 雙注入陷阱），再加自家 magic env (`SERVICE_URL_*` / `SERVICE_PASSWORD_*` / `SERVICE_FQDN_*` / `COMPOSE_PROJECT_NAME`) 預處理。`${VAR:?}` 在這條鏈中**行為穩定性風險高**，跟本地 `docker compose config` 不一定一致；不同 Coolify 版本 / compose buildpack vs dockerfile-only 行為也可能不同。
+2. **失敗訊息不友善**：即使 `${VAR:?}` 在 Coolify 內順利擋下，Coolify deployment log 顯示的是通用 docker compose error，常被通用「Deployment failed: command execution failed」訊息蓋掉，反而拖長診斷時間。
+3. **有更精準的 fail-fast 點**：機密 / 必填 env 的守護應放在**應用層**（Pydantic Settings / Zod schema）或**初始化腳本**（bash `: "${VAR:?error}"`，bash 內 `:?` 是 POSIX 標準，可信賴），錯誤訊息精準、看得到 stack trace、可加 fallback 與 hint。
+
+**規則 + 替代守護方案**：
+
+- compose `environment:` 區一律寫 `${VAR}`（值若 undefined 自動展為空字串，不阻擋 deploy）
+- fail-fast 移到消費端：
+
+| 場合 | 替代寫法 | 在哪裡 fail |
+|------|----------|------------|
+| Python app 必填 env | Pydantic `Settings(...)` 缺欄即 `ValidationError`（搭配本檔下方 "Settings fail-fast"） | 應用啟動時 |
+| DB init script | 腳本開頭 `: "${VAR:?VAR is required}"`（bash `:?` 標準支援、可信賴） | initdb 階段 |
+| 前端 build 必填 arg | Dockerfile `RUN test -n "${VAR}" \|\| (echo "VAR required" && exit 1)` | build 階段 |
+| 容器 entrypoint 必填 | `entrypoint.sh` 開頭 `[ -z "$VAR" ] && exit 1` | 容器啟動瞬間 |
+
+> 這條規則也是 `references/compose.md` 「compose 撰寫規則」`${VAR}` vs `${VAR:?error}` 條目背後的完整理由——compose.md 只記規則本身，本檔記為什麼。
+
 ## env 來源優先序
 
 ```

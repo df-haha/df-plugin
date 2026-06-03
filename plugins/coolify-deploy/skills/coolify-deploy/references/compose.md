@@ -248,6 +248,74 @@ volumes:
 
 ---
 
+## Coolify storage 機制的 3 個非顯而易見行為
+
+Coolify 用內部 `file_storages` 資料表追蹤 compose volumes（不是即時讀 compose 檔），衍生出 3 個會踩雷的行為。Multi-service compose（同一 application 內多顆 DB / 多服務共用初始化目錄）幾乎一定遇到。
+
+### Quirk 1：UI 對 compose-defined volume 是唯讀
+
+Storages 頁面對 compose `volumes:` 區定義的 named volume **沒有刪除按鈕**（UI 有黃色橫幅明示 mounts are read-only）。要刪 volume 只能：
+
+- SSH 到 Coolify host 跑 `docker volume rm <name>`
+- Coolify CLI `coolify app storage delete <app_uuid> <storage_uuid>`——⚠️ **只刪 Coolify DB metadata，不會** touch host 上的真實 docker volume
+
+**部署時的影響**：需要重建 DB volume（例如 init scripts 改了要重跑 initdb）時 UI 沒辦法直接做。優先用 **volume rename pattern**（見 `db-migration.md`「後續：重建 DB volume 跑 fresh initdb」），而非 SSH `docker volume rm`——前者宣告式、reversible，後者命令打錯就刪錯資料。
+
+### Quirk 2：Storage table 用 underscore，但實際 docker volume 看 `name:` override 用 hyphen
+
+`coolify app storage list` 顯示的 `name` 欄是 docker compose **預設**命名 `<project>_<volumeKey>`（**底線**）。但 compose 在 `volumes:` 區用 `name:` override（本 skill 規定的 `${COMPOSE_PROJECT_NAME}-*` 寫法）時，host 上真實的 docker volume 用 override 後的名字（**連字號**）。
+
+實例：
+- Coolify storage table 顯示：`my-app_postgres-data`（底線）
+- Host 上實際的 docker volume：`my-app-postgres-data`（連字號）
+
+**部署時的影響**：
+- `coolify app storage delete` 不能信任會清掉 host 上的真實 volume——它操作的是底線 metadata 名，跟連字號實體不對應
+- 要判斷真實 docker volume 名，**本地跑 `COMPOSE_PROJECT_NAME=<id> docker compose config`** 看 `volumes:` 區的 `name` 解析結果
+
+### Quirk 3：同 `mount_path` 的 bind mount 會被靜默 drop（SKILL.md rule 14 來源）
+
+`file_storages` 表對 `(application_id, mount_path)` 有 unique-like 限制（觀察行為，非官方 schema 文件證實）。同 application 內若想加第二個 bind mount 到同一個容器路徑，**後加的會被靜默 drop**——compose YAML 寫了、Coolify storage list 看不到、容器內目錄是空的。
+
+典型踩雷（multi-postgres compose）：
+- `auth-db` 已用 `./migrations/auth:/docker-entrypoint-initdb.d` 占住 `/docker-entrypoint-initdb.d`
+- `backup-db` 想再加 `./migrations/backup:/docker-entrypoint-initdb.d` → 被靜默 drop
+- backup-db 容器啟動時 `/docker-entrypoint-initdb.d/` 是空的 → init script 沒跑 → 角色 / schema 從未建 → app 端 `password authentication failed`
+
+**繞道方案**：第二個 service 的初始化腳本改 **build-time `COPY` 進該 service 自家的 Dockerfile**，完全繞過 Coolify storage 機制：
+
+```dockerfile
+# backup-db/Dockerfile
+ARG POSTGRES_VERSION=16
+FROM postgres:${POSTGRES_VERSION}
+# 整個目錄 COPY（不用 *.sh / *.sql glob）——避免目錄只含其中一種副檔名時 Docker
+# 因 unmatched glob 報 build error；同時無條件處理「init 目錄混雜 .sh + .sql」場景。
+COPY migrations/backup/ /docker-entrypoint-initdb.d/
+# postgres entrypoint 對 .sh 要求可執行；用 find 在 image 內補 +x，不依賴 host 端權限。
+RUN find /docker-entrypoint-initdb.d -name '*.sh' -exec chmod +x {} +
+```
+
+```yaml
+# docker-compose.yml backup-db 段
+backup-db:
+  build:
+    context: .
+    dockerfile: ./backup-db/Dockerfile
+    args:
+      POSTGRES_VERSION: ${POSTGRES_VERSION:-16}
+  # 不再有 - ./migrations/backup:/docker-entrypoint-initdb.d 這行
+```
+
+⚠️ `.dockerignore` 配套：根 `.dockerignore` 若排除整個 `migrations/`（典型寫法），需 **negation pattern** 讓 build context 看得到該子目錄**及其內所有檔案**。單寫 `!migrations/backup` 在某些 Docker 版本 / classic builder 下只 unignore 目錄入口、descendants（如 `migrations/backup/001.sql`）仍被排除，導致 `COPY` 找不到檔。安全寫法：
+
+```
+migrations
+!migrations/backup/
+!migrations/backup/**
+```
+
+---
+
 ## 常見問題（compose）
 
 | 問題 | 原因 | 解法 |
