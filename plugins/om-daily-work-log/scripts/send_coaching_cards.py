@@ -249,18 +249,31 @@ def build_reply_ps(
     attach_line: str,
     action_line: str,
     final_status: str,
+    outlook_account: str = "",
+    inbox_name: str = "Inbox",
 ) -> str:
     """純函式：組 reply PS 腳本。
 
     嚴格 email 比對（有 email → 只認 SenderEmailAddress 相等，**不** fallback GetFirst，
     避免多屬下同主旨串錯人）；無 email 時退回 SenderName.EndsWith。找不到回 status='not_found'。
+    多帳號：有 outlook_account 時導覽該帳號 store 的 inbox（鏡像 fetch_daily_reports.ps1），
+    否則退回 GetDefaultFolder(6)；避免在非預設帳號 setup 永遠找不到原日報而退 compose。
     """
     return f"""
 $ErrorActionPreference = 'Stop'
 try {{
     $outlook = New-Object -ComObject Outlook.Application
     $namespace = $outlook.GetNamespace('MAPI')
-    $inbox = $namespace.GetDefaultFolder(6)  # olFolderInbox
+    $account = '{outlook_account}'
+    $inboxName = '{inbox_name}'
+    $inbox = $null
+    if ($account -ne '') {{
+        try {{
+            $root = $namespace.Folders.Item($account)
+            $inbox = $root.Folders.Item($inboxName)
+        }} catch {{ $inbox = $null }}
+    }}
+    if ($inbox -eq $null) {{ $inbox = $namespace.GetDefaultFolder(6) }}  # fallback：預設帳號 inbox
     $targetFolder = $null
     foreach ($f in $inbox.Folders) {{
         if ($f.Name -eq '{inbox_folder}') {{ $targetFolder = $f; break }}
@@ -380,6 +393,8 @@ def open_reply_draft(
     auto_send: bool = False,
     report_subject_pattern: str | None = None,
     inbox_folder: str = "每日工作報告",
+    outlook_account: str = "",
+    inbox_name: str = "Inbox",
 ) -> dict:
     """找屬下 previous-workday 日報 → .Reply() 開草稿（嚴格 email 比對）。
 
@@ -392,6 +407,7 @@ def open_reply_draft(
     ps = build_reply_ps(
         employee_name, employee_email, subject_pattern, inbox_folder,
         html_body, attach_line, action_line, final_status,
+        outlook_account=outlook_account, inbox_name=inbox_name,
     )
     return _run_ps(ps)
 
@@ -447,6 +463,10 @@ def main():
                         help="reply 模式屬下原日報所在資料夾（cockpit 由 config.email.daily_report_folder 注入）")
     parser.add_argument("--report-subject", default=None,
                         help="reply 比對日報主旨模板（用 {date} 當日期佔位；省略＝『每日工作報告 YYYY/MM/DD』）")
+    parser.add_argument("--report-account", default="",
+                        help="reply 找原日報的 Outlook 帳號（cockpit 由 config.email.account 注入；空＝預設帳號）")
+    parser.add_argument("--report-inbox", default="Inbox",
+                        help="該帳號 inbox 顯示名（中文 Outlook＝收件匣；cockpit 由 config.email.inbox_name 注入）")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -533,6 +553,7 @@ def main():
                 employee_name=name, employee_email=email_addr, previous_date=target_date,
                 html_body=html_body, attachment_path=slice_path, auto_send=args.auto_send,
                 report_subject_pattern=report_subject, inbox_folder=args.report_folder,
+                outlook_account=args.report_account, inbox_name=args.report_inbox,
             )
             if result.get("status") == "not_found":
                 print(f"[INFO] 卡 {idx + 1} ({name}) reply 找不到原日報 → 轉 compose", file=sys.stderr)

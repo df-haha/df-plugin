@@ -87,6 +87,24 @@ def test_reply_ps_honors_custom_folder_and_subject():
     assert "每日工作報告" not in ps          # 不應殘留中文預設
 
 
+def test_reply_ps_navigates_configured_account():
+    """Codex R2-F3：有 outlook_account → 導覽該帳號 store inbox（非只看 GetDefaultFolder）。"""
+    ps = scc.build_reply_ps(
+        "A", "a@x.example", "Sub", "Folder", "h", "", "$reply.Display()", "draft",
+        outlook_account="boss@acme.example", inbox_name="收件匣",
+    )
+    assert "boss@acme.example" in ps
+    assert "$namespace.Folders.Item($account)" in ps
+    assert "GetDefaultFolder(6)" in ps          # 仍保留 fallback
+
+
+def test_reply_ps_default_account_when_empty():
+    ps = scc.build_reply_ps(
+        "A", "a@x.example", "Sub", "Folder", "h", "", "$reply.Display()", "draft",
+    )
+    assert "GetDefaultFolder(6)" in ps
+
+
 def test_reply_ps_name_fallback_when_no_email():
     """無 email 時退回 EndsWith 精確比對，仍不可用 *name* 子字串。"""
     ps = scc.build_reply_ps(

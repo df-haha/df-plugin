@@ -53,16 +53,23 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
   ```
 
 ### 執行（主要：Claude + Outlook MCP）
+
+> **以 OM_DIRECTIVE marker 為唯一可靠訊號**，不要硬依賴主旨前綴（主管可在 cockpit config
+> 自訂 `directive.subject_prefix`，屬下端不一定知道實際值）。主旨前綴只當「縮小掃描範圍」的軟過濾。
+
 1. `ToolSearch("select:mcp__outlook-local__search_email_by_subject_tool,mcp__outlook-local__list_recent_emails_tool,mcp__outlook-local__get_email_by_number_tool")`
-2. 搜當日信：`search_email_by_subject_tool(subject="【每日追蹤】")`（前綴比對），
-   或 `list_recent_emails_tool(days=1)` 後過濾主旨含前綴者。
-3. 對候選信 `get_email_by_number_tool(email_number=N, mode="basic")` 取 body，抽 marker：
+2. **掃近期信**：`list_recent_emails_tool(days=2)`（涵蓋週末/補寄；天數寧多勿少）。
+   逐封 `get_email_by_number_tool(email_number=N, mode="basic")` 取 body，抽 marker：
    ```python
    import re
    M = re.compile(r"<!--\s*OM_DIRECTIVE\s+(?P<meta>[^>]+?)-->")
    META = re.compile(r"(\w+)=(\S+)")   # directive_id / target_date / employee_id / source
    ```
-4. 取 `target_date` 命中今日目標日、`employee_id` 為自己者的**最新一封**。
+   （若已知主旨前綴，可先 `search_email_by_subject_tool` 縮範圍，但**最終以 marker 命中為準**。）
+3. **日期語義（關鍵）**：directive 的 `target_date` 指「**被追問的那份日報的日期**」——也就是屬下
+   **上一個工作日**的日報，不是今天。先算 `prev = 上一個工作日(今天的報告日)`（遇連假往前找）。
+4. 取 marker `target_date == prev`、`employee_id == 自己` 者的**最新一封**。
+   （找不到 `prev` 命中時，可放寬到「最近 2 工作日內、employee_id 為自己」的最新 directive，避免連假錯位。）
 5. 從 body 的 `## Q1 / ## Q2 …` 標題 + 內容抽出問題清單（`directive_id` 即原 card_id）。
 
 ### Fallback（MCP 搜不到或不穩時）
