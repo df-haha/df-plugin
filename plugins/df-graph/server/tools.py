@@ -15,7 +15,7 @@ from graphcore import (  # noqa: F401
 # --- 信箱 ---
 from mailtools import (  # noqa: F401
     mail_list_recent, mail_search, mail_get, mail_download_attachment,
-    folder_list, mail_send, mail_draft, mail_reply, mail_forward,
+    folder_list, mail_send, mail_draft, mail_reply, mail_reply_draft, mail_forward,
     mail_mark_read, mail_move, mail_delete, _attachment_meta, _strip_html,
 )
 

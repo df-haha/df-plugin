@@ -502,6 +502,43 @@ def mail_reply(message_id: str, body: str, reply_all: bool = False) -> str:
     return "Replied" + (" (all)" if reply_all else "")
 
 
+def mail_reply_draft(message_id: str, body: str, reply_all: bool = False) -> str:
+    """建立『回覆草稿』到草稿匣供你在 Outlook 過目後再寄出（不自動送出）。
+    用 Graph createReply/createReplyAll 建 threaded 草稿（保留原信 thread 與引用），
+    再把 body（如卡片 HTML）prepend 到草稿內文上方。
+    與 mail_reply 不同：mail_reply 會【直接寄出】；本工具只建草稿、保留主管審稿。
+    回傳 draft_id / web_link / subject。"""
+    action = "createReplyAll" if reply_all else "createReply"
+    try:
+        d = _req("POST", f"{GRAPH}/me/messages/{_enc(message_id)}/{action}")
+    except GraphHTTPError as ex:
+        if _is_bad_id(ex):
+            return "ERROR: 找不到該郵件（id 不存在或已被移動/刪除）。"
+        raise
+    did = d.get("id")
+    if not did:
+        return "ERROR: 建立回覆草稿失敗（Graph 未回傳草稿 id）。"
+    # createReply 預填的內文含原信引用；把卡片 prepend 在上方，下方保留 thread 引用。
+    existing = (d.get("body") or {}).get("content", "")
+    new_content = body + existing
+    try:
+        d2 = _req("PATCH", f"{GRAPH}/me/messages/{_enc(did)}",
+                  body={"body": {"contentType": "HTML", "content": new_content}})
+    except GraphHTTPError:
+        # PATCH 失敗 → 清掉剛建的半成品草稿（best-effort，不掩蓋原錯誤）
+        try:
+            _req("DELETE", f"{GRAPH}/me/messages/{_enc(did)}")
+        except Exception:
+            pass
+        raise
+    return json.dumps({"draft_id": did,
+                       "web_link": d2.get("webLink") or d.get("webLink"),
+                       "subject": d2.get("subject") or d.get("subject"),
+                       "reply_all": reply_all,
+                       "note": "已存回覆草稿（threaded），請在 Outlook 過目後送出"},
+                      ensure_ascii=False, indent=2)
+
+
 def mail_forward(message_id: str, to: str, comment: str = "") -> str:
     if not _recips(to):
         return "ERROR: 請至少提供一個收件人 (to)。"

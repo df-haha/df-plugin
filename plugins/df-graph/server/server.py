@@ -81,6 +81,14 @@ def mail_reply(message_id: str, body: str, reply_all: bool = False) -> str:
 
 
 @mcp.tool()
+def mail_reply_draft(message_id: str, body: str, reply_all: bool = False) -> str:
+    """Create a REPLY DRAFT (threaded, keeps the original quoted) in Drafts for you to review
+    in Outlook before sending — does NOT send. Unlike mail_reply (which sends immediately),
+    this preserves supervisor review. body (e.g. card HTML) is prepended above the quote."""
+    return tools.mail_reply_draft(message_id, body, reply_all)
+
+
+@mcp.tool()
 def mail_forward(message_id: str, to: str, comment: str = "") -> str:
     """Forward an email by id to comma-separated recipients, with an optional comment."""
     return tools.mail_forward(message_id, to, comment)
