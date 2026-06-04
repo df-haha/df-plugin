@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-工作日誌郵件寄送腳本
-讀取 markdown 工作日誌，轉換為 HTML 格式，透過 Outlook COM 開啟草稿視窗。
+工作日誌郵件 payload 產生器（df-graph 版，取代舊 Outlook COM）。
+讀取 markdown 工作日誌 → 轉成郵件 HTML → 寫到本機（WSL）暫存檔 →
+emit JSON payload 給 skill；由 agent 呼叫 mcp__df-graph__mail_draft(body_file=...) 建草稿。
+大型 HTML 內文走 body_file、不經對話 token 流。stdout 只輸出 payload JSON；進度走 stderr。
 
 Usage:
     python scripts/send_work_log_email.py daily_proposal/daily_work_log_2026-03-09.md
     python scripts/send_work_log_email.py daily_proposal/daily_work_log_2026-03-09.md --to boss@example.com
 """
-import subprocess
 import sys
 import re
-import os
 import json
+import tempfile
 from pathlib import Path
 
 
@@ -53,16 +54,13 @@ def md_to_html(md_content: str) -> str:
     # 解析 markdown 結構
     sections = []          # (level, title, items)
     output_table_rows = [] # 產出清單表格
-    cost_table_rows = []   # AI 使用費用明細表格
     topic_items = []       # 工作主題分類
 
     current_section = None
     current_subsection = None
     in_table = False
-    in_cost_table = False
     in_topics = False
     table_header_skipped = False
-    cost_header_skipped = False
 
     for line in body_lines:
         stripped = line.strip()
@@ -70,10 +68,8 @@ def md_to_html(md_content: str) -> str:
         # 分隔線
         if stripped == "---":
             in_table = False
-            in_cost_table = False
             in_topics = False
             table_header_skipped = False
-            cost_header_skipped = False
             continue
 
         # 工作主題分類
@@ -86,11 +82,9 @@ def md_to_html(md_content: str) -> str:
                 topic_items.append(match.group(1))
             continue
 
-        # 產出清單表格（支援舊稱「產出清單」與新稱「今日產出」）
-        if stripped in ("## 產出清單", "## 今日產出"):
+        # 產出清單表格
+        if stripped == "## 產出清單":
             in_table = True
-            in_cost_table = False
-            in_topics = False
             table_header_skipped = False
             continue
         if in_table:
@@ -109,39 +103,9 @@ def md_to_html(md_content: str) -> str:
                     output_table_rows.append((num, item, status))
             continue
 
-        # AI 使用費用明細表格（4 欄：專案 / 模型 / 費用 / 備註）
-        if stripped == "## AI 使用費用明細":
-            in_cost_table = True
-            in_table = False
-            in_topics = False
-            cost_header_skipped = False
-            continue
-        if in_cost_table:
-            if stripped.startswith("|"):
-                if not cost_header_skipped:
-                    if "---" in stripped:
-                        cost_header_skipped = True
-                    continue
-                cols = [c.strip() for c in stripped.split("|")[1:-1]]
-                if len(cols) >= 3:
-                    project = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", cols[0])
-                    model = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", cols[1])
-                    cost = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", cols[2])
-                    note = cols[3] if len(cols) >= 4 else ""
-                    cost_table_rows.append((project, model, cost, note))
-            elif stripped and not stripped.startswith(">"):
-                # 遇到非表格、非引言內容（空行除外）→ 離開費用表格區段
-                in_cost_table = False
-            continue
-
         # 專案標題 (## 一、...)
-        # 排除已由專屬邏輯處理的區段（產出清單、工作主題、費用明細）
-        skip_h2_prefixes = (
-            "## 產出", "## 工作", "## 今日產出",
-            "## AI 使用費用明細", "## AI使用費用明細",
-        )
         match_h2 = re.match(r"^##\s+(.+)$", stripped)
-        if match_h2 and not any(stripped.startswith(p) for p in skip_h2_prefixes):
+        if match_h2 and not stripped.startswith("## 產出") and not stripped.startswith("## 工作"):
             title = match_h2.group(1)
             current_section = {"title": title, "subsections": [], "items": []}
             sections.append(current_section)
@@ -221,27 +185,9 @@ def md_to_html(md_content: str) -> str:
             html_parts.append("</tr>")
         html_parts.append("</table>")
 
-    # 四、AI 使用費用明細
-    if cost_table_rows:
-        html_parts.append(_section_header("四、AI 使用費用明細"))
-        html_parts.append('<table style="border-collapse: collapse; width: 100%;">')
-        html_parts.append('<tr style="background: #E3F2FD;">')
-        html_parts.append('  <th style="border: 1px solid #BBDEFB; padding: 8px; text-align: left;">專案</th>')
-        html_parts.append('  <th style="border: 1px solid #BBDEFB; padding: 8px; text-align: left;">使用的 AI 模型</th>')
-        html_parts.append('  <th style="border: 1px solid #BBDEFB; padding: 8px; text-align: right; width: 100px;">費用</th>')
-        html_parts.append('  <th style="border: 1px solid #BBDEFB; padding: 8px; text-align: left;">備註</th>')
-        html_parts.append("</tr>")
-        for project, model, cost, note in cost_table_rows:
-            html_parts.append("<tr>")
-            html_parts.append(f'  <td style="border: 1px solid #ddd; padding: 8px;">{project}</td>')
-            html_parts.append(f'  <td style="border: 1px solid #ddd; padding: 8px;">{model}</td>')
-            html_parts.append(f'  <td style="border: 1px solid #ddd; padding: 8px; text-align: right;">{cost}</td>')
-            html_parts.append(f'  <td style="border: 1px solid #ddd; padding: 8px; color: #666;">{note}</td>')
-            html_parts.append("</tr>")
-        html_parts.append("</table>")
-
-    # 結語
+    # 結語 + 簽名
     html_parts.append('<p style="margin-top: 20px;">如有需要進一步了解的部分，歡迎隨時告知。</p>')
+    html_parts.append('<p style="margin-top: 16px;">黃奕儒<br/><span style="color: #666; font-size: 12px;">營運部</span></p>')
     html_parts.append("</div>")
 
     return "\n".join(html_parts)
@@ -254,67 +200,16 @@ def _section_header(title: str) -> str:
     )
 
 
-def _to_windows_path(posix_path: Path) -> str:
-    """將 WSL/Linux 路徑轉成 Windows 路徑給 Outlook COM 用。"""
-    abs_path = str(posix_path.resolve())
-    try:
-        result = subprocess.run(
-            ["wslpath", "-w", abs_path],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # 非 WSL 環境，假設已是 Windows 路徑
-        return abs_path
-
-
-def open_outlook_draft(subject: str, html_body: str, to_email: str, attachment_path: Path | None = None):
-    """透過 PowerShell Outlook COM 開啟郵件草稿，並可選擇夾帶附件。"""
-    attach_line = ""
-    if attachment_path is not None and attachment_path.exists():
-        win_path = _to_windows_path(attachment_path)
-        # 用單引號 PowerShell 字串避免路徑中 $ 等被展開
-        ps_escaped = win_path.replace("'", "''")
-        attach_line = f"$mail.Attachments.Add('{ps_escaped}') | Out-Null"
-
-    combined_script = f'''
-# 寫入暫存 HTML
-if (-not (Test-Path "C:\\temp")) {{ New-Item -ItemType Directory -Path "C:\\temp" | Out-Null }}
-$htmlContent = @"
-{html_body}
-"@
-[System.IO.File]::WriteAllText("C:\\temp\\work_log_email.html", $htmlContent, [System.Text.Encoding]::UTF8)
-
-# 讀取並開啟 Outlook 草稿
-$body = [System.IO.File]::ReadAllText("C:\\temp\\work_log_email.html", [System.Text.Encoding]::UTF8)
-$outlook = New-Object -ComObject Outlook.Application
-$mail = $outlook.CreateItem(0)
-$mail.To = "{to_email}"
-$mail.Subject = "{subject}"
-$mail.HTMLBody = $body
-{attach_line}
-$mail.Display()
-
-# 清理暫存
-Remove-Item "C:\\temp\\work_log_email.html" -ErrorAction SilentlyContinue
-'''
-
-    result = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-Command", combined_script],
-        capture_output=True,
-        text=True,
-    )
-
-    if result.returncode != 0:
-        print(f"[ERROR] PowerShell 執行失敗：", file=sys.stderr)
-        print(result.stderr, file=sys.stderr)
-        sys.exit(1)
-    else:
-        print("[OK] Outlook 草稿已開啟，請確認後按發送。")
-        if attach_line:
-            print(f"[OK] 已夾帶附件：{attachment_path.name}")
+def write_body_file(html_body: str, date_tag: str) -> Path:
+    """把 HTML 內文寫到本機（WSL）暫存檔，回傳路徑。
+    供 df-graph mail_draft 的 body_file 讀取——大型內文不經對話 token 流。
+    一律用 WSL 暫存目錄（tempfile），絕不寫 C:\\temp / /mnt/c。"""
+    tmp_dir = Path(tempfile.gettempdir()) / "daily-work-log"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    safe_tag = re.sub(r"[^0-9A-Za-z_-]", "_", date_tag) or "latest"
+    body_file = tmp_dir / f"work_log_email_{safe_tag}.html"
+    body_file.write_text(html_body, encoding="utf-8")
+    return body_file
 
 
 def main():
@@ -351,15 +246,26 @@ def main():
     date_str = extract_date_from_filename(str(md_path))
     subject = f"每日工作報告 {date_str}" if date_str else "每日工作報告"
 
-    # 轉換為 HTML
+    # 轉換為 HTML，寫到本機暫存檔（大型內文走 body_file，不經對話）
     html_body = md_to_html(md_content)
+    date_tag = date_str.replace("/", "-") if date_str else "latest"
+    body_file = write_body_file(html_body, date_tag)
 
-    # 開啟 Outlook 草稿（自動夾帶 md 原檔為附件）
-    print(f"[INFO] 郵件標題：{subject}")
-    print(f"[INFO] 收件者：{to_email}")
-    print(f"[INFO] 附件：{md_path.name}")
-    print(f"[INFO] 正在開啟 Outlook 草稿...")
-    open_outlook_draft(subject, html_body, to_email, attachment_path=md_path)
+    # 輸出 payload 給 skill：由 agent 呼叫 df-graph mail_draft 建草稿（不自動寄出）
+    #   mcp__df-graph__mail_draft(to=<to>, subject=<subject>,
+    #                             body_file=<body_file>, attachments=<attachment>)
+    payload = {
+        "action": "mail_draft",
+        "to": to_email,
+        "subject": subject,
+        "body_file": str(body_file),
+        "attachments": str(md_path.resolve()),
+    }
+    print(f"[INFO] 郵件標題：{subject}", file=sys.stderr)
+    print(f"[INFO] 收件者：{to_email}", file=sys.stderr)
+    print(f"[INFO] 內文暫存：{body_file}", file=sys.stderr)
+    print(f"[INFO] 附件：{md_path.name}", file=sys.stderr)
+    print(json.dumps(payload, ensure_ascii=False))
 
 
 if __name__ == "__main__":

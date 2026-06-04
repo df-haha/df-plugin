@@ -308,20 +308,32 @@ mkdir -p weekly_reports
 - 「確認」/「好」/「寄」→ 執行寄信
 - 「還要改」→ 依指示修改再次確認
 
-寄信：
+寄信已改走 df-graph（純雲端 Graph API，不再需要 Windows + Outlook Desktop）。
+腳本只負責「md → HTML → 寫暫存檔 → emit payload」，由 agent 呼叫 df-graph 建**草稿**（不自動寄出）。
+
+跑腳本取得 payload（stdout 為一行 JSON；進度在 stderr）：
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_weekly_report_email.py weekly_reports/weekly_report_{iso_week}.md
+```
+
+payload 形如：`{"action":"mail_draft","to":...,"subject":...,"body_file":"/tmp/.../*.html","attachments":".../*.md"}`
+
+用 payload 呼叫 df-graph 建草稿（**大型 HTML 內文走 `body_file`，不經對話**）：
+```
+mcp__df-graph__mail_draft(to=<payload.to>, subject=<payload.subject>,
+                          body_file=<payload.body_file>, attachments=<payload.attachments>)
 ```
 
 腳本會自動：
 - 讀 md 檔並轉為 HTML（AI 觀察區會用黃色框視覺標記）
 - 郵件標題：`週工作報告 YYYY 第 NN 週`
 - 收件者：`config.manager_email`（未設則 fallback `outlook_email`）
-- 透過 Outlook COM 開啟草稿視窗（**不會自動發送**）
 - 自動夾帶 md 原檔為附件
 
-告知屬下：「Outlook 草稿已開啟，請確認內容後按發送。md 檔已夾為附件。」
+草稿會出現在你的「草稿匣」，過目後手動寄出。
+
+告知屬下：「郵件草稿已建立在草稿匣，請確認內容後手動寄出。md 檔已夾為附件。」
 
 > **→ TaskUpdate: Phase 5 → completed**
 
