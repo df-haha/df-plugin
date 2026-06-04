@@ -1,0 +1,8 @@
+{
+  "name": "df-graph",
+  "description": "Microsoft 365 / Graph MCP server（信箱讀寫 + 行事曆 + 人員）— 純雲端 Graph API、OS 無關、每人一次 device-code 登入，取代需要 Windows + Outlook Desktop 的 COM 方案。無狀態、id-based、讀取零淨化。由安裝 skill（df-graph-setup）以 user-scope 註冊，工具前綴 mcp__df-graph__*。",
+  "version": "0.1.0",
+  "author": {
+    "name": "宗霖"
+  }
+}

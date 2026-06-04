@@ -1,22 +1,28 @@
 ---
 name: team-daily-fetcher
-description: 讀取 Outlook 日報資料夾內團隊成員的昨日工作日報（成員名單來自 config）。PowerShell + Outlook COM 抓 .md 附件原檔並加「已處理」Category；MCP 讀 body；檢查未寄送與格式異常；（可選）交叉比對 tracking_files；解析 om-daily-work-log 的主管疑問回覆 anchor；產出結構化團隊引導資料。由 /hi 呼叫。department-agnostic、config 驅動、零 hard-code。
-allowed-tools: Bash, Read, Glob, mcp__outlook-local__get_folder_list_tool, mcp__outlook-local__load_emails_by_folder_tool, mcp__outlook-local__view_email_cache_tool, mcp__outlook-local__get_email_by_number_tool
+description: 讀取 Outlook 日報資料夾內團隊成員的昨日工作日報（成員名單來自 config）。df-graph MCP（Microsoft Graph）resolve 資料夾→列信→讀 body→下載並改名 .md 附件；本地檔去重；格式檢查；（可選）交叉比對 tracking_files；解析 om-daily-work-log 的主管疑問回覆 anchor；產出結構化團隊引導資料。由 /hi 呼叫。department-agnostic、config 驅動、零 hard-code。
+allowed-tools: Bash, Read, Glob, mcp__df-graph__folder_list, mcp__df-graph__mail_list_recent, mcp__df-graph__mail_search, mcp__df-graph__mail_get, mcp__df-graph__mail_download_attachment
 ---
 
 # 團隊工作日報擷取 & 分析
 
 目的：替主管自動完成「昨日工作日下屬日報」的擷取、歸檔、格式檢查、進度對齊、引導建議與疑問提問。
-**所有部門特定值（成員名單、Outlook 帳號/資料夾、追蹤檔路徑）一律來自 config，技術碼零 hard-code。**
+**所有部門特定值（成員名單、資料夾顯示名、追蹤檔路徑）一律來自 config，技術碼零 hard-code。**
+
+> **寄件路徑（send-side）**：coaching directive（澄清問題卡寄信）目前仍走 Outlook COM 路徑，
+> 需要 Windows + Outlook Desktop，待 Stage B 完成後才會遷移至 Graph API。
+> 本 skill 只涵蓋**讀取路徑（read-side）**：全部改為 df-graph MCP，不需 Outlook Desktop。
 
 ## 資料來源
 
 | 資訊 | 來源 |
 |------|------|
-| 成員名單 + Outlook 帳號/資料夾 + Category + 路徑 | oc-config（`--config` 或 `OM_DAILY_COCKPIT_CONFIG`） |
+| 成員名單 + 資料夾顯示名 + 路徑 | oc-config（`--config` 或 `OM_DAILY_COCKPIT_CONFIG`） |
 | 目標日期（最近工作日） | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/last_workday.py` |
-| 附件原檔 | `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/fetch_daily_reports.py --config <cfg>`（PowerShell + Outlook COM） |
-| Body 文字 | Outlook MCP `get_email_by_number_tool(mode="basic")` |
+| 資料夾 id（顯示名 → id） | `mcp__df-graph__folder_list` |
+| 信件清單 | `mcp__df-graph__mail_list_recent(folder=<resolved id>)` |
+| Body 文字 | `mcp__df-graph__mail_get(message_id, mode="concise")`（解析 marker 用 `mode="full"`） |
+| .md 附件原檔 | `mcp__df-graph__mail_download_attachment(message_id, attachment_id, dest_dir)` |
 | 任務/進度交叉比對（可選） | `config.paths.tracking_files`（清單，空則跳過對齊度分析） |
 
 ## 執行流程
@@ -28,45 +34,67 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/oc_core/config.py --validate <cfg>   # 確
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/last_workday.py                       # e.g. 2026-04-21
 ```
 
-從 config 取：`team.members[]`（顯示名 + member_id + email/alias）、`email.account`、
-`email.daily_report_folder`、`email.processed_category`、`paths.archive_dir`、
-`paths.daily_proposal_dir`、`paths.tracking_files`。
+從 config 取：`team.members[]`（顯示名 + member_id + email/alias）、`email.daily_report_folder`、
+`paths.archive_dir`、`paths.daily_proposal_dir`、`paths.tracking_files`。
+
+> df-graph 用**本地檔去重**（見 Step 2），不再需要 Outlook Category；config 的 `processed_category`
+> 在 df_graph adapter 下已標為可選，此 skill 不使用。
 
 ### Step 2：本地快取檢查（同日重跑 /hi 時省資源）
 
 對每位成員檢查 `{archive_dir}/{target_date}/{name}_daily_work_log_{target_date}.md` 是否存在：
-- **全員都有** → 直接讀本地 md，跳過 Outlook 呼叫
+- **全員都有** → 直接讀本地 md，跳過 Graph API 呼叫
 - **有缺** → 進 Step 3
 
-### Step 3：PowerShell 抓附件 + 加 Category
+### Step 3：resolve 資料夾 id + 列出資料夾內信件（df-graph）
 
-```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/fetch_daily_reports.py --config <cfg>
-```
-
-輸出 JSON（stderr 有進度訊息）。關心欄位：`results[]`（含 `attachment_saved`、`already_processed`）、
-`missing[]`（名單內但這次沒抓到的人）、`errors[]`。
-
-若 `errors` 含 `stage: "setup"` → Outlook COM 不可用（多半是 Outlook 沒開），進 Step 4 降級走 MCP only。
-
-### Step 4：MCP 讀 body（取得日報全文）
-
-即便 Step 3 成功存檔附件，body 仍是最方便的分析來源；若 Step 3 失敗，MCP 是唯一 fallback。
+日報資料夾是 Outlook 顯示名；df-graph 的 `folder` 參數只吃 well-known 名稱或 **folder id**，
+**不吃顯示名/路徑**，故先把顯示名 resolve 成 id：
 
 ```
-mcp__outlook-local__load_emails_by_folder_tool(folder_path="{email.daily_report_folder}", days=7)
-mcp__outlook-local__view_email_cache_tool(page=1..N)
+mcp__df-graph__folder_list(parent_id="inbox")     # 多數情況報告夾是收件匣的子夾
 ```
 
-挑出：`subject` 含 target_date（用 `email.report_subject_pattern` 抓日期）或附件名匹配
-`email.attachment_pattern`；且 `from` 以 config 成員顯示名任一結尾。
-對每位成員取**最新一封**（`received` 最大），呼叫：
+在回傳陣列中找 `name == "{email.daily_report_folder}"`（config 的顯示名）取其 `id`。
+若 inbox 子層找不到，改 `folder_list(parent_id="")`（頂層）再找；仍找不到 → 走錯誤降級表。
+
+拿到 `folder_id` 後，列出該資料夾近 7 天信件（**資料夾已專用，列全部再 client 端篩，避開 subject 前綴 startswith 陷阱**）：
 
 ```
-mcp__outlook-local__get_email_by_number_tool(email_number=N, mode="basic", include_attachments=false)
+mcp__df-graph__mail_list_recent(days=7, folder="<folder_id>")
 ```
 
-> ⚠️ **不要**用 `mode="enhanced"` 或 `include_attachments=true`：MCP 不回傳附件內容、enhanced response 會膨脹至 ~100KB 浪費 token。附件抓取已由 Step 3 處理。
+回傳 JSON 陣列，每筆含 `id, subject, from, date, is_read, preview`。挑出每位成員：
+- `from` 以 config 成員顯示名任一結尾（`sender.endswith(member.name)`）
+- `subject` 含 target_date 日期格式（用 `email.report_subject_pattern` 匹配），或之後讀到的附件名匹配 `email.attachment_pattern`
+- 同人多封取**最新一封**（`date` 最大）
+
+### Step 4：讀 body + 下載 .md 附件原檔（df-graph）
+
+對每位成員選中的那封信：
+
+```
+mcp__df-graph__mail_get(message_id="<id>", mode="concise")   # 純文字 body，省 token，供分析
+```
+
+回傳的 `Attachments` 區塊列出附件 `id/name/type/size`。找出 `.md` 附件（名稱匹配 `email.attachment_pattern`），下載到當日歸檔目錄：
+
+```
+mcp__df-graph__mail_download_attachment(
+    message_id="<id>", attachment_id="<att_id>",
+    dest_dir="{archive_dir}/{target_date}", overwrite=false)
+```
+
+> 🔴 **附件改名（必做，否則覆蓋）**：多位成員的附件**檔名相同**（都是 `daily_work_log_{date}.md`）。
+> `mail_download_attachment` 以附件自身檔名存檔、同名自動加 `(1)/(2)`，會**遺失成員身分**且破壞 Step 2 的存在性去重。
+> 下載後立刻把回傳的 `path` 改名成成員前綴格式：
+> ```bash
+> mv "<回傳 path>" "{archive_dir}/{target_date}/{name}_daily_work_log_{target_date}.md"
+> ```
+> 最終檔名必須是 `{name}_daily_work_log_{target_date}.md`（與 Step 2 去重 key、Step 7 存檔欄一致）。
+
+> ℹ️ **body 用途分流**：一般分析讀已下載的 `.md` 原檔最準；
+> body（`mail_get`）作摘要與 .md 缺漏時的後備。**Step 5.6 解析 HTML comment anchor 若需從 body 取得（.md 缺）→ 必用 `mail_get(mode="full")`**（concise 會去掉 `<!-- -->` 註解，marker 會消失）。
 
 ### Step 5：格式檢查（對每份日報）
 
@@ -187,15 +215,16 @@ om_qa:
 
 | 失敗服務 | 偵測 | 降級 | 輸出 |
 |----------|------|------|------|
-| Outlook COM（沒開）| Step 3 errors stage=setup | 只走 MCP，跳過附件歸檔與 Category | 「⚠️ Outlook COM 不可用，未歸檔附件原檔；請確認 Outlook Desktop 已啟動」|
-| Outlook MCP（down）| MCP 呼叫 error | 讀本地 `{archive_dir}/{date}/` 既有檔案 | 「⚠️ Outlook MCP 不可用，使用本地快取」|
-| 兩者都不可用 | 上述皆 fail | 空報告 + 錯誤詳情 | 「❌ 無法取得團隊日報，請人工檢查 Outlook 與連線狀態」|
+| 資料夾 resolve 失敗 | `folder_list` 找不到 `{email.daily_report_folder}` | 改試頂層 `folder_list(parent_id="")`；仍無 → 讀本地快取 | 「⚠️ 找不到日報資料夾，請確認 config 的 `email.daily_report_folder` 顯示名與 Microsoft 365 帳號一致」|
+| df-graph 未授權／連線失敗 | `mail_*` 工具回 ERROR / 未登入 | 讀本地 `{archive_dir}/{date}/` 既有檔案 | 「⚠️ df-graph 不可用（跑 df-graph-setup skill 重新登入），使用本地快取」|
+| 附件下載失敗 | `mail_download_attachment` 回 ERROR | 以 body（`mail_get`）內容做分析，標未歸檔 | 「⚠️ {member} 附件無法下載，改用 body 分析」|
+| 全部不可用 | 上述皆 fail | 顯示空報告 + 錯誤詳情 | 「❌ 無法取得團隊日報，請人工檢查 df-graph 登入狀態」|
 | tracking_files 讀取失敗 | Read error | 對齊度欄顯示「—」 | 「⚠️ tracking 檔讀取失敗：{path}」|
 
 ## 注意事項
 
-1. **同人同日多封**：Step 3 PowerShell 已按 `SentOn` 降冪只取最新；Step 4 MCP 也取 `received` 最大。
-2. **補寄情境**：以附件/主旨日期為準；若收件日期 > 附件日期，加註「（補寄）」。
-3. **Category 去重**：PowerShell 已加 `already_processed` 旗標。
+1. **同人同日多封**：Step 3 client 端挑出後，每位成員取 `date`（receivedDateTime）最大的那封。
+2. **補寄情境**：以附件名 `daily_work_log_{date}.md` / 主旨日期為準，不看收件時間。若收件日期 > 附件日期，加註「（補寄）」。
+3. **去重靠本地檔**：Step 2 以 `{archive_dir}/{date}/{name}_daily_work_log_{date}.md` 是否存在判斷（取代舊的 Outlook Category 機制）；故 Step 4 附件改名成成員前綴格式至關重要。
 4. **不要自動寄信催繳**：未寄送只在報告裡提醒主管，由主管決定 follow up。
 5. **疑問數量**：每人 1–3 則，寧缺勿濫，不為填欄位硬擠。

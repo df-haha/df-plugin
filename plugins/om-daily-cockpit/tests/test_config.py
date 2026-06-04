@@ -166,10 +166,27 @@ def test_no_members(tmp_path):
         load_config(_write_md(tmp_path, d))
 
 
-def test_email_adapter_must_be_outlook_local(tmp_path):
+def test_email_adapter_rejects_unsupported(tmp_path):
     d = copy.deepcopy(BASE)
     d["email"]["adapter"] = "gmail_smtp"
-    with pytest.raises(ConfigError, match="outlook_local"):
+    with pytest.raises(ConfigError, match="adapter"):
+        load_config(_write_md(tmp_path, d))
+
+
+def test_email_adapter_df_graph_accepted_without_category(tmp_path):
+    # df_graph 改用本地檔去重，processed_category 可省略。
+    d = copy.deepcopy(BASE)
+    d["email"]["adapter"] = "df_graph"
+    del d["email"]["processed_category"]
+    cfg = load_config(_write_md(tmp_path, d))
+    assert cfg.email.adapter == "df_graph"
+    assert cfg.email.processed_category == ""
+
+
+def test_email_adapter_outlook_local_still_requires_category(tmp_path):
+    d = copy.deepcopy(BASE)
+    del d["email"]["processed_category"]
+    with pytest.raises(ConfigError, match="processed_category"):
         load_config(_write_md(tmp_path, d))
 
 

@@ -1,6 +1,6 @@
 ---
-description: 每日啟動駕駛艙（Daily Cockpit）。整合郵件分流 + 團隊日報追蹤 + 教練 directive loop +（可選）情報/標案/社群雷達。config 驅動、零 hard-code。用法 /hi [--quick] [--config <path>]。
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, ToolSearch, TaskCreate, TaskUpdate, TaskList, mcp__outlook-local__list_recent_emails_tool, mcp__outlook-local__load_emails_by_folder_tool, mcp__outlook-local__get_email_by_number_tool, mcp__outlook-local__search_email_by_subject_tool
+description: 每日啟動駕駛艙（Daily Cockpit）。整合郵件分流 + 團隊日報追蹤 + 教練 directive loop +（可選）情報/標案/社群雷達。config 驅動、零 hard-code。用法 /hi [--quick] [--config <path>]。郵件讀取走 df-graph MCP；coaching 寄送目前仍走 Outlook COM（待 Stage B）。
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, ToolSearch, TaskCreate, TaskUpdate, TaskList, mcp__df-graph__mail_list_recent, mcp__df-graph__mail_search, mcp__df-graph__mail_get, mcp__df-graph__folder_list, mcp__df-graph__mail_download_attachment
 ---
 
 # /hi — Daily Cockpit 入口

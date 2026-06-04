@@ -28,6 +28,8 @@ _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 _FENCE = re.compile(r"^```oc-config[ \t]*\n(.*?)\n```[ \t]*$", re.DOTALL | re.MULTILINE)
 _VALID_STORAGE = {"quick_only", "sqlite", "postgres"}
+# 郵件後端 adapter：outlook_local（Windows COM，需 Outlook Desktop）/ df_graph（純雲端 Graph API）。
+_VALID_EMAIL_ADAPTERS = {"outlook_local", "df_graph"}
 _MODULE_KEYS = ("intel", "tender", "fb")
 
 # 密鑰特徵：config 內任一字串值命中即拒絕（強制 secret 走 env、不進 config）。
@@ -246,16 +248,23 @@ def _build_config(d: dict) -> Config:
     # email
     em = d.get("email") or {}
     adapter = str(em.get("adapter", ""))
-    if adapter != "outlook_local":
-        raise ConfigError(f"email.adapter MVP 只支援 outlook_local，得到 {adapter!r}")
+    if adapter not in _VALID_EMAIL_ADAPTERS:
+        raise ConfigError(
+            f"email.adapter 只支援 {sorted(_VALID_EMAIL_ADAPTERS)}，得到 {adapter!r}")
     account = str(em.get("account", ""))
     if not _EMAIL.match(account):
         raise ConfigError(f"email.account 非法 email：{account!r}")
+    # processed_category 只有 outlook_local 用得到（以 Outlook Category 標記「已處理」做去重）。
+    # df_graph 改用本地檔（data/daily_reports/{date}/ 存在性）去重，故此欄可選。
+    if adapter == "outlook_local":
+        processed_category = _require_str(em, "processed_category")
+    else:
+        processed_category = str(em.get("processed_category", ""))
     email_cfg = EmailCfg(
         adapter,
         account,
         _require_str(em, "daily_report_folder"),
-        _require_str(em, "processed_category"),
+        processed_category,
         inbox_name=str(em.get("inbox_name") or EmailCfg.inbox_name),
         attachment_pattern=str(em.get("attachment_pattern") or EmailCfg.attachment_pattern),
         report_subject_pattern=str(em.get("report_subject_pattern") or EmailCfg.report_subject_pattern),

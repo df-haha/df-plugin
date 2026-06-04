@@ -25,10 +25,12 @@ team:
       alias_allowlist: []        # 屬下回信可能用的其他位址（嚴格 email 比對用）
 
 email:
-  adapter: outlook_local         # MVP 只支援 outlook_local（PowerShell + Outlook COM）
-  account: <你的 Outlook 帳號 email>
+  adapter: df_graph              # df_graph（雲端 Graph API，OS 無關，建議）或 outlook_local（Windows COM）
+  account: <你的 Microsoft 365 / Outlook 帳號 email>
   daily_report_folder: <收日報的子資料夾名>
-  processed_category: <已處理標記類別>
+  # processed_category 只有 outlook_local 需要（以 Outlook Category 標記已處理做去重）；
+  # df_graph 改用本地檔（data/daily_reports/{date}/ 存在性）去重，可省略。
+  # processed_category: <已處理標記類別>
   # --- 以下可選（不填用預設）---
   inbox_name: Inbox              # Outlook inbox 顯示名；中文版 Outlook 填「收件匣」
   # attachment_pattern: <日報附件檔名 regex；預設 daily_work_log_<date>.md>
@@ -75,7 +77,7 @@ modules:
 
 - **identity**：決定 AI 報告的署名與語氣，以及對外文書的部門/公司抬頭。全部來自此處，程式碼零寫死。
 - **team.members**：`member_id` 是穩定 slug（換顯示名不影響追蹤）；`email` + `alias_allowlist` 用於 directive 回信的**嚴格 email 比對**，避免多屬下同主旨串錯人。
-- **email.adapter**：MVP 僅 `outlook_local`（現況為 PowerShell COM）。未來新增 Graph/Gmail adapter 時於此擴充，onboarding 不承諾尚未實作的能力。
+- **email.adapter**：`df_graph`（雲端 Microsoft Graph API，OS 無關、每人一次 device-code 登入，建議）或 `outlook_local`（Windows COM，需 Outlook Desktop）。讀信兩者皆走對應 MCP；`df_graph` 不需 `processed_category`（改本地檔去重）。
 - **directive**：`subject_prefix` + `marker` 構成催辦信契約，屬下端據此用 Outlook MCP 搜當日催辦信（繞過 reply-chain）。
 - **services**：環境變數名稱對照表。loader 強制這些值是「名稱」而非密鑰本體。
 - **modules**：情報雷達 / 標案追蹤 / 社群追蹤。`enabled: false` 時完全不執行、不寫任何 DB。`storage` 決定資料落地後端（見 Phase 4.5）。

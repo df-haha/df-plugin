@@ -10,23 +10,25 @@
 
 | 區塊 | 說明 | MVP 預設 |
 |------|------|----------|
-| 郵件分流 | Outlook 收件匣 P0-P3 分類 + 回覆建議（`email-triage`，走 outlook_local MCP） | ✅ 開 |
+| 郵件分流 | 收件匣 P0-P3 分類 + 回覆建議（`email-triage`，走 df-graph MCP，read-side） | ✅ 開 |
 | 團隊日報追蹤 | 抓屬下日報附件、格式檢查、AI 用量、對齊度、主管疑問閉環（`team-daily-fetcher`） | ✅ 開 |
 | Coaching directive loop | 產澄清問題卡 → compose/reply 寄屬下 → 屬下 directive-first 偵測回覆（依賴 `om-daily-work-log`） | ✅ 開 |
 | 情報 / 標案 / 社群雷達 | 產業特化爬取 + First-Principles 分析（`intel`/`tender`/`fb`） | ⛔ 停用（框架在） |
 
 ## 安裝
 
-> **前置（Outlook 整合需要）**：郵件分流（主管端）與 coaching loop（屬下端 `om-daily-work-log`）都走
-> **outlook-local MCP**，需 **Windows 10+ + Outlook Desktop（桌面版）+ Python 3.8+** 與
-> [outlook-local MCP server](https://github.com/marlonluo2018/outlook-mcp-server)。
-> 屬下裝完 `om-daily-work-log` 後對 Claude 說「**work-log setup**」跑 onboarding 引導安裝；
-> 主管端則在下方 cockpit onboarding 的「接 Outlook MCP」步驟設定。
+> **郵件整合兩條路徑**：
+> - **讀取（read-side）**：郵件分流 + 團隊日報擷取走 **df-graph MCP**（Microsoft Graph API，純雲端），
+>   不需 Outlook Desktop，只需 Microsoft 365 帳號授權。
+> - **寄送（send-side）**：coaching directive loop 目前仍走 Outlook COM，
+>   需 **Windows 10+ + Outlook Desktop（桌面版）**。
+>   Stage B 完成後 send-side 也會遷移至 Graph API；屆時 Outlook Desktop 依賴可完全移除。
 
 1. 安裝相依 plugin：`om-daily-work-log`（≥1.3.0，已自給自足，內建日誌/寄信功能）。
-2. 安裝核心 Python 相依：`pip install PyYAML`。
-3. 跑 onboarding：對 Claude 說「cockpit setup」（或執行 `cockpit-onboarding` skill），它會引導你：
-   填 config → 設 secrets env → 接 Outlook MCP → 驗證 → 跑 `/hi --quick`。
+2. 安裝並設定 **`df-graph` plugin**（提供 `mcp__df-graph__*` 工具）：對 Claude 說「**df-graph setup**」跑 `df-graph-setup` skill，完成 Microsoft 365 OAuth 授權。
+3. 安裝核心 Python 相依：`pip install PyYAML`。
+4. 跑 onboarding：對 Claude 說「cockpit setup」（或執行 `cockpit-onboarding` skill），它會引導你：
+   填 config → 設 secrets env → 安裝 df-graph plugin → 驗證 → 跑 `/hi --quick`。
 
 ## 設定（config.md）
 
@@ -69,6 +71,7 @@ export OM_DAILY_COCKPIT_CONFIG=<你的>/config.md
 
 ## 已知限制
 
+- **send-side 仍需 Outlook Desktop（暫時）**：coaching directive loop 的寄信路徑（`om-daily-work-log` 的 `send_coaching_cards.py`）目前走 Outlook COM，需要 Windows + Outlook Desktop。Stage B 完成後將遷移至 Graph API。
 - **日報主旨慣例**：coaching loop 的 reply 路徑（`om-daily-work-log`）目前**假設屬下日報主旨為中文
   「每日工作報告 YYYY/MM/DD」**。非中文團隊的 reply-match 需把 `report_subject_pattern` 覆寫成自己的
   慣例（compose fallback 仍可運作，只是 reply 接信會 degrade）。這是語言慣例假設，非 tenant 識別洩漏。
@@ -93,4 +96,4 @@ intel/tender/fb 啟用前須選 `storage`：
 python3 -m pytest tests/ -q
 ```
 
-涵蓋：config schema / loader、no-hardcode gate、config→args 映射、storage adapter。
+涵蓋：config schema / loader、no-hardcode gate、storage adapter。

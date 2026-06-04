@@ -1,7 +1,7 @@
 ---
 name: team-coaching-cards
 description: 主管端 — 將 team-daily-fetcher 產出的「待釐清疑問」轉換為可寄給屬下的「澄清問題卡」md。每位屬下一張卡，每張卡含主管看到的工作摘要 + 3-5 個 CC 可查證的提問（接 git/spec/tasks 出處）。觸發時機：/hi Phase 3.X、或主管說「產卡」「澄清卡」「coaching cards」「產問題卡」「給屬下出問題」「team coaching」。產卡後詢問主管 review，確認後 reply 屬下原日報寄出。
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Skill, mcp__outlook-local__search_email_by_subject_tool, mcp__outlook-local__list_recent_emails_tool
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, AskUserQuestion, Skill, mcp__df-graph__mail_search, mcp__df-graph__mail_list_recent
 ---
 
 # Team Coaching Cards — 主管端澄清問題卡產生器
