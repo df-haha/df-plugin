@@ -39,9 +39,8 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
 
 ### Phase 0 preflight：確認 df-graph MCP 已就緒（硬性，不可跳過）
 
-本 skill 的讀信偵測（Phase 0）依賴 df-graph MCP（讀信已走 Microsoft Graph，OS 無關）。
-**寄信（Phase 6）** 仍走本地 COM 腳本，於 Stage B 完成前仍需 Windows + Outlook Desktop。
-**開工第一件事**先確認讀信工具在：
+本 skill 的讀信偵測（Phase 0）與寄信建草稿（Phase 6）都走 df-graph MCP（Microsoft Graph，OS 無關，無須 Windows/Outlook Desktop）。
+**開工第一件事**先確認 df-graph 工具在：
 
 1. `ToolSearch("select:mcp__df-graph__mail_list_recent")`
 2. **抓不到 → 立即停止本 skill**，告訴屬下（把觸發詞講白）：
@@ -309,17 +308,24 @@ session-detail 腳本，故不引用它們；缺的欄位就省略或標 N/A，�
 
 ---
 
-## Phase 6：寄出（本 plugin 內建 send_work_log_email.py）
+## Phase 6：寄出（df-graph 建草稿，OS 無關）
 
-> ⚠️ **讀信已走 df-graph；寄信（日報）的 COM 路徑於 Stage B 完成前仍需 Windows + Outlook Desktop。**
-> 此 Phase 使用本地 COM 腳本，非 df-graph。
+寄信已改走 df-graph（純雲端 Graph API，不再需要 Windows + Outlook Desktop）。
+腳本只負責「md → HTML → 寫暫存檔 → emit payload」，由 agent 呼叫 df-graph 建**草稿**（不自動寄出）。
 
-```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_work_log_email.py \
-  daily_proposal/daily_work_log_{target_date}.md --to {主管 email}
-```
-> 收件人（主管 email）用 `--to` 指定，或事先設在 `~/.claude/daily-work-log/config.json` 的 `outlook_email`。
-> 寄信功能已內建，無須額外安裝 daily-work-log plugin。
+1. 跑腳本取得 payload（stdout 為一行 JSON；進度在 stderr）：
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_work_log_email.py \
+     daily_proposal/daily_work_log_{target_date}.md --to {主管 email}
+   ```
+   > 收件人（主管 email）用 `--to` 指定，或事先設在 `~/.claude/daily-work-log/config.json` 的 `outlook_email`。
+   payload 形如：`{"action":"mail_draft","to":...,"subject":...,"body_file":"/tmp/.../*.html","attachments":".../*.md"}`
+2. 用 payload 呼叫 df-graph 建草稿（**大型 HTML 內文走 `body_file`，不經對話**）：
+   ```
+   mcp__df-graph__mail_draft(to=<payload.to>, subject=<payload.subject>,
+                             body_file=<payload.body_file>, attachments=<payload.attachments>)
+   ```
+   草稿會出現在你的「草稿匣」，過目後手動寄出（保留審稿）。
 
 主管會在「每日工作報告」資料夾收到屬下日報。
 - subject: `每日工作報告 {target_date 用 / 分隔}`
@@ -346,4 +352,4 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_work_log_email.py \
 | Phase 1 日誌 md 沒產出 | 腳本只印 JSON——確認你有依 1-2 模板把 JSON 渲染並**寫檔**到 `daily_proposal/daily_work_log_{date}.md`（最常見漏做步驟） |
 | Phase 3 找不到 `## 待處理事項` heading | fallback 到末尾並標 anomaly（已內建） |
 | Phase 4 evidence_hint 找不到對應 repo | 屬下手動指定 repo 路徑，或標 Q{N} 為「待下次回覆」 |
-| Phase 6 Outlook COM 失敗 | 屬下手動 attach md 並寄送 |
+| Phase 6 mail_draft 失敗 | 確認 df-graph 已登入（login.py）；或屬下手動把 md 內容貼成信件寄送 |
