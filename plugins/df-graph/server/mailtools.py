@@ -440,12 +440,32 @@ def _build_message(to, subject, body, cc, bcc, html):
     return msg
 
 
-def mail_send(to: str, subject: str, body: str, cc: str = "", bcc: str = "",
-              html: bool = True, attachments: str = "") -> str:
+def _resolve_body(body, body_file):
+    """body 優先；body 空且給了 body_file 則讀該檔（utf-8）當內文。回傳 (body_str, error_or_None)。
+    用途：大型 HTML 內文（日報/卡片）走本機檔案、不經 agent token 流（避免膨脹與字元走樣）。
+    body_file 應為本機（WSL）路徑，如 /tmp/xxx.html。"""
+    if body:
+        return body, None
+    bf = (body_file or "").strip()
+    if not bf:
+        return body, None  # 兩者皆空 → 空內文（由呼叫端決定是否允許）
+    try:
+        with open(bf, "r", encoding="utf-8") as f:
+            return f.read(), None
+    except OSError as e:
+        return None, f"ERROR: 讀取 body_file 失敗（{bf}）：{e}"
+
+
+def mail_send(to: str, subject: str, body: str = "", cc: str = "", bcc: str = "",
+              html: bool = True, attachments: str = "", body_file: str = "") -> str:
     """寄信。to/cc/bcc 逗號分隔地址；attachments 逗號分隔本機檔案路徑（單檔/總計各上限 150MB）。
-    小附件單發；含 >=3MB 的大檔時自動改走「草稿→分段上傳→送出」。"""
+    小附件單發；含 >=3MB 的大檔時自動改走「草稿→分段上傳→送出」。
+    body 留空且給 body_file 時，從該本機檔案讀 HTML 內文（大型內文免經對話）。"""
     if not _recips(to):
         return "ERROR: 請至少提供一個收件人 (to)。"
+    body, err = _resolve_body(body, body_file)
+    if err:
+        return err
     try:
         files = _collect_files(attachments)
     except ValueError as e:
@@ -474,10 +494,14 @@ def mail_send(to: str, subject: str, body: str, cc: str = "", bcc: str = "",
     return f"Sent to {to}" + (f" cc {cc}" if cc else "") + (f" with {n} attachment(s)" if n else "")
 
 
-def mail_draft(to: str, subject: str, body: str, cc: str = "", bcc: str = "",
-               html: bool = True, attachments: str = "") -> str:
+def mail_draft(to: str, subject: str, body: str = "", cc: str = "", bcc: str = "",
+               html: bool = True, attachments: str = "", body_file: str = "") -> str:
     """建立草稿到「草稿匣」供你在 Outlook 過目後再手動寄出（不會自動送出）。
-    參數同 mail_send（含大附件，最大 150MB）。回傳 draft_id 與 web_link。"""
+    參數同 mail_send（含大附件，最大 150MB）。body 留空且給 body_file 時從該本機檔案讀 HTML 內文。
+    回傳 draft_id 與 web_link。"""
+    body, err = _resolve_body(body, body_file)
+    if err:
+        return err
     try:
         files = _collect_files(attachments)
     except ValueError as e:
@@ -502,12 +526,16 @@ def mail_reply(message_id: str, body: str, reply_all: bool = False) -> str:
     return "Replied" + (" (all)" if reply_all else "")
 
 
-def mail_reply_draft(message_id: str, body: str, reply_all: bool = False) -> str:
+def mail_reply_draft(message_id: str, body: str = "", reply_all: bool = False,
+                     body_file: str = "") -> str:
     """建立『回覆草稿』到草稿匣供你在 Outlook 過目後再寄出（不自動送出）。
     用 Graph createReply/createReplyAll 建 threaded 草稿（保留原信 thread 與引用），
-    再把 body（如卡片 HTML）prepend 到草稿內文上方。
+    再把 body（如卡片 HTML）prepend 到草稿內文上方。body 留空且給 body_file 時從該本機檔案讀。
     與 mail_reply 不同：mail_reply 會【直接寄出】；本工具只建草稿、保留主管審稿。
     回傳 draft_id / web_link / subject。"""
+    body, err = _resolve_body(body, body_file)
+    if err:
+        return err
     action = "createReplyAll" if reply_all else "createReply"
     try:
         d = _req("POST", f"{GRAPH}/me/messages/{_enc(message_id)}/{action}")

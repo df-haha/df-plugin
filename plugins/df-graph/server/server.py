@@ -59,19 +59,22 @@ def mail_download_attachment(message_id: str, attachment_id: str, dest_dir: str 
 
 # ---- 信箱：寫/寄 ----
 @mcp.tool()
-def mail_send(to: str, subject: str, body: str, cc: str = "", bcc: str = "",
-              html: bool = True, attachments: str = "") -> str:
+def mail_send(to: str, subject: str, body: str = "", cc: str = "", bcc: str = "",
+              html: bool = True, attachments: str = "", body_file: str = "") -> str:
     """Send an email as the signed-in user. to/cc/bcc are comma-separated addresses.
-    attachments: comma-separated local file paths (up to 150MB; large files auto-chunked)."""
-    return tools.mail_send(to, subject, body, cc, bcc, html, attachments)
+    attachments: comma-separated local file paths (up to 150MB; large files auto-chunked).
+    body_file: if body is empty, read the HTML body from this local (WSL) file path —
+    use for large bodies so they don't pass through the conversation."""
+    return tools.mail_send(to, subject, body, cc, bcc, html, attachments, body_file)
 
 
 @mcp.tool()
-def mail_draft(to: str, subject: str, body: str, cc: str = "", bcc: str = "",
-               html: bool = True, attachments: str = "") -> str:
+def mail_draft(to: str, subject: str, body: str = "", cc: str = "", bcc: str = "",
+               html: bool = True, attachments: str = "", body_file: str = "") -> str:
     """Create a draft in Drafts for you to review in Outlook before sending (does NOT send).
-    Same params as mail_send. Returns draft_id + web_link."""
-    return tools.mail_draft(to, subject, body, cc, bcc, html, attachments)
+    Same params as mail_send (incl. body_file for large bodies via a local file path).
+    Returns draft_id + web_link."""
+    return tools.mail_draft(to, subject, body, cc, bcc, html, attachments, body_file)
 
 
 @mcp.tool()
@@ -81,11 +84,13 @@ def mail_reply(message_id: str, body: str, reply_all: bool = False) -> str:
 
 
 @mcp.tool()
-def mail_reply_draft(message_id: str, body: str, reply_all: bool = False) -> str:
+def mail_reply_draft(message_id: str, body: str = "", reply_all: bool = False,
+                     body_file: str = "") -> str:
     """Create a REPLY DRAFT (threaded, keeps the original quoted) in Drafts for you to review
     in Outlook before sending — does NOT send. Unlike mail_reply (which sends immediately),
-    this preserves supervisor review. body (e.g. card HTML) is prepended above the quote."""
-    return tools.mail_reply_draft(message_id, body, reply_all)
+    this preserves supervisor review. body (e.g. card HTML) is prepended above the quote;
+    body_file: if body is empty, read the HTML body from this local (WSL) file path."""
+    return tools.mail_reply_draft(message_id, body, reply_all, body_file)
 
 
 @mcp.tool()
