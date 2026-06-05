@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-週報寄信腳本（屬下端）
-
-讀取週報 markdown，轉為 HTML，透過 Outlook COM 開啟草稿視窗並夾帶原 md 附件。
+週報郵件 payload 產生器（df-graph 版，取代舊 Outlook COM）。
+讀取週報 markdown → 轉成郵件 HTML → 寫到本機（WSL）暫存檔 →
+emit JSON payload 給 skill；由 agent 呼叫 mcp__df-graph__mail_draft(body_file=...) 建草稿。
+大型 HTML 內文走 body_file、不經對話 token 流。stdout 只輸出 payload JSON；進度走 stderr。
 
 Usage:
     python3 send_weekly_report_email.py weekly_reports/weekly_report_2026-W16.md
@@ -16,8 +17,8 @@ import argparse
 import html
 import json
 import re
-import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 CONFIG_PATH = Path.home() / ".claude" / "daily-work-log" / "config.json"
@@ -192,59 +193,19 @@ def _inline(text: str) -> str:
 
 
 # ────────────────────────────────────────────────────────────────
-# Outlook COM
+# WSL temp file writer
 # ────────────────────────────────────────────────────────────────
 
-def _to_windows_path(posix_path: Path) -> str:
-    abs_path = str(posix_path.resolve())
-    try:
-        result = subprocess.run(
-            ["wslpath", "-w", abs_path],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return abs_path
-
-
-def open_outlook_draft(subject: str, html_body: str, to_email: str, attachment_path: Path):
-    attach_line = ""
-    if attachment_path.exists():
-        win_path = _to_windows_path(attachment_path)
-        ps_escaped = win_path.replace("'", "''")
-        attach_line = f"$mail.Attachments.Add('{ps_escaped}') | Out-Null"
-
-    ps_script = f'''
-if (-not (Test-Path "C:\\temp")) {{ New-Item -ItemType Directory -Path "C:\\temp" | Out-Null }}
-$htmlContent = @"
-{html_body}
-"@
-[System.IO.File]::WriteAllText("C:\\temp\\weekly_report_email.html", $htmlContent, [System.Text.Encoding]::UTF8)
-$body = [System.IO.File]::ReadAllText("C:\\temp\\weekly_report_email.html", [System.Text.Encoding]::UTF8)
-$outlook = New-Object -ComObject Outlook.Application
-$mail = $outlook.CreateItem(0)
-$mail.To = "{to_email}"
-$mail.Subject = "{subject}"
-$mail.HTMLBody = $body
-{attach_line}
-$mail.Display()
-Remove-Item "C:\\temp\\weekly_report_email.html" -ErrorAction SilentlyContinue
-'''
-
-    result = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-Command", ps_script],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        print("[ERROR] PowerShell 執行失敗：", file=sys.stderr)
-        print(result.stderr, file=sys.stderr)
-        sys.exit(1)
-    print("[OK] Outlook 草稿已開啟，請確認後按發送。")
-    if attach_line:
-        print(f"[OK] 已夾帶附件：{attachment_path.name}")
+def write_body_file(html_body: str, week_tag: str) -> Path:
+    """把 HTML 內文寫到本機（WSL）暫存檔，回傳路徑。
+    供 df-graph mail_draft 的 body_file 讀取——大型內文不經對話 token 流。
+    一律用 WSL 暫存目錄（tempfile），絕不寫 C:\\temp / /mnt/c。"""
+    tmp_dir = Path(tempfile.gettempdir()) / "daily-work-log"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    safe_tag = re.sub(r"[^0-9A-Za-z_-]", "_", week_tag) or "latest"
+    body_file = tmp_dir / f"weekly_report_email_{safe_tag}.html"
+    body_file.write_text(html_body, encoding="utf-8")
+    return body_file
 
 
 def main() -> int:
@@ -276,13 +237,28 @@ def main() -> int:
     week_str = extract_week_from_filename(str(md_path))
     subject = f"週工作報告 {week_str}" if week_str else "週工作報告"
 
+    # 轉換為 HTML，寫到本機暫存檔（大型內文走 body_file，不經對話）
     html_body = md_to_html(md_content)
+    # derive a safe tag from the filename (e.g. "2026-W16")
+    week_match = re.search(r"(\d{4}-W\d{2})", str(md_path))
+    week_tag = week_match.group(1) if week_match else "latest"
+    body_file = write_body_file(html_body, week_tag)
 
-    print(f"[INFO] 郵件標題：{subject}")
-    print(f"[INFO] 收件者：{to_email}")
-    print(f"[INFO] 附件：{md_path.name}")
-    print("[INFO] 正在開啟 Outlook 草稿...")
-    open_outlook_draft(subject, html_body, to_email, md_path)
+    # 輸出 payload 給 skill：由 agent 呼叫 df-graph mail_draft 建草稿（不自動寄出）
+    #   mcp__df-graph__mail_draft(to=<to>, subject=<subject>,
+    #                             body_file=<body_file>, attachments=<attachment>)
+    payload = {
+        "action": "mail_draft",
+        "to": to_email,
+        "subject": subject,
+        "body_file": str(body_file),
+        "attachments": str(md_path.resolve()),
+    }
+    print(f"[INFO] 郵件標題：{subject}", file=sys.stderr)
+    print(f"[INFO] 收件者：{to_email}", file=sys.stderr)
+    print(f"[INFO] 內文暫存：{body_file}", file=sys.stderr)
+    print(f"[INFO] 附件：{md_path.name}", file=sys.stderr)
+    print(json.dumps(payload, ensure_ascii=False))
     return 0
 
 

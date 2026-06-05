@@ -1,0 +1,33 @@
+[project]
+name = "df-graph"
+version = "0.1.0"
+description = "Stateless, id-based Microsoft 365 / Graph MCP server (mail + calendar + people)."
+readme = "README.md"
+requires-python = ">=3.10"
+# 釘版本：避免 mcp/msal 上游改版無預警破壞執行（與 CI 解析到的已知良好版本一致）。
+dependencies = [
+    "mcp==1.27.2",
+    "msal==1.37.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff==0.14.4",
+    "mypy==1.18.2",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# 預設（pyflakes F + pycodestyle E4/E7/E9）再加上 W（警告，如行尾空白）。
+select = ["E4", "E7", "E9", "F", "W"]
+
+[tool.mypy]
+# 寬鬆起步：本專案型別標註少，嚴格模式雜訊過多。先求乾淨、之後可逐步加嚴。
+python_version = "3.10"
+ignore_missing_imports = true        # mcp / msal 無 type stubs
+check_untyped_defs = false
+warn_unused_ignores = true
+warn_redundant_casts = true

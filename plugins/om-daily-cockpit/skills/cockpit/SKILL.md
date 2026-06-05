@@ -1,7 +1,7 @@
 ---
 name: cockpit
-description: Daily Cockpit orchestrator — 由 /hi 委派。整合郵件分流（Outlook MCP）+ 團隊日報追蹤（team-daily-fetcher）+ 教練 directive loop（team-coaching-cards）+（可選）情報/標案/社群雷達。全程 config 驅動、零 hard-code。mode=quick 只跑核心。
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, ToolSearch, TaskCreate, TaskUpdate, TaskList, mcp__outlook-local__list_recent_emails_tool, mcp__outlook-local__load_emails_by_folder_tool, mcp__outlook-local__get_email_by_number_tool, mcp__outlook-local__search_email_by_subject_tool
+description: Daily Cockpit orchestrator — 由 /hi 委派。整合郵件分流（df-graph MCP，read-side）+ 團隊日報追蹤（team-daily-fetcher）+ 教練 directive loop（team-coaching-cards）+（可選）情報/標案/社群雷達。全程 config 驅動、零 hard-code。mode=quick 只跑核心。郵件寄送（coaching directive）目前仍走 Outlook COM 路徑（send-side，待 Stage B 遷移）。
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, ToolSearch, TaskCreate, TaskUpdate, TaskList, mcp__df-graph__mail_list_recent, mcp__df-graph__mail_search, mcp__df-graph__mail_get, mcp__df-graph__folder_list, mcp__df-graph__mail_download_attachment
 ---
 
 # Daily Cockpit Orchestrator
@@ -28,14 +28,14 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, ToolSearch, TaskCreat
 
 > **異常收集**：全程記錄 hook 攔截 / MCP error / script stderr / skill 中斷，統一輸出到報告末尾「🔧 執行紀錄」。
 
-### 1.1 郵件分流（核心，Outlook MCP）
+### 1.1 郵件分流（核心，df-graph MCP）
 
-用 `mcp__outlook-local__list_recent_emails_tool(days=1)` 取收件匣，套用 **email-triage skill** 規則做 P0-P3 分類。
-（MVP 走 outlook_local MCP，不依賴外部 webhook。）
+用 `mcp__df-graph__mail_list_recent(days=1, folder="inbox")` 取收件匣，套用 **email-triage skill** 規則做 P0-P3 分類。
+（郵件讀取走 df-graph MCP，不需 Outlook Desktop。）
 
 ### 1.5 團隊日報（核心）
 
-委派 **team-daily-fetcher skill**（傳 `--config`）：算最近工作日 → 本地快取檢查 → `fetch_daily_reports.py --config` 抓附件 → MCP 讀 body → 格式檢查 → AI 用量抽取 → 解析 om-daily-work-log 的 `OM_QA` anchor → 交叉比對 `config.paths.tracking_files`（空則跳過對齊分析）。產出「🎯 團隊引導」結構化區塊。
+委派 **team-daily-fetcher skill**（傳 `--config`）：算最近工作日 → 本地快取檢查 → df-graph resolve 資料夾 → 列信 → 讀 body + 下載附件 → 改名成員前綴 → 格式檢查 → AI 用量抽取 → 解析 om-daily-work-log 的 `OM_QA` anchor → 交叉比對 `config.paths.tracking_files`（空則跳過對齊分析）。產出「🎯 團隊引導」結構化區塊。
 
 ### 1.3 情報（可選；`config.modules.intel.enabled`）
 
@@ -133,8 +133,9 @@ python3 "$SCC" {daily_proposal_dir}/team_coaching_cards_{target_date}.md \
 
 | 失敗服務 | 偵測 | 降級 | 提示 |
 |----------|------|------|------|
-| Outlook MCP | 呼叫失敗 | 讀本地 `{archive_dir}/{date}/` 快取 | 「⚠️ Outlook MCP 不可用，使用本地快取」|
-| team-daily-fetcher COM | fetch errors stage=setup | 只走 MCP body，跳過附件歸檔 | 「⚠️ Outlook COM 不可用，請確認 Outlook Desktop 已啟動」|
+| df-graph MCP（郵件讀取） | 呼叫失敗 / 未登入 | 讀本地 `{archive_dir}/{date}/` 快取 | 「⚠️ df-graph 不可用（跑 df-graph-setup skill 重新登入），使用本地快取」|
+| team-daily-fetcher 附件下載 | `mail_download_attachment` ERROR | 只用 body 分析，跳過附件歸檔 | 「⚠️ 附件下載失敗，改用 body 分析」|
+| coaching directive 寄送（send-side COM） | Outlook Desktop 未啟動 | 跳過自動寄信，提示手動確認 | 「⚠️ Outlook COM 不可用，coaching 寄信需 Outlook Desktop 已啟動」|
 | intel/tender script | script error | 查既有 / 跳過該區 | 「⚠️ {模組}爬蟲不可用」|
 | tracking_files 讀取 | Read error | 對齊度顯示「—」 | 「⚠️ tracking 檔讀取失敗」|
 

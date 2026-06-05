@@ -1,7 +1,7 @@
 ---
 name: om-daily-work-log
 description: OM 營運部專用日誌產生器（基於 daily-work-log plugin 擴展）。除了通用日誌功能外，自動偵測主管 compose/reply 的催辦信（directive marker 契約，繞過 reply-chain 限制），引導屬下用 CC 查 git/spec/tasks 後在新一日日報的「## 主管疑問回覆」區塊（HTML anchor 標記）填答。觸發時機：屬下說「日誌」「工作日誌」「彙整工作進度」「整理今天的工作」「日報」「工作報告」（OM 屬下機器優先觸發此 skill 而非通用 daily-work-log）。
-allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, Skill, mcp__outlook-local__list_recent_emails_tool, mcp__outlook-local__get_folder_list_tool, mcp__outlook-local__search_email_by_subject_tool, mcp__outlook-local__get_email_by_number_tool
+allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, TaskUpdate, TaskList, AskUserQuestion, Skill, mcp__df-graph__mail_list_recent, mcp__df-graph__mail_search, mcp__df-graph__folder_list, mcp__df-graph__mail_get
 ---
 
 # OM 營運部日誌 + 主管疑問回覆閉環
@@ -37,15 +37,16 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
 
 ## Phase 0：偵測主管催辦信（directive-first）
 
-### Phase 0 preflight：確認 outlook-local MCP 已就緒（硬性，不可跳過）
+### Phase 0 preflight：確認 df-graph MCP 已就緒（硬性，不可跳過）
 
-本 skill 的偵測（Phase 0）與寄信（Phase 6）都依賴 outlook-local MCP。**開工第一件事**先確認它在：
+本 skill 的讀信偵測（Phase 0）與寄信建草稿（Phase 6）都走 df-graph MCP（Microsoft Graph，OS 無關，無須 Windows/Outlook Desktop）。
+**開工第一件事**先確認 df-graph 工具在：
 
-1. `ToolSearch("select:mcp__outlook-local__list_recent_emails_tool")`
+1. `ToolSearch("select:mcp__df-graph__mail_list_recent")`
 2. **抓不到 → 立即停止本 skill**，告訴屬下（把觸發詞講白）：
-   > 未偵測到 **outlook-local** MCP，無法自動讀主管催辦信／寄日報。
+   > 未偵測到 **df-graph** MCP，無法自動讀主管催辦信。
    > 請先跑 **work-log onboarding**——對我說「**work-log setup**」或「**設定 daily work-log**」，
-   > 它會引導你安裝 outlook-local MCP server 並設好你的 `member_id`，設好再回來說「日報」。
+   > 它會引導你安裝 df-graph plugin 並走 device-code 登入，設好再回來說「日報」。
 3. **抓得到 → 繼續**下方偵測流程。
 
 ### 目標
@@ -63,20 +64,21 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, ToolSearch, TaskCreate, Task
   <!-- OM_DIRECTIVE directive_id=<id> target_date=<YYYY-MM-DD> employee_id=<id> source=compose|reply -->
   ```
 
-### 執行（主要：Claude + Outlook MCP）
+### 執行（主要：Claude + df-graph MCP）
 
 > **以 OM_DIRECTIVE marker 為唯一可靠訊號**，不要硬依賴主旨前綴（主管可在 cockpit config
 > 自訂 `directive.subject_prefix`，屬下端不一定知道實際值）。主旨前綴只當「縮小掃描範圍」的軟過濾。
 
-1. `ToolSearch("select:mcp__outlook-local__search_email_by_subject_tool,mcp__outlook-local__list_recent_emails_tool,mcp__outlook-local__get_email_by_number_tool")`
-2. **掃近期信**：`list_recent_emails_tool(days=7)`（放寬到一週，涵蓋連假/請假/補寄；天數寧多勿少，靠 marker 精準命中）。
-   逐封 `get_email_by_number_tool(email_number=N, mode="basic")` 取 body，抽 marker：
+1. `ToolSearch("select:mcp__df-graph__mail_search,mcp__df-graph__mail_list_recent,mcp__df-graph__mail_get")`
+2. **掃近期信**：`mcp__df-graph__mail_list_recent(days=7)`（放寬到一週，涵蓋連假/請假/補寄；天數寧多勿少，靠 marker 精準命中）。
+   回傳陣列每筆含 `{id, subject, from, date, is_read, preview}`。
+   逐封以 `id` 欄位呼叫 `mcp__df-graph__mail_get(message_id=<id>, mode="full")`（**必須 `mode="full"`**，`concise` 會去掉 HTML comment，`<!-- OM_DIRECTIVE … -->` marker 會消失）取 body，抽 marker：
    ```python
    import re
    M = re.compile(r"<!--\s*OM_DIRECTIVE\s+(?P<meta>[^>]+?)-->")
    META = re.compile(r"(\w+)=(\S+)")   # directive_id / target_date / employee_id / source
    ```
-   （若已知主旨前綴，可先 `search_email_by_subject_tool` 縮範圍，但**最終以 marker 命中為準**。）
+   （若已知主旨前綴，可先 `mcp__df-graph__mail_search(subject_prefix=<前綴>, days=7)` 縮範圍，但**最終以 marker 命中為準**。）
 3. **日期語義（關鍵）**：directive 的 `target_date` 指「**被追問的那份日報的日期**」——也就是屬下
    **上一個工作日**的日報，不是今天。先算 `prev = 上一個工作日(今天的報告日)`（遇連假往前找）。
 4. 取 marker `target_date == prev`、`employee_id == 自己` 者的**最新一封**。
@@ -306,14 +308,24 @@ session-detail 腳本，故不引用它們；缺的欄位就省略或標 N/A，�
 
 ---
 
-## Phase 6：寄出（本 plugin 內建 send_work_log_email.py）
+## Phase 6：寄出（df-graph 建草稿，OS 無關）
 
-```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_work_log_email.py \
-  daily_proposal/daily_work_log_{target_date}.md --to {主管 email}
-```
-> 收件人（主管 email）用 `--to` 指定，或事先設在 `~/.claude/daily-work-log/config.json` 的 `outlook_email`。
-> 寄信功能已內建，無須額外安裝 daily-work-log plugin。
+寄信已改走 df-graph（純雲端 Graph API，不再需要 Windows + Outlook Desktop）。
+腳本只負責「md → HTML → 寫暫存檔 → emit payload」，由 agent 呼叫 df-graph 建**草稿**（不自動寄出）。
+
+1. 跑腳本取得 payload（stdout 為一行 JSON；進度在 stderr）：
+   ```bash
+   python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_work_log_email.py \
+     daily_proposal/daily_work_log_{target_date}.md --to {主管 email}
+   ```
+   > 收件人（主管 email）用 `--to` 指定，或事先設在 `~/.claude/daily-work-log/config.json` 的 `outlook_email`。
+   payload 形如：`{"action":"mail_draft","to":...,"subject":...,"body_file":"/tmp/.../*.html","attachments":".../*.md"}`
+2. 用 payload 呼叫 df-graph 建草稿（**大型 HTML 內文走 `body_file`，不經對話**）：
+   ```
+   mcp__df-graph__mail_draft(to=<payload.to>, subject=<payload.subject>,
+                             body_file=<payload.body_file>, attachments=<payload.attachments>)
+   ```
+   草稿會出現在你的「草稿匣」，過目後手動寄出（保留審稿）。
 
 主管會在「每日工作報告」資料夾收到屬下日報。
 - subject: `每日工作報告 {target_date 用 / 分隔}`
@@ -336,8 +348,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_work_log_email.py \
 
 | 問題 | 解法 |
 |------|------|
-| Phase 0 找不到主管郵件 | 確認 Outlook MCP 連線；確認屬下「寄件備份」資料夾有 previous_workday 日報 |
+| Phase 0 找不到主管郵件 | 確認 df-graph MCP 連線（`mcp__df-graph__mail_list_recent` 能否呼叫）；確認 directive marker `employee_id` 與自己的 `member_id` 一致 |
 | Phase 1 日誌 md 沒產出 | 腳本只印 JSON——確認你有依 1-2 模板把 JSON 渲染並**寫檔**到 `daily_proposal/daily_work_log_{date}.md`（最常見漏做步驟） |
 | Phase 3 找不到 `## 待處理事項` heading | fallback 到末尾並標 anomaly（已內建） |
 | Phase 4 evidence_hint 找不到對應 repo | 屬下手動指定 repo 路徑，或標 Q{N} 為「待下次回覆」 |
-| Phase 6 Outlook COM 失敗 | 屬下手動 attach md 並寄送 |
+| Phase 6 mail_draft 失敗 | 確認 df-graph 已登入（login.py）；或屬下手動把 md 內容貼成信件寄送 |

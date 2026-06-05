@@ -462,21 +462,28 @@ python3 ${CLAUDE_PLUGIN_ROOT}/scripts/extract_session_details.py {session1_full_
 
 ### 6-2. 執行寄信（若有設定 email）
 
+寄信已改走 df-graph（純雲端 Graph API，不再需要 Windows + Outlook Desktop）。
+腳本只負責「md → HTML → 寫暫存檔 → emit payload」，由 agent 呼叫 df-graph 建**草稿**（不自動寄出）。
+
 讀取 `~/.claude/daily-work-log/config.json`：
 - `outlook_email` 為空 → 告知「寄信功能未設定，如需啟用請執行 Phase 0 設定流程」，標記完成
-- `outlook_email` 有值 → 執行寄信腳本：
+- `outlook_email` 有值 → 跑腳本取得 payload（stdout 為一行 JSON；進度在 stderr）：
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/scripts/send_work_log_email.py daily_proposal/daily_work_log_{YYYY-MM-DD}.md
 ```
 
-腳本會自動：
-- 讀取 md 檔並轉換為正式郵件 HTML（微軟正黑體、品牌綠配色）
-- 郵件標題：`每日工作報告 YYYY/MM/DD`
-- 收件者：讀取 config 的 `outlook_email`
-- 透過 Outlook COM 開啟草稿視窗（**不會自動發送**）
+payload 形如：`{"action":"mail_draft","to":...,"subject":...,"body_file":"/tmp/.../*.html","attachments":".../*.md"}`
 
-告知使用者：「Outlook 草稿已開啟，請確認內容後按發送。」
+用 payload 呼叫 df-graph 建草稿（**大型 HTML 內文走 `body_file`，不經對話**）：
+```
+mcp__df-graph__mail_draft(to=<payload.to>, subject=<payload.subject>,
+                          body_file=<payload.body_file>, attachments=<payload.attachments>)
+```
+
+草稿會出現在你的「草稿匣」，過目後手動寄出。
+
+告知使用者：「郵件草稿已建立在草稿匣，請確認內容後手動寄出。」
 
 **注意**：
 - 郵件語氣為正式商務風格，主管會看——強調成果與進度，技術細節簡化
