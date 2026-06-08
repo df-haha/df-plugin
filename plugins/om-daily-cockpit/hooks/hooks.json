@@ -1,0 +1,38 @@
+{
+  "description": "om-daily-cockpit coaching 守衛：Stop 防跳過引導草稿、PreToolUse 卡片語氣/欄位/串錯人 lint、Bash 未驗證 email 實寄 gate。全部 fail-open（守衛內部錯誤一律放行）。",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/stop_coaching_guard.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/coaching_card_lint.py\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/coaching_send_gate.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

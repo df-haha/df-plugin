@@ -1,6 +1,6 @@
 {
   "name": "om-daily-work-log",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "營運主管/屬下雙向 async coaching loop（自給自足，員工只裝這一個）。屬下端：產日誌 + directive-first 偵測主管催辦信並用 CC 查證回覆，HTML anchor 標記讓主管 /hi 解析閉環；主管端：產澄清問題卡，compose/reply 兩路寄出（嚴格 email 比對防串錯人）。日誌與寄信功能 vendored 自 daily-work-log，無須額外安裝相依 plugin。",
   "author": {
     "name": "df-haha"

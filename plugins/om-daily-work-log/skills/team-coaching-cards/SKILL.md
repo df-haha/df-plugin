@@ -48,10 +48,21 @@ ls -1 data/daily_reports/{target_date}/*_daily_work_log_{target_date}.md
 # 讀 config.paths.tracking_files 列出的任務/進度文件（若 config 有設定）
 Read <config.paths.tracking_files 的每個檔>
 ```
+
+> 🔴 **HARD GATE：讀「最新一週」的逐人列，不是讀整檔頭尾。**
+> 追蹤檔通常是逐週累積（可能數百行、回溯數月）。**只讀頭尾會抓到過期數字**（吃過虧：把 3 月的 25% 當基準、把支線當主項）。
+> 強制步驟：
+> 1. `grep -nE "週報|準會議|會議實際" <檔>` 找出**最新一週**的段落起始行。
+> 2. `Read(offset=最新週起始行)` 把那一週的**降本項目表 + 增效項目表完整讀進來**。
+> 3. 對**每位屬下**抽出其 tracked 列的：**達成率% / RAG / 預計完成日 / 🔴卡關 / 追蹤事項**（逐欄，不是憑印象）。
+> 4. 注意**一人可能有多個 tracked 主項**（例：靠行對帳 + 鋼廠買貨各一列）——全部抽，不要只抓一個。
+
 抽每位屬下的：
-- 任務線清單
+- 任務線清單（**最新一週逐人列的 tracked 主項，含達成率/RAG/卡關**）
 - tracking_files 追蹤項目對應（若 config 有設定）
 - 主管已知前提（如：某專案架構 = 上級已拍板、某任務優先序 = 主管要求）
+
+> ⚠️ 若手動跑 cockpit（未 invoke team-daily-fetcher skill）導致 daily_proposal 的「🎯 團隊引導」對齊度是弱的/缺的 → **本 1.2 的 HARD GATE 不可跳過**，必須自己把最新週逐人列讀齊，否則卡片會對齊到「日報講了什麼」而非「追蹤檔要交付什麼」。
 
 ### 1.3 team-daily-fetcher 已產出的對齊度判斷
 從 daily_proposal/daily_proposal_{target_date}.md 抽「🎯 團隊引導」區塊：
@@ -87,6 +98,9 @@ Read <config.paths.tracking_files 的每個檔>
 - [ ] 不問 token / AI 成本（除非 soft note）
 - [ ] 接受主管已知前提
 - [ ] **可用 CC 查證**（題目出處可指向 git log / commit / spec.md / plan.md / tasks.md）
+- [ ] 🔴 **對得到 tracked 卡關（相關性 gate）**：本題必須對應到 1.2 抽出的「最新一週逐人列」的 **🔴卡關 / 追蹤事項 / 達成率缺口** 其一；**若題目指向追蹤檔沒有的支線**（如某個不在表內的功能/雜務），則該題**必須明標 `scope 釐清`**（問「這是新指派/支線/前置？與 tracked 主項的優先序？」），不得當成一般進度題混入。
+
+> ⚠️ **為何加這條**：原 checklist 只防「可不可查證」，不防「相不相關」。一個綁了 git commit、語氣溫和的問題可以通過全部 gate，卻在問追蹤檔根本沒列的支線（吃過虧：問 D029 支線、漏掉 tracked 的🔴磅單持久化）。**可查證 ≠ 對得準**；每張卡至少要有過半題目命中該成員的 tracked 卡關，否則回 Phase 1.2 重抽。
 
 任一題失敗 → 重寫該題
 

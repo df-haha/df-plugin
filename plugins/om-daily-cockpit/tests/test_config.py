@@ -250,6 +250,43 @@ def test_member_by_email_strict_match(tmp_path):
     assert cfg.member_by_email("") is None
 
 
+# --- email_verified（coaching send gate 防串錯人）-----------------------
+
+def test_verified_defaults_false_when_absent(tmp_path):
+    cfg = load_config(_write_md(tmp_path, BASE))
+    # BASE 未填 verified → 兩人皆 False
+    assert all(m.email_verified is False for m in cfg.members)
+    assert cfg.member_by_email("a.chen@acme.example").is_verified() is False
+
+
+def test_verified_true_parsed(tmp_path):
+    d = copy.deepcopy(BASE)
+    d["team"]["members"][0]["verified"] = True
+    cfg = load_config(_write_md(tmp_path, d))
+    m = cfg.member_by_email("a.chen@acme.example")
+    assert m.email_verified is True
+    assert m.is_verified() is True
+    assert m.is_verified("a.chen@acme.example") is True
+    # alias 永遠視為 unverified（verified 只擔保主 email）
+    assert m.is_verified("achen@personal.example") is False
+    # 另一人未標 → 仍 False
+    assert cfg.member_by_email("b.lin@acme.example").is_verified() is False
+
+
+def test_verified_false_explicit_parsed(tmp_path):
+    d = copy.deepcopy(BASE)
+    d["team"]["members"][0]["verified"] = False
+    cfg = load_config(_write_md(tmp_path, d))
+    assert cfg.member_by_email("a.chen@acme.example").is_verified() is False
+
+
+def test_verified_non_bool_rejected(tmp_path):
+    d = copy.deepcopy(BASE)
+    d["team"]["members"][0]["verified"] = "yes"
+    with pytest.raises(ConfigError, match="verified"):
+        load_config(_write_md(tmp_path, d))
+
+
 # --- fenced block edge cases --------------------------------------------
 
 def test_no_config_block(tmp_path):

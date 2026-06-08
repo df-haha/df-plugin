@@ -58,10 +58,23 @@ class Member:
     name: str
     email: str
     alias_allowlist: list[str] = field(default_factory=list)
+    # 主 email 是否經目錄/實證確認。coaching hook 用此擋「未確認 email 拿去實寄」（防串錯人）。
+    # 預設 False（onboarding 代填的推斷 email 視為未確認），經實證後在 config 標 verified: true。
+    email_verified: bool = False
 
     def all_emails(self) -> list[str]:
         """主 email + 所有 alias（小寫化），供嚴格比對用。"""
         return [self.email.lower(), *(a.lower() for a in self.alias_allowlist)]
+
+    def is_verified(self, addr: str | None = None) -> bool:
+        """addr=None → 主 email 是否 verified。
+
+        給 addr → 該位址是否為「已驗證的主 email」。alias_allowlist 內位址永遠視為
+        unverified（verified 旗標只擔保主 email；若未來要驗證 alias 另立 verified_aliases）。
+        """
+        if addr is None:
+            return self.email_verified
+        return addr.strip().lower() == self.email.lower() and self.email_verified
 
 
 @dataclass
@@ -241,7 +254,12 @@ def _build_config(d: dict) -> Config:
             if al.lower() in seen_email:
                 raise ConfigError(f"member {mid} alias email 與其他成員重複：{al!r}")
             seen_email.add(al.lower())
-        members.append(Member(mid, m["name"], email, [str(a) for a in aliases]))
+        verified = m.get("verified", False)
+        if not isinstance(verified, bool):
+            raise ConfigError(f"member {mid} verified 必須是 true/false，得到 {verified!r}")
+        members.append(
+            Member(mid, m["name"], email, [str(a) for a in aliases], email_verified=verified)
+        )
     if not members:
         raise ConfigError("至少要一個 team.member")
 

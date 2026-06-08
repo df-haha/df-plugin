@@ -1,6 +1,6 @@
 {
   "name": "om-daily-cockpit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "營運主管每日駕駛艙 — /hi 整合郵件分流 + 團隊日報追蹤 + async coaching directive loop +（可選）情報/標案/社群雷達。department-agnostic、config 驅動、零 hard-code。",
   "author": {
     "name": "df-haha"
@@ -11,7 +11,7 @@
     "depends_on_plugins": [
       {
         "name": "om-daily-work-log",
-        "min_version": "1.3.0",
+        "min_version": "1.3.1",
         "reason": "屬下端日教練 loop（directive-first 偵測 + 引導補答，自給自足）與 team-coaching-cards 主管端寄卡（--mode compose + 嚴格 email）"
       }
     ],
@@ -24,8 +24,9 @@
       }
     },
     "requires_mcp": {
-      "required": ["outlook-local"],
-      "optional": ["postgres"]
+      "required": ["df-graph"],
+      "optional": ["outlook-local", "postgres"],
+      "_note": "df-graph：日報/郵件讀側（核心，純雲端 Graph）；outlook-local：僅 coaching 寄送端（COM，Stage B 遷移前暫用）"
     },
     "default_enabled_modules": ["quick", "team-daily-fetcher", "directive", "email-triage"],
     "audience": ["supervisor"]
