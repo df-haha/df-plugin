@@ -20,7 +20,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, ToolSearch, TaskCreat
 
 1. 載入 config（`--config` 或 `OM_DAILY_COCKPIT_CONFIG`），`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/oc_core/config.py --validate <cfg>`。
 2. 取用：`identity`（署名/語氣）、`team.members`、`email.*`、`paths.*`、`modules.*`。
-3. `mode=quick` → 只跑 Phase 1.1 + 1.5 + 3.X + 4（核心）；`mode=full` → 加所有 `modules.*.enabled=true` 區塊。
+3. `mode=quick` → 只跑 Phase 1.1 + 1.5 + 3.X + 3.H + 4（核心）；`mode=full` → 加所有 `modules.*.enabled=true` 區塊。
 
 ---
 
@@ -93,6 +93,18 @@ python3 "$SCC" {daily_proposal_dir}/team_coaching_cards_{target_date}.md \
 
 ---
 
+## Phase 3.H：Personal Hub 注入（cc-memory-hi，唯讀）
+
+若 session 有 `mcp__cc-memory-hi__*` 工具：
+1. 呼 `cc_task_stats`（**不帶任何 project 參數**——instance 已 forced `__personal__`）取得 today / overdue / open 統計。
+2. overdue > 0 或 today > 0 時，呼 `cc_task_list`（status=open，**同樣不帶 project 參數**）列出前 5 筆，整理成「📌 個人待辦」小節放在駕駛艙摘要最末。
+3. 全部唯讀：本節**禁止**呼叫任何 cc_task_create / cc_task_update / cc_task_set_reminder / cc_task_snooze / cc_memory_save / cc_memory_delete；該 instance 本身也會拒絕（雙層保險）。
+4. 工具不存在（未註冊／離線）→ 跳過本節，不報錯、不影響其他模組。
+
+mode=quick 也跑本節（兩個 read call 很便宜，且個人待辦正是晨間最需要的）。
+
+---
+
 ## Phase 4：報告產出
 
 存檔至 `{config.paths.daily_proposal_dir}/daily_proposal_{YYYY-MM-DD}.md`。署名/語氣用 `config.identity`。
@@ -117,6 +129,9 @@ python3 "$SCC" {daily_proposal_dir}/team_coaching_cards_{target_date}.md \
 
 ## 📡 情報精選（僅 intel 啟用；First-Principles 5 欄表）
 ## 📋 標案機會（僅 tender 啟用）
+
+## 📌 個人待辦（cc-memory-hi 有資料時才顯示）
+（cc_task_list 前 5 筆；overdue/today 皆 0 則省略整節）
 
 ## 💡 待確認提案
 | # | 操作 | 內容 |

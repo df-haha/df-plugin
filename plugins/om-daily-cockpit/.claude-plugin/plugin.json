@@ -1,6 +1,6 @@
 {
   "name": "om-daily-cockpit",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "營運主管每日駕駛艙 — /hi 整合郵件分流 + 團隊日報追蹤 + async coaching directive loop +（可選）情報/標案/社群雷達。department-agnostic、config 驅動、零 hard-code。",
   "author": {
     "name": "df-haha"
