@@ -97,7 +97,7 @@ services:
       retries: 5
     restart: unless-stopped
 
-  adminer:                                # 選配；正式環境的安全底線見 optional-services.md
+  adminer:                                # 選配；Adminer 已移到姊妹 skill coolify-db references/adminer.md
     image: adminer:4.8.1-standalone       # 第三方固定版工具，允許 pinned literal
     environment:
       SERVICE_URL_ADMINER_8080:           # 冒號後留空
@@ -111,13 +111,13 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  seq:                                    # 選配；CLEF / first-run 密碼規則見 optional-services.md
+  seq:                                    # 選配；CLEF / first-run 密碼規則見 seq.md
     image: datalust/seq:${SEQ_VERSION}   # per-service 版本變數，禁 latest
     environment:
       ACCEPT_EULA: "Y"
       SERVICE_URL_SEQ_80:                 # 冒號後留空
       SEQ_FIRSTRUN_ADMINUSERNAME: admin
-      SEQ_FIRSTRUN_ADMINPASSWORD:         # 留空：非 magic env，不可寫 ${...}（見 optional-services.md）
+      SEQ_FIRSTRUN_ADMINPASSWORD:         # 留空：非 magic env，不可寫 ${...}（見 seq.md）
       TZ: Asia/Taipei
     # ⚠️ 故意不設 healthcheck — datalust/seq 不一定有 curl/wget，易卡死
     expose:
@@ -135,7 +135,7 @@ volumes:
     name: ${COMPOSE_PROJECT_NAME}-seq-data
 ```
 
-> Adminer / Seq 是**選配**服務。不需要就整段移除（含其 volume 與其他 service 對它的 `depends_on`）；勾選與生成必須一致，否則屬安全/設定事件——詳見 `optional-services.md`。
+> Adminer / Seq 是**選配**服務。不需要就整段移除（含其 volume 與其他 service 對它的 `depends_on`）；勾選與生成必須一致，否則屬安全/設定事件。詳見：Adminer → 姊妹 skill `coolify-db references/adminer.md`；Seq → `seq.md`。
 
 ---
 
@@ -164,7 +164,36 @@ volumes: {}
 
 ---
 
-## development 變體
+## `expose` vs `ports` —— 多環境踩雷整理
+
+| 場景 | 主檔 `ports`？ | override.yml | 風險 |
+|------|--------------|--------------|------|
+| production 任何 service | ❌ 禁 | — | 同主機跑多個 stack 時 host port 衝突（典型：兩個 postgres 都搶 5432，後啟動的整個 stack 起不來）。Coolify 反代只需 `expose` 就能對外路由 |
+| 本機開發要對 DB 連 | ❌ 主檔仍只寫 `expose` | ✅ 寫在 `docker-compose.override.yml` 的 `ports` | Coolify 預設**不讀 override**，本機 `docker compose up` 自動疊加 —— 設計上的安全分離 |
+| dev 變體（`docker-compose.development.yml`） | ✅ 可開 | 不用 override | 顯式以「不同檔名」與 production 分離，IDE / 工具知道走哪個 |
+
+### override.yml pattern
+
+```yaml
+# docker-compose.yml（production / Coolify 用，只 expose）
+services:
+  postgres:
+    image: postgres:${POSTGRES_VERSION}
+    expose:
+      - "5432"
+
+# docker-compose.override.yml（本機開發用，git tracked 也 OK —— 不含機密）
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5433:5432"  # bind 127.0.0.1 避開公網；5433 避主機已開 5432 衝突
+```
+
+`docker compose up` 在同目錄會自動疊加 override；Coolify 部署時忽略 override。**禁**把 `ports:` 寫進主檔再用註解「production 記得拿掉」—— 一定會有人忘記。
+
+---
+
+## development 變體（顯式 dev compose）
 
 本地開發用獨立檔 `docker-compose.development.yml`，通常只跑 `postgres`（後端 / 前端走各自的 dev server）。**dev 變體允許對 postgres 開 `ports`** 給本機 dev server 連線——這是 dev 例外，production 主檔禁開 `ports`。
 
@@ -216,7 +245,7 @@ volumes:
 ### depends_on
 - 依賴**有 healthcheck** 的 service 才用 `condition: service_healthy`。
 - 依賴 **Seq**（無 healthcheck）**禁** `service_healthy`，只能 plain `depends_on` 或明標 `condition: service_started`。
-- **log ingestion 不得因 Seq 未 healthy 阻斷主服務啟動**（logger 要能 fallback console，見 `optional-services.md`）。
+- **log ingestion 不得因 Seq 未 healthy 阻斷主服務啟動**（logger 要能 fallback console，見 `seq.md`）。
 
 ### TZ
 - 每個 service 必設 `TZ: Asia/Taipei`（時戳對齊，ISO 8601 + offset）。Dockerfile 端也要裝 `tzdata` 並設 `TZ`。

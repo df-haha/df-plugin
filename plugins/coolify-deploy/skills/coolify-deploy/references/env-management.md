@@ -94,7 +94,7 @@ Coolify Runtime Env  >  image 內 ENV  >  app code 預設
 - [ ] `JWT_SECRET_KEY`（32+ 字元隨機，**禁** development 預設值）
 - [ ] `CORS_ORIGINS`（限本網域，**禁** `["*"]`，見 `domains-and-tls.md`）
 - [ ] 其他 per-service 版本變數（`REDIS_VERSION` / `SEQ_VERSION` 等，視 compose 用到哪些）
-- [ ] 選配服務必填 env（生成 seq → `SEQ_FIRSTRUN_ADMINPASSWORD` 等，見 `optional-services.md`）
+- [ ] 選配服務必填 env（生成 seq → `SEQ_FIRSTRUN_ADMINPASSWORD` 等，見 `seq.md`）
 - [ ] 第三方 API key（SMTP / Stripe / Azure AD / Sentry DSN…）
 - [ ] `TZ=Asia/Taipei`（若 image 沒設好）
 

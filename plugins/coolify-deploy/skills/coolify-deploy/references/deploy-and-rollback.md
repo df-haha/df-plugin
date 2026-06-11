@@ -62,6 +62,85 @@
 9. 不健康 → Coolify 自動回滾（見下方回滾段）
 ```
 
+## Scheduled Task / 排程備份 —— 必用「長駐 idle container + docker exec」
+
+Coolify v4 的 Scheduled Task 設計上**只能 `docker exec` 進已運作中的容器**跑指令，**不支援 `docker compose run` / `docker run` 建臨時容器**（這個限制目前沒有 UI 揭露，安排上去會看似成功但實際無事發生，或在 docker exec 階段噴 `Container is not running`）。
+
+對「每天一次跑 backup-to-r2.sh / sync-from-r2.sh / cron-like 任務」這類需求，**正解**是：在 compose 加一個**長駐 idle container** 專門讓 Scheduled Task 進去 exec：
+
+```yaml
+services:
+  backup:
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
+    environment:
+      TZ: Asia/Taipei
+      # 連 DB 用 compose 內網 service 名
+      DB_HOST: postgres
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB}
+      # 對外服務憑證走 runtime env
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # 關鍵：常駐睡眠，等 Scheduled Task 進來 exec
+    command: ["sleep", "infinity"]
+    restart: unless-stopped
+```
+
+Coolify Application → Scheduled Tasks → Add Task：
+- Frequency：cron expression（例 `0 3 * * *` 每天 03:00）
+- Command：`/app/backup-to-r2.sh`（image 內絕對路徑；script 自己處理錯誤碼與 log）
+- Container：選 `backup` service
+
+**禁** 把備份腳本塞進 backend service 跑 cron —— 違反「一 container 一進程」、混在一起難 debug、且 backend 重啟就漏跑。**禁** 用 `restart: "no"` + entrypoint 跑一次 —— 那是 one-shot migration 的形狀（見 coolify-db skill），不是 cron。
+
+---
+
+## Dockerfile ENTRYPOINT 與 compose `command:` 互咬
+
+ENTRYPOINT + command 的組合在 Docker 是「ENTRYPOINT 是不可變的前綴，CMD/command 變成它的參數」。寫 sync / backup script 時最常見的踩雷：
+
+```dockerfile
+# backup/Dockerfile
+ENTRYPOINT ["/app/sync.sh"]   # 寫死執行 sync.sh
+```
+
+```yaml
+# docker-compose.yml
+backup:
+  build: ./backup
+  command: ["sleep", "infinity"]   # 想用 idle 模式
+```
+
+實際執行的是 `/app/sync.sh sleep infinity` —— sync.sh 不認識這兩個 argv，要嘛無視、要嘛吃錯參數崩潰、要嘛卡在 sync.sh 自己的等待邏輯不會 idle。
+
+**規則**：
+
+- 想讓 compose `command:` **完全覆寫**啟動指令 → Dockerfile 用 `CMD` 不要用 `ENTRYPOINT`，或顯式 `ENTRYPOINT []` 清空。
+- 想讓 ENTRYPOINT 固定但 command 帶可變參數（典型：migration script 接環境名）→ ENTRYPOINT 寫成接受 argv 的 dispatcher：
+  ```dockerfile
+  ENTRYPOINT ["/app/entrypoint.sh"]
+  ```
+  ```bash
+  # entrypoint.sh
+  #!/bin/sh
+  case "$1" in
+    sleep) exec sleep infinity ;;
+    sync)  exec /app/sync.sh ;;
+    *)     exec "$@" ;;        # fallback 透傳
+  esac
+  ```
+- one-shot migration container：用 `command:` 寫腳本即可，**禁** Dockerfile 另設 ENTRYPOINT 蓋過。
+
+`docker compose config` 印不出來這個問題（YAML 合法），會在 container 啟動才炸 —— Coolify deployment log 只看到 `Container is unhealthy`，要靠 runtime log 才找得到根因。所以 **寫了 ENTRYPOINT 的 image，compose 端任何 `command:` 都要實際 `docker compose up` 跑一遍驗**，不要相信只跑 config。
+
+---
+
 ## Migration 時機
 
 DB migration（如 Alembic）**必**在容器**啟動**時跑，**禁**手動在跳板機跑 `alembic upgrade head`（失去 audit trail、易與部署不同步）：
