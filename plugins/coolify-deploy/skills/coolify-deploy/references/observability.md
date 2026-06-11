@@ -4,7 +4,7 @@
 
 三層：**Log**（Coolify 內建 stdout 收集）、**Metric**（Coolify 內建 + 可選外接）、**錯誤追蹤 / APM**（Sentry 或同等）。
 
-> 集中式 log（Seq / CLEF）的架構、SDK、first-run 密碼等細節是 **`optional-services.md` 的 SSOT**，本檔只引用、不重寫。
+> 集中式 log（Seq / CLEF）的架構、SDK、first-run 密碼等細節是 **`seq.md` 的 SSOT**，本檔只引用、不重寫。
 
 ---
 
@@ -23,7 +23,7 @@ Coolify Application → Logs 頁，即時 stream + 搜尋。
 
 ### 長期保存 / 集中查詢
 
-- 集中式查詢推薦 **Seq**（CLEF HTTP 推送）— 設定見 `optional-services.md`。
+- 集中式查詢推薦 **Seq**（CLEF HTTP 推送）— 設定見 `seq.md`。
 - 更長期保存 / 跨 service 集中：視需要外接 Loki + Grafana（自架）或商用 Datadog / Better Stack——**外接細節超出本 skill 範圍**。
 - 對應外接 client 放專案自己的 client 層（如 `app/clients/<provider>/`），不在本 skill 規範。
 

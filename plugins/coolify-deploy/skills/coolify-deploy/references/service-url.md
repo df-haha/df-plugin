@@ -19,7 +19,7 @@ Coolify **只**展開以下前綴的變數，其餘變數一律當普通 env 處
 | `SERVICE_PASSWORD_*` | Coolify 產生的隨機密碼 |
 | `COMPOSE_PROJECT_NAME` | 專案名（用於 named volume 命名） |
 
-> **重要例外**：`SEQ_FIRSTRUN_ADMINPASSWORD` **不在**此清單，**不可**寫成 `${SEQ_FIRSTRUN_ADMINPASSWORD}`，也**不可**借用 `$SERVICE_PASSWORD_SEQ`。它的正確處理見 `optional-services.md`。不要把 Seq 密碼泛化成 magic env。
+> **重要例外**：`SEQ_FIRSTRUN_ADMINPASSWORD` **不在**此清單，**不可**寫成 `${SEQ_FIRSTRUN_ADMINPASSWORD}`，也**不可**借用 `$SERVICE_PASSWORD_SEQ`。它的正確處理見 `seq.md`。不要把 Seq 密碼泛化成 magic env。
 
 ---
 

@@ -89,8 +89,8 @@
     },
     {
       "name": "coolify-deploy",
-      "description": "Coolify + Docker Compose 部署規則 skill",
-      "version": "1.0.0",
+      "description": "Coolify + Docker Compose 部署 plugin（4 個 skills：coolify-deploy 部署建構、coolify-db 角色隔離 / migration / 唯讀存取、coolify-logs CLI 與 build log、coolify-setup CLI 安裝與 permission）",
+      "version": "2.0.0",
       "author": { "name": "df-haha" },
       "source": "./plugins/coolify-deploy",
       "category": "development"
