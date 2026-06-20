@@ -1,0 +1,16 @@
+{
+  "name": "devlog",
+  "description": "Repo 決策日誌（devlog）— LLM 維護的 ADR 決策索引，讓未來的人/模型能回溯『何時、為何、做了什麼 trade-off』。提供 /log-decision、決定性 helper script、可設定的 sensitivity gate（none/secrets-only/pii/custom），跨 repo 套用。",
+  "author": {
+    "name": "df-haha"
+  },
+  "prerequisites": [
+    {
+      "name": "python3",
+      "type": "cli",
+      "checkCommand": "python3 --version",
+      "optional": false,
+      "description": "devlog helper script 需要 Python 3（僅用標準函式庫，無外部相依）"
+    }
+  ]
+}

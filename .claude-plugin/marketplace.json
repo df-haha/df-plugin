@@ -102,6 +102,14 @@
       "author": { "name": "宗霖" },
       "source": "./plugins/df-graph",
       "category": "productivity"
+    },
+    {
+      "name": "devlog",
+      "description": "Repo 決策日誌 — LLM 維護的 ADR 決策索引，讓未來的人/模型能回溯『何時、為何、做了什麼 trade-off』。提供 /log-decision、決定性 helper script、可設定的 sensitivity gate（none/secrets-only/pii/custom），跨 repo 套用",
+      "version": "0.1.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/devlog",
+      "category": "development"
     }
   ]
 }
