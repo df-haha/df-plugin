@@ -13,3 +13,8 @@ __pycache__/
 
 # Claude project-local state
 .claude/
+
+# 敏感資訊（Track B B1 預防性）
+.env
+.env.*
+!.env.example
