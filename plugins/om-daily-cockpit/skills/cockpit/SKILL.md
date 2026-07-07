@@ -20,7 +20,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, ToolSearch, TaskCreat
 
 1. 載入 config（`--config` 或 `OM_DAILY_COCKPIT_CONFIG`），`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/oc_core/config.py --validate <cfg>`。
 2. 取用：`identity`（署名/語氣）、`team.members`、`email.*`、`paths.*`、`modules.*`。
-3. `mode=quick` → 只跑 Phase 1.1 + 1.5 + 3.X + 3.H + 4（核心）；`mode=full` → 加所有 `modules.*.enabled=true` 區塊。
+3. `mode=quick` → 只跑 Phase 1.1 + 1.5 + 1.6 + 3.X + 3.H + 4（核心）；`mode=full` → 加所有 `modules.*.enabled=true` 區塊。
 
 ---
 
@@ -36,6 +36,22 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, ToolSearch, TaskCreat
 ### 1.5 團隊日報（核心）
 
 委派 **team-daily-fetcher skill**（傳 `--config`）：算最近工作日 → 本地快取檢查 → df-graph resolve 資料夾 → 列信 → 讀 body + 下載附件 → 改名成員前綴 → 格式檢查 → AI 用量抽取 → 解析 om-daily-work-log 的 `OM_QA` anchor → 交叉比對 `config.paths.tracking_files`（空則跳過對齊分析）。產出「🎯 團隊引導」結構化區塊。
+
+### 1.6 缺報升級檢查（核心）
+
+1.5 抓完日報後，跑機械規則把「連續缺報」與「休假」分開：
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/scripts/missing_report_check.py --config <cfg>   # --threshold 預設 2
+```
+
+吃 stdout JSON（每位成員含 `missing_streak` / `on_leave` / `on_leave_until` / `escalate` / `missing_dates`）：
+- `escalate=true`：**「團隊日報」總覽列標 🔴 P1**，並在「💡 待確認提案」自動加一條
+  「寄追蹤提醒給 {name}（連續缺報 {missing_streak} 個工作日）」。
+- `on_leave=true`：該成員顯示「🏖️ 休假至 {on_leave_until}」，**不升級**（休假日不計缺報）。
+
+> 成員休假請在 config 的 `team.members[].on_leave_until`（ISO 日期，含當日）標記；過期自動恢復計算。
+> 寄不寄追蹤提醒仍由主管在 Phase 4 確認（不自動催繳，見 team-daily-fetcher 注意事項）。
 
 ### 1.3 情報（可選；`config.modules.intel.enabled`）
 
@@ -117,7 +133,7 @@ mode=quick 也跑本節（兩個 read call 很便宜，且個人待辦正是晨�
 ## 總覽
 | 項目 | 數量 |
 | 郵件 | N 封（🔴P0 🟡P1 🟢P2 ⚪P3）|
-| 團隊日報 | {len(members)} 人中 N 已寄、M 未寄、K 格式異常 |
+| 團隊日報 | {len(members)} 人中 N 已寄、M 未寄、K 格式異常；🔴 P1 連續缺報 J 人（休假 H 人不計）|
 | AI 用量 | 當日合計 $X；任一人 7d≥40% 加 ⚠️ |
 | 情報 | N 則（僅 intel 啟用時）|
 

@@ -26,6 +26,9 @@ team:
                                  #「未確認 email 拿去實寄」（防串錯人）。預設 false（含 onboarding
                                  # 代填的推斷值）。注意：alias_allowlist 內位址永遠視為 unverified。
       alias_allowlist: []        # 屬下回信可能用的其他位址（嚴格 email 比對用）
+      # on_leave_until: 2026-07-31  # 可選：休假迄日（ISO YYYY-MM-DD，含當日）。缺報升級檢查
+      #                             # 用此把「休假中」與「失聯」分開——<= 此日的工作日不計缺報，
+      #                             # 過期自動恢復計算。未請假就整行省略（向後相容）。
 
 email:
   adapter: df_graph              # df_graph（雲端 Graph API，OS 無關，建議）或 outlook_local（Windows COM）
@@ -79,7 +82,7 @@ modules:
 ## 各區塊說明
 
 - **identity**：決定 AI 報告的署名與語氣，以及對外文書的部門/公司抬頭。全部來自此處，程式碼零寫死。
-- **team.members**：`member_id` 是穩定 slug（換顯示名不影響追蹤）；`email` + `alias_allowlist` 用於 directive 回信的**嚴格 email 比對**，避免多屬下同主旨串錯人。`verified`（預設 false）標記主 email 是否經實證——coaching send gate 只放行已 verified email 的實寄/compose，未驗證者只能開 reply 草稿讓人工把關（`alias_allowlist` 內位址一律視為 unverified）。
+- **team.members**：`member_id` 是穩定 slug（換顯示名不影響追蹤）；`email` + `alias_allowlist` 用於 directive 回信的**嚴格 email 比對**，避免多屬下同主旨串錯人。`verified`（預設 false）標記主 email 是否經實證——coaching send gate 只放行已 verified email 的實寄/compose，未驗證者只能開 reply 草稿讓人工把關（`alias_allowlist` 內位址一律視為 unverified）。`on_leave_until`（可選，ISO 日期）標休假迄日，缺報升級檢查（`missing_report_check.py`）據此豁免休假中的成員、過期自動恢復。
 - **email.adapter**：`df_graph`（雲端 Microsoft Graph API，OS 無關、每人一次 device-code 登入，建議）或 `outlook_local`（Windows COM，需 Outlook Desktop）。讀信兩者皆走對應 MCP；`df_graph` 不需 `processed_category`（改本地檔去重）。
 - **directive**：`subject_prefix` + `marker` 構成催辦信契約，屬下端據此用 Outlook MCP 搜當日催辦信（繞過 reply-chain）。
 - **services**：環境變數名稱對照表。loader 強制這些值是「名稱」而非密鑰本體。

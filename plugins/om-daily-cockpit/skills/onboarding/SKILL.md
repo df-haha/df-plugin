@@ -28,6 +28,7 @@ allowed-tools: Bash, Read, Write, Edit, AskUserQuestion, ToolSearch, TaskCreate,
 2. 引導主管填：
    - `tenant_id`、`timezone`、`identity`（部門/公司/AI persona）
    - `team.members[]`：每位屬下 `member_id`（穩定 slug）→ `name` → `email` → `alias_allowlist`
+     →（可選）`on_leave_until`（休假迄日 ISO 日期，缺報升級檢查用；未請假省略）
      （**email 是 directive 嚴格比對的 key，務必正確**，避免多屬下同主旨串錯人）
    - `email`：`adapter`（填 `df_graph`）、`account`（Microsoft 365 帳號）、`daily_report_folder`（日報子資料夾顯示名）
    - `paths`：`archive_dir`、`daily_proposal_dir`、（可選）`tracking_files`（任務/進度追蹤檔，供對齊度分析）

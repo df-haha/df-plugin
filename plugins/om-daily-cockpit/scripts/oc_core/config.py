@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -61,6 +62,9 @@ class Member:
     # 主 email 是否經目錄/實證確認。coaching hook 用此擋「未確認 email 拿去實寄」（防串錯人）。
     # 預設 False（onboarding 代填的推斷 email 視為未確認），經實證後在 config 標 verified: true。
     email_verified: bool = False
+    # 可選：休假到期日（ISO YYYY-MM-DD，含當日）。缺報升級檢查用此把「休假中」與「失聯」分開：
+    # 該日 <= on_leave_until 視為休假、不計缺報。None = 未請假（向後相容舊 config）。
+    on_leave_until: str | None = None
 
     def all_emails(self) -> list[str]:
         """主 email + 所有 alias（小寫化），供嚴格比對用。"""
@@ -75,6 +79,12 @@ class Member:
         if addr is None:
             return self.email_verified
         return addr.strip().lower() == self.email.lower() and self.email_verified
+
+    def is_on_leave(self, as_of: date) -> bool:
+        """as_of 當日是否在休假中（on_leave_until 含當日；未請假回 False）。"""
+        if not self.on_leave_until:
+            return False
+        return date.fromisoformat(self.on_leave_until) >= as_of
 
 
 @dataclass
@@ -200,6 +210,31 @@ def _require_str(d: dict, label: str) -> str:
     return v.strip()
 
 
+def _parse_leave_date(mid: str, raw: object) -> str | None:
+    """驗證並正規化 member.on_leave_until → ISO 字串或 None。
+
+    可選欄位：缺（None）→ 回 None（向後相容）。YAML 未加引號的日期會被 safe_load
+    解析成 datetime.date，故同時接受 date 物件與 YYYY-MM-DD 字串；其餘型別或非法日期報錯。
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        raise ConfigError(
+            f"member {mid} on_leave_until 只能是日期（YYYY-MM-DD），不含時間：{raw!r}")
+    if isinstance(raw, date):
+        return raw.isoformat()
+    if isinstance(raw, str) and raw.strip():
+        s = raw.strip()
+        try:
+            date.fromisoformat(s)
+        except ValueError:
+            raise ConfigError(
+                f"member {mid} on_leave_until 非法日期（需 YYYY-MM-DD）：{s!r}")
+        return s
+    raise ConfigError(
+        f"member {mid} on_leave_until 必須是 YYYY-MM-DD 字串，得到 {raw!r}")
+
+
 def _build_config(d: dict) -> Config:
     if d.get("schema_version") != 1:
         raise ConfigError(f"schema_version 必須為 1，得到 {d.get('schema_version')!r}")
@@ -257,8 +292,12 @@ def _build_config(d: dict) -> Config:
         verified = m.get("verified", False)
         if not isinstance(verified, bool):
             raise ConfigError(f"member {mid} verified 必須是 true/false，得到 {verified!r}")
+        on_leave_until = _parse_leave_date(mid, m.get("on_leave_until"))
         members.append(
-            Member(mid, m["name"], email, [str(a) for a in aliases], email_verified=verified)
+            Member(
+                mid, m["name"], email, [str(a) for a in aliases],
+                email_verified=verified, on_leave_until=on_leave_until,
+            )
         )
     if not members:
         raise ConfigError("至少要一個 team.member")

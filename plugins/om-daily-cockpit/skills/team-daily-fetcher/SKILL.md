@@ -191,6 +191,8 @@ om_qa:
 
 ### 🚨 未寄送（需催繳）
 - {member}：{target_date} 未在日報資料夾收到
+- config `team.members[].on_leave_until` 有值且未過期（含當日）的成員標「🏖️ 休假至 {date}」，
+  **不列入未寄送警示、不計缺報**（連續缺報升級由 cockpit Phase 1.6 的 `missing_report_check.py` 判定）。
 
 ### ⚠️ 格式異常
 - {member}：{缺什麼}
