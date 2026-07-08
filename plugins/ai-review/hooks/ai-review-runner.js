@@ -47,10 +47,10 @@ function normalizeClaudePermissionMode(mode) {
 
 function normalizeReviewer(reviewer) {
   const value = (reviewer || "claude").toLowerCase();
-  if (value === "claude" || value === "claude-code") return "claude";
-  if (value === "agy" || value === "antigravity") return "agy";
+  if (value === "claude" || value === "claude-code" || value === "codex") return "claude";
+  if (value === "agy" || value === "antigravity" || value === "gemini") return "agy";
   if (value === "both") return "both";
-  throw new Error(`未知 reviewer "${reviewer}"，支援: claude, agy, both`);
+  throw new Error(`未知 reviewer "${reviewer}"，支援: claude, agy, both (codex→claude, gemini→agy)`);
 }
 
 function expandReviewers(reviewer) {
