@@ -1,256 +1,251 @@
 #!/usr/bin/env node
-// AI Review Runner — 核心執行引擎（支援 Codex CLI + Gemini CLI）
-// 透過環境變數接收模式與參數，組裝並執行 AI CLI 指令，output 寫入暫存檔
-//
-// Security note: 此腳本所有輸入來自環境變數（由 Claude skill 控制），
-// 不接受使用者直接輸入。execSync 用於組合 codex CLI 管道命令，
-// 已對 shell 特殊字元做跳脫處理。
+// AI Review Runner - shared execution engine for Claude Code and Codex plugins.
+// It invokes external reviewer CLIs (Claude Code and Antigravity) in print mode
+// and writes each result to a temporary markdown file.
 "use strict";
 
 const fs = require("fs");
 const path = require("path");
-const { execSync } = require("child_process");
+const { execFileSync } = require("child_process");
 
-// ── 設定 ─────────────────────────────────────────────
-const COOLDOWN_FILE = path.join(
-  process.env.HOME || "/tmp",
-  ".claude",
-  "ai-review-cooldown.json"
-);
-const COOLDOWN_MS = 60_000; // 60 秒間隔
+const COOLDOWN_MS = 60_000;
+const MAX_PROMPT_CHARS = 8000;
+const DEFAULT_CLAUDE_MODEL = "claude-opus-4-6[1m]";
+const DEFAULT_CLAUDE_EFFORT = "max";
+const DEFAULT_CLAUDE_PERMISSION_MODE = "plan";
+const DEFAULT_AGY_MODEL = "3.5-flash";
+const CLAUDE_PERMISSION_MODES = new Set([
+  "acceptEdits",
+  "auto",
+  "bypassPermissions",
+  "default",
+  "dontAsk",
+  "plan",
+]);
 
-// ── Shell 跳脫 ──────────────────────────────────────
-function shellEscape(str) {
-  return "'" + str.replace(/'/g, "'\\'") + "'";
+function cooldownFile() {
+  return process.env.AI_REVIEW_COOLDOWN_FILE || path.join(
+    process.env.HOME || "/tmp",
+    ".ai-review",
+    "cooldown.json"
+  );
 }
 
-// ── Rate Limit 檢查 ──────────────────────────────────
+function sanitizeModel(model) {
+  return (model || "").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+}
+
+function normalizeClaudePermissionMode(mode) {
+  const value = mode || DEFAULT_CLAUDE_PERMISSION_MODE;
+  if (!CLAUDE_PERMISSION_MODES.has(value)) {
+    throw new Error(
+      `未知 Claude permission mode "${mode}"，支援: ${Array.from(CLAUDE_PERMISSION_MODES).join(", ")}`
+    );
+  }
+  return value;
+}
+
+function normalizeReviewer(reviewer) {
+  const value = (reviewer || "claude").toLowerCase();
+  if (value === "claude" || value === "claude-code") return "claude";
+  if (value === "agy" || value === "antigravity") return "agy";
+  if (value === "both") return "both";
+  throw new Error(`未知 reviewer "${reviewer}"，支援: claude, agy, both`);
+}
+
+function expandReviewers(reviewer) {
+  const normalized = normalizeReviewer(reviewer);
+  return normalized === "both" ? ["claude", "agy"] : [normalized];
+}
+
+function buildInvocation(reviewer, model = "", options = {}) {
+  const normalized = normalizeReviewer(reviewer);
+  const selectedModel = sanitizeModel(
+    model || (normalized === "claude" ? DEFAULT_CLAUDE_MODEL : DEFAULT_AGY_MODEL)
+  );
+
+  if (normalized === "claude") {
+    const permissionMode = normalizeClaudePermissionMode(options.claudePermissionMode);
+    const args = ["-p", "--output-format", "text", "--permission-mode", permissionMode];
+    if (selectedModel) args.push("--model", selectedModel);
+    args.push("--effort", DEFAULT_CLAUDE_EFFORT);
+    return {
+      command: "claude",
+      args,
+      label: "Claude Code",
+    };
+  }
+
+  if (normalized === "agy") {
+    const args = ["--print-timeout", "5m0s"];
+    if (selectedModel) args.push("--model", selectedModel);
+    args.push("--print");
+    return {
+      command: "agy",
+      args,
+      label: "Antigravity",
+    };
+  }
+
+  throw new Error("both must be expanded before building an invocation");
+}
+
+function readTextFile(filePath, label) {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch {
+    throw new Error(`無法讀取${label}: ${filePath}`);
+  }
+}
+
+function truncatePrompt(content) {
+  if (content.length <= MAX_PROMPT_CHARS) return content;
+  return `${content.slice(0, MAX_PROMPT_CHARS)}\n\n[... 內容截斷 ...]`;
+}
+
+function buildPrompt({ mode, planPath = "", question = "" }) {
+  switch (mode || "code") {
+    case "code":
+      return [
+        "請審查此 Git repository 目前未提交的程式碼變更。",
+        "",
+        "請先檢查 git status 與 git diff，找出 bugs、行為回歸、缺漏測試、風險與可操作的修正建議。",
+        "只做審查，不要修改檔案，不要 commit，不要執行破壞性命令。",
+        "輸出請用繁體中文，依嚴重度排序，並附上具體檔案/行號或可驗證依據。",
+      ].join("\n");
+
+    case "plan": {
+      if (!planPath) throw new Error("plan 模式需要 PLAN_PATH 環境變數或計畫檔路徑");
+      const planContent = truncatePrompt(readTextFile(planPath, "計畫檔案"));
+      return `請審查以下實作計畫，指出潛在問題、遺漏、風險和改進建議。請用繁體中文、依嚴重度排序：\n\n${planContent}`;
+    }
+
+    case "debate":
+      if (!question) throw new Error("debate 模式需要 CODEX_QUESTION 環境變數或問題文字");
+      return [
+        "你是魔鬼代言人（Devil's Advocate）。",
+        "針對以下技術決策或問題，請提出反對意見、潛在風險、替代方案和需要考慮的 trade-off。",
+        "請用繁體中文，聚焦實質技術風險，不要泛泛而談。",
+        "",
+        question,
+      ].join("\n");
+
+    default:
+      throw new Error(`未知模式 "${mode}"，支援: code, plan, debate`);
+  }
+}
+
 function checkCooldown(provider) {
   try {
-    if (fs.existsSync(COOLDOWN_FILE)) {
-      const data = JSON.parse(fs.readFileSync(COOLDOWN_FILE, "utf8"));
-      const lastRun = data[provider] || 0;
-      const elapsed = Date.now() - lastRun;
-      if (elapsed < COOLDOWN_MS) {
-        const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000);
-        console.log(
-          `COOLDOWN: ${provider} 距離上次執行不到 60 秒，請等待 ${remaining} 秒後再試。`
-        );
-        process.exit(0);
-      }
+    const file = cooldownFile();
+    if (!fs.existsSync(file)) return;
+
+    const data = JSON.parse(fs.readFileSync(file, "utf8"));
+    const lastRun = data[provider] || 0;
+    const elapsed = Date.now() - lastRun;
+    if (elapsed < COOLDOWN_MS) {
+      const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 1000);
+      console.log(`COOLDOWN: ${provider} 距離上次執行不到 60 秒，請等待 ${remaining} 秒後再試。`);
+      process.exit(0);
     }
   } catch {
-    // cooldown 檔案損壞，忽略繼續
+    // Ignore corrupt or unreadable cooldown files.
   }
 }
 
 function updateCooldown(provider) {
   try {
-    fs.mkdirSync(path.dirname(COOLDOWN_FILE), { recursive: true });
+    const file = cooldownFile();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
     let data = {};
     try {
-      if (fs.existsSync(COOLDOWN_FILE)) {
-        data = JSON.parse(fs.readFileSync(COOLDOWN_FILE, "utf8"));
-      }
-    } catch { /* ignore */ }
+      if (fs.existsSync(file)) data = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      data = {};
+    }
     data[provider] = Date.now();
-    fs.writeFileSync(COOLDOWN_FILE, JSON.stringify(data), "utf8");
+    fs.writeFileSync(file, JSON.stringify(data), "utf8");
   } catch {
-    // 寫入失敗不阻塞
+    // Cooldown write failures should not block review.
   }
 }
 
-// ── 輸出檔案路徑 ─────────────────────────────────────
-function makeOutputPath() {
+function makeOutputPath(provider) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  return `/tmp/ai-review-${ts}.md`;
+  return `/tmp/ai-review-${provider}-${ts}.md`;
 }
 
-// ── 模式：code ───────────────────────────────────────
-function buildCodeCommand(projectDir, outputFile) {
-  return {
-    cmd: `codex review --uncommitted 2>&1 | tee ${shellEscape(outputFile)}`,
-    cwd: projectDir,
-  };
+function formatExecError(error, label) {
+  const stdout = Buffer.isBuffer(error.stdout) ? error.stdout.toString("utf8") : (error.stdout || "");
+  const stderr = Buffer.isBuffer(error.stderr) ? error.stderr.toString("utf8") : (error.stderr || "");
+  const body = [stdout, stderr].filter(Boolean).join("\n\n").trim();
+  return body || `${label} 執行錯誤，但沒有輸出 stdout/stderr。`;
 }
 
-// ── 模式：plan ───────────────────────────────────────
-function buildPlanCommand(planPath, projectDir, outputFile) {
-  let planContent;
-  try {
-    planContent = fs.readFileSync(planPath, "utf8");
-  } catch (e) {
-    console.log(`ERROR: 無法讀取計畫檔案: ${planPath}`);
-    process.exit(1);
-  }
-
-  // 截斷過長的計畫內容（避免超過 CLI 引數限制）
-  if (planContent.length > 8000) {
-    planContent = planContent.slice(0, 8000) + "\n\n[... 內容截斷 ...]";
-  }
-
-  const prompt = `請審查以下實作計畫，指出潛在問題、遺漏、風險和改進建議：\n\n${planContent}`;
-
-  // 寫入暫存檔避免 shell 引號問題
-  const promptFile = `/tmp/ai-review-prompt-${Date.now()}.txt`;
-  fs.writeFileSync(promptFile, prompt, "utf8");
-
-  return {
-    cmd: `cat ${shellEscape(promptFile)} | codex exec - --ephemeral --skip-git-repo-check -o ${shellEscape(outputFile)} 2>&1`,
-    cwd: projectDir,
-    cleanup: promptFile,
-  };
-}
-
-// ── 模式：debate ─────────────────────────────────────
-function buildDebateCommand(question, projectDir, outputFile) {
-  const prompt = `你是魔鬼代言人（Devil's Advocate）。針對以下技術決策或問題，請提出反對意見、潛在風險、替代方案和需要考慮的 trade-off：\n\n${question}`;
-
-  const promptFile = `/tmp/ai-review-prompt-${Date.now()}.txt`;
-  fs.writeFileSync(promptFile, prompt, "utf8");
-
-  return {
-    cmd: `cat ${shellEscape(promptFile)} | codex exec - --ephemeral --skip-git-repo-check -o ${shellEscape(outputFile)} 2>&1`,
-    cwd: projectDir,
-    cleanup: promptFile,
-  };
-}
-
-// ── Gemini 模式：code ────────────────────────────────────
-function buildGeminiCodeCommand(projectDir, outputFile) {
-  const prompt = "請審查以下未提交的程式碼變更，指出 bugs、風格問題和改進建議：";
-  return {
-    cmd: `git diff | gemini -p ${shellEscape(prompt)} --approval-mode plan --output-format text 2>&1 | tee ${shellEscape(outputFile)}`,
-    cwd: projectDir,
-  };
-}
-
-// ── Gemini 模式：plan ────────────────────────────────────
-function buildGeminiPlanCommand(planPath, projectDir, outputFile) {
-  let planContent;
-  try {
-    planContent = fs.readFileSync(planPath, "utf8");
-  } catch (e) {
-    console.log(`ERROR: 無法讀取計畫檔案: ${planPath}`);
-    process.exit(1);
-  }
-  if (planContent.length > 8000) {
-    planContent = planContent.slice(0, 8000) + "\n\n[... 內容截斷 ...]";
-  }
-
-  const prompt = `請審查以下實作計畫，指出潛在問題、遺漏、風險和改進建議：\n\n${planContent}`;
-  const promptFile = `/tmp/ai-review-prompt-${Date.now()}.txt`;
-  fs.writeFileSync(promptFile, prompt, "utf8");
-
-  return {
-    cmd: `cat ${shellEscape(promptFile)} | gemini -p "" --approval-mode plan --output-format text 2>&1 | tee ${shellEscape(outputFile)}`,
-    cwd: projectDir,
-    cleanup: promptFile,
-  };
-}
-
-// ── Gemini 模式：debate ──────────────────────────────────
-function buildGeminiDebateCommand(question, projectDir, outputFile) {
-  const prompt = `你是魔鬼代言人。針對以下技術決策，提出反對意見、潛在風險、替代方案：\n\n${question}`;
-  const promptFile = `/tmp/ai-review-prompt-${Date.now()}.txt`;
-  fs.writeFileSync(promptFile, prompt, "utf8");
-
-  return {
-    cmd: `cat ${shellEscape(promptFile)} | gemini -p "" --approval-mode plan --output-format text 2>&1 | tee ${shellEscape(outputFile)}`,
-    cwd: projectDir,
-    cleanup: promptFile,
-  };
-}
-
-// ── 主程式 ─────────────────────────────────────────
-function main() {
-  const mode = process.env.CODEX_MODE || "code";
-  const projectDir = process.env.PROJECT_DIR || process.cwd();
-  const planPath = process.env.PLAN_PATH || "";
-  const question = process.env.CODEX_QUESTION || "";
-  const model = process.env.CODEX_MODEL || "";
-  const reviewer = process.env.REVIEWER || "codex";
-
-  // Rate limit (per-provider)
+function runReviewer({ reviewer, mode, projectDir, planPath, question, model }) {
   checkCooldown(reviewer);
 
-  const outputFile = makeOutputPath();
-  let build;
+  const outputFile = makeOutputPath(reviewer);
+  const prompt = buildPrompt({ mode, planPath, question });
+  const invocation = buildInvocation(reviewer, model, {
+    claudePermissionMode: process.env.AI_REVIEW_CLAUDE_PERMISSION_MODE,
+  });
 
-  switch (mode) {
-    case "code":
-      build = reviewer === "gemini"
-        ? buildGeminiCodeCommand(projectDir, outputFile)
-        : buildCodeCommand(projectDir, outputFile);
-      break;
-    case "plan":
-      if (!planPath) {
-        console.log("ERROR: plan 模式需要 PLAN_PATH 環境變數");
-        process.exit(1);
-      }
-      build = reviewer === "gemini"
-        ? buildGeminiPlanCommand(planPath, projectDir, outputFile)
-        : buildPlanCommand(planPath, projectDir, outputFile);
-      break;
-    case "debate":
-      if (!question) {
-        console.log("ERROR: debate 模式需要 CODEX_QUESTION 環境變數");
-        process.exit(1);
-      }
-      build = reviewer === "gemini"
-        ? buildGeminiDebateCommand(question, projectDir, outputFile)
-        : buildDebateCommand(question, projectDir, outputFile);
-      break;
-    default:
-      console.log(`ERROR: 未知模式 "${mode}"，支援: code, plan, debate`);
-      process.exit(1);
-  }
-
-  // 注入 model 旗標（僅在使用者明確指定時）
-  if (model) {
-    const safeModel = model.replace(/[^a-zA-Z0-9._-]/g, "");
-    if (reviewer === "gemini") {
-      build.cmd = build.cmd.replace(/(gemini )/, `$1-m ${safeModel} `);
-    } else {
-      const modelFlag = ` -c model="${safeModel}"`;
-      build.cmd = build.cmd.replace(/(codex (?:review|exec))/, `$1${modelFlag}`);
-    }
-  }
-
-  // 執行
   updateCooldown(reviewer);
   console.log(`REVIEWER: ${reviewer}`);
   console.log(`MODE: ${mode}${model ? ` (model: ${model})` : ""}`);
   console.log(`OUTPUT: ${outputFile}`);
-  console.log(`EXECUTING: ${reviewer} ${mode === "code" ? "review" : "exec"} ...`);
+  console.log(`EXECUTING: ${invocation.label} ...`);
 
   try {
-    execSync(build.cmd, {
-      cwd: build.cwd,
+    const output = execFileSync(invocation.command, [...invocation.args, prompt], {
+      cwd: projectDir,
       timeout: 300_000,
-      stdio: ["pipe", "pipe", "pipe"],
+      encoding: "utf8",
       maxBuffer: 10 * 1024 * 1024,
     });
-  } catch (e) {
-    const stderr = e.stderr?.toString()?.slice(0, 500) || "";
-    if (stderr && !fs.existsSync(outputFile)) {
-      fs.writeFileSync(outputFile, `${reviewer} 執行錯誤:\n\n${stderr}`, "utf8");
-    }
+    fs.writeFileSync(outputFile, output || "", "utf8");
+  } catch (error) {
+    fs.writeFileSync(outputFile, formatExecError(error, invocation.label), "utf8");
   }
 
-  // 清理暫存 prompt 檔案
-  if (build.cleanup) {
-    try {
-      fs.unlinkSync(build.cleanup);
-    } catch {}
-  }
-
-  // 驗證 output 存在
   if (fs.existsSync(outputFile) && fs.statSync(outputFile).size > 0) {
     console.log(`SUCCESS: 結果已寫入 ${outputFile}`);
-  } else {
-    console.log(`WARNING: output 檔案為空或不存在，${reviewer} 可能沒有產出`);
+    return outputFile;
+  }
+
+  console.log(`WARNING: output 檔案為空或不存在，${reviewer} 可能沒有產出`);
+  return "";
+}
+
+function main() {
+  const mode = process.env.AI_REVIEW_MODE || process.env.CODEX_MODE || "code";
+  const projectDir = process.env.PROJECT_DIR || process.cwd();
+  const planPath = process.env.PLAN_PATH || "";
+  const question = process.env.AI_REVIEW_QUESTION || process.env.CODEX_QUESTION || "";
+  const model = process.env.AI_REVIEW_MODEL || process.env.CODEX_MODEL || "";
+  const reviewers = expandReviewers(process.env.REVIEWER || "claude");
+
+  for (const reviewer of reviewers) {
+    runReviewer({ reviewer, mode, projectDir, planPath, question, model });
   }
 }
 
-main();
+if (require.main === module) {
+  try {
+    main();
+  } catch (error) {
+    console.log(`ERROR: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+module.exports = {
+  buildInvocation,
+  buildPrompt,
+  expandReviewers,
+  normalizeReviewer,
+  sanitizeModel,
+  normalizeClaudePermissionMode,
+  runReviewer,
+};
