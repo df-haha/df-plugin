@@ -1,6 +1,6 @@
 {
   "name": "decision-wiki",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Git-first decision Wiki toolkit for installing, upgrading, and recording reviewable repository decisions.",
   "author": {
     "name": "df-haha"

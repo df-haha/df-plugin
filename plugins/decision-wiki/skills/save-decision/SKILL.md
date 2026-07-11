@@ -24,6 +24,8 @@ Files changed: none
 Commit: none
 ```
 
+The four template lines are the entire response. Do not add a preface, code fence, explanation, rationale, next step, or trailing text. After emitting the fourth line, end the turn immediately.
+
 Proceed only with actual human selection evidence: an affirmative statement from a person with decision authority that selects the outcome. Never invent an approver, source, rationale, benchmark, metric, or other decision number.
 
 | Red flag or rationalization（合理化藉口） | Required interpretation |

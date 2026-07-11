@@ -43,7 +43,7 @@ test('publishes matching Claude Code and Codex manifests', () => {
 
   assert.equal(claude.name, 'decision-wiki');
   assert.equal(codex.name, 'decision-wiki');
-  assert.equal(claude.version, '1.0.0');
+  assert.equal(claude.version, '1.0.1');
   assert.equal(codex.version, claude.version);
   assert.deepEqual(claude.author, { name: 'df-haha' });
   assert.deepEqual(codex.author, { name: 'df-haha' });
@@ -61,7 +61,7 @@ test('registers exactly one entry in each marketplace', () => {
 
   assert.equal(claudeEntries.length, 1);
   assert.equal(claudeEntries[0].source, './plugins/decision-wiki');
-  assert.equal(claudeEntries[0].version, '1.0.0');
+  assert.equal(claudeEntries[0].version, '1.0.1');
   assert.equal(claudeEntries[0].category, 'development');
 
   assert.equal(codexEntries.length, 1);
@@ -112,6 +112,24 @@ test('contains no host-specific frontmatter, local paths, or symlinks', () => {
     const content = readFileSync(absolutePath, 'utf8');
     assert.doesNotMatch(content, forbidden, absolutePath);
   }
+});
+
+test('makes NOT_SETTLED a four-line-only terminal response', () => {
+  const saveDecision = read('plugins/decision-wiki/skills/save-decision/SKILL.md');
+  const template = /Return exactly:\n\n```text\n([\s\S]*?)\n```\n\nThe four template lines are the entire response\./
+    .exec(saveDecision);
+
+  assert.ok(template, 'NOT_SETTLED template must remain directly bound to Return exactly');
+  assert.deepEqual(template[1].split('\n'), [
+    'NOT_SETTLED',
+    'Open choice: <concise unresolved choice>',
+    'Files changed: none',
+    'Commit: none',
+  ]);
+  assert.match(
+    saveDecision,
+    /Do not add a preface, code fence, explanation, rationale, next step, or trailing text\./,
+  );
 });
 
 test('documents both hosts and both skills', () => {
