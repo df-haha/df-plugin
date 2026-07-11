@@ -1,6 +1,6 @@
 {
   "name": "ai-review",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "AI 二次審查 - 使用 Claude Code CLI 或 Antigravity CLI 對程式碼、計畫或技術決策進行獨立審查（Codex 宿主外審用；runner 另支援 Codex reviewer 供 Claude Code 宿主）。",
   "author": {
     "name": "df-haha"

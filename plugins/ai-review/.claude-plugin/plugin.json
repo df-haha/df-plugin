@@ -1,5 +1,6 @@
 {
   "name": "ai-review",
+  "version": "1.1.0",
   "description": "AI 二次審查 — Codex/Antigravity/Claude Code CLI 獨立審查 + 多輪對審",
   "author": {
     "name": "df-haha"
