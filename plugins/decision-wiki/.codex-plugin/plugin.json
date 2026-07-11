@@ -1,0 +1,33 @@
+{
+  "name": "decision-wiki",
+  "version": "1.0.0",
+  "description": "Git-first decision Wiki toolkit for installing, upgrading, and recording reviewable repository decisions.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "decision",
+    "wiki",
+    "adr",
+    "documentation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Decision Wiki",
+    "shortDescription": "Install a decision Wiki and record settled repository decisions",
+    "longDescription": "A Git-first decision knowledge-base toolkit with setup-decision-wiki for installing or upgrading the decision Wiki and save-decision for drafting explicitly settled repository decisions for review.",
+    "developerName": "df-haha",
+    "category": "Development",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "用 setup-decision-wiki 在這個 repository 建立決策知識庫",
+      "用 save-decision 將已確認的技術決策建立成草稿",
+      "檢查這個 repository 的 decision Wiki 是否需要升級"
+    ],
+    "brandColor": "#4F46E5"
+  }
+}

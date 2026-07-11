@@ -14,6 +14,14 @@ claude plugin marketplace add df-haha/df-plugin
 claude plugin install first-principles
 ```
 
+安裝決策知識庫工具組：
+
+```bash
+claude plugin install decision-wiki
+```
+
+安裝後可使用 `setup-decision-wiki` 安裝或升級決策 Wiki，並以 `save-decision` 將已定案的決策建立為可審查草稿。
+
 ## Codex 安裝方式
 
 從本 repo root 加入本地 marketplace：
@@ -22,7 +30,7 @@ claude plugin install first-principles
 codex plugin marketplace add ./
 ```
 
-然後在 Codex CLI 內開 `/plugins`，從 `df-haha Plugins` 安裝 `ai-review`、`coolify-deploy` 或 `first-principles`。目前 Codex marketplace 已暴露已完成 Codex manifest 的 `ai-review`、`coolify-deploy`、`first-principles`。
+然後在 Codex CLI 內開 `/plugins`，從 `df-haha Plugins` 安裝 `ai-review`、`coolify-deploy`、`first-principles` 或 `decision-wiki`。安裝後可在 `/skills` 發現 `setup-decision-wiki` 與 `save-decision`；目前 Codex marketplace 已暴露已完成 Codex manifest 的 `ai-review`、`coolify-deploy`、`first-principles`、`decision-wiki`。
 
 ## 可用 Plugins
 
@@ -39,3 +47,4 @@ codex plugin marketplace add ./
 | **om-daily-work-log** | OM 營運部雙向 async coaching loop（員工只裝這一個，自給自足）— 屬下端日誌偵測主管催辦信、用 CC 查 git/spec/tasks 後在 HTML anchor 區塊回覆；主管端產澄清問題卡 compose/reply 寄出，下次 /hi 解析閉環。日誌/寄信 vendored，無須額外裝 plugin。**前置**：Python 3.8+ + **df-graph** plugin（純雲端 Graph，OS 無關，取代舊的 Windows + Outlook Desktop + outlook-local；對 Claude 說「df-graph setup」裝），再說「work-log setup」跑 onboarding。註：教練卡片 reply 寄送仍在從 COM 遷移中 |
 | **coolify-deploy** | Coolify（自架 PaaS）+ Docker Compose 部署規則 skill — compose 撰寫、Dockerfile、env/機密、SERVICE_URL magic env、Adminer/Seq 選配服務、部署流程、回滾、網域/TLS，整條 CD 生命週期的調和規則 |
 | **df-graph** | Microsoft 365 / Graph MCP server（信箱 + 行事曆 + 人員）— 純雲端 Graph API、**OS 無關**、每人一次 device-code 登入，取代需 Windows + Outlook Desktop 的 COM 方案。無狀態、id-based、讀取零淨化。是 `daily-work-log` / `om-daily-work-log` 信箱讀寫的後端。啟用後對 Claude 說「df-graph setup」跑 onboarding（`claude mcp add df-graph --scope user`→device-code 登入→selftest）。上游 [dfroy00/df-graph](https://github.com/dfroy00/df-graph)（vendored，by 宗霖） |
+| **decision-wiki** | Git-first 決策知識庫工具組 — **setup-decision-wiki** 安裝或升級可審查的決策 Wiki；**save-decision** 將已明確定案的 repository 決策建立為草稿。支援 Claude Code 與 Codex。 |

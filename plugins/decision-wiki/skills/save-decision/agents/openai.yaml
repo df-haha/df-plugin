@@ -1,0 +1,4 @@
+interface:
+  display_name: "Save Decision"
+  short_description: "Capture an approved decision with provenance"
+  default_prompt: "Use $save-decision to draft the settled decision from this session."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Setup Decision Wiki"
+  short_description: "Install or upgrade a Git decision wiki safely"
+  default_prompt: "Use $setup-decision-wiki to install a reviewed decision Wiki in this repository."

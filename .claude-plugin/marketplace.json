@@ -110,6 +110,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/devlog",
       "category": "development"
+    },
+    {
+      "name": "decision-wiki",
+      "description": "Git-first 決策知識庫工具組 — setup-decision-wiki 安裝或升級可審查的決策 Wiki，save-decision 為已明確定案的 repository 決策建立草稿。",
+      "version": "1.0.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/decision-wiki",
+      "category": "development"
     }
   ]
 }
