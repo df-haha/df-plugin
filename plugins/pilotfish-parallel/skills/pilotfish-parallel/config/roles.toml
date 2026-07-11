@@ -1,0 +1,38 @@
+[policy]
+max_parallel_hard_cap = 3
+approval_policy = "never"
+v2_session_thread_cap = 1
+final_verifier_timeout_seconds = 900
+max_patch_bytes = 52428800
+max_changed_files = 500
+max_event_log_bytes = 10485760
+max_result_bytes = 1048576
+max_manifest_bytes = 1048576
+max_prompt_bytes = 1048576
+max_command_output_bytes = 10485760
+forbidden_executables = ["bash", "curl", "docker", "mysql", "nc", "podman", "psql", "scp", "sh", "socat", "ssh", "wget"]
+forbidden_argv_tokens = ["/var/run/docker.sock", "postgres://", "postgresql://", "mysql://", "http://", "https://"]
+
+[roles.scout]
+model = "gpt-5.6-luna"
+effort = "low"
+sandbox = "read-only"
+prompt = "prompts/scout.md"
+success_statuses = ["DONE"]
+terminal_statuses = ["DONE", "NEEDS_CONTEXT", "BLOCKED"]
+
+[roles.executor]
+model = "gpt-5.6-terra"
+effort = "low"
+sandbox = "workspace-write"
+prompt = "prompts/executor.md"
+success_statuses = ["DONE"]
+terminal_statuses = ["DONE", "NEEDS_CONTEXT", "BLOCKED"]
+
+[roles.verifier]
+model = "gpt-5.6-terra"
+effort = "xhigh"
+sandbox = "read-only"
+prompt = "prompts/verifier.md"
+success_statuses = ["CONFIRMED"]
+terminal_statuses = ["CONFIRMED", "REFUTED", "NEEDS_WRITABLE_VERIFICATION", "NEEDS_CONTEXT"]

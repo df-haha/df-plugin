@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.invalid/pilotfish/job.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "run_id", "task_requirement", "completion_claim",
+    "overall_acceptance_criteria", "repo_root", "base_branch", "base_sha",
+    "max_parallel", "integration_verification_commands", "jobs"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "run_id": {"$ref": "#/$defs/id"},
+    "task_requirement": {"type": "string", "minLength": 1, "maxLength": 32768},
+    "completion_claim": {"type": "string", "minLength": 1, "maxLength": 16384},
+    "overall_acceptance_criteria": {"$ref": "#/$defs/text_list"},
+    "repo_root": {"type": "string", "minLength": 1},
+    "base_branch": {"type": "string", "minLength": 1},
+    "base_sha": {"$ref": "#/$defs/sha"},
+    "max_parallel": {"type": "integer", "minimum": 1, "maximum": 3},
+    "integration_verification_commands": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {"$ref": "#/$defs/command"}
+    },
+    "jobs": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "items": {"$ref": "#/$defs/job"}
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"},
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"},
+    "text_list": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+    },
+    "path_list": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+    },
+    "allowed_path_list": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "argv", "timeout_seconds", "effect_scope"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "argv": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+        },
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "effect_scope": {"const": "repo-local"}
+      }
+    },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "role", "goal", "allowed_paths", "denied_paths",
+        "acceptance_criteria", "verification_commands", "timeout_seconds"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "role": {"enum": ["scout", "executor", "verifier"]},
+        "goal": {"type": "string", "minLength": 1, "maxLength": 16384},
+        "allowed_paths": {"$ref": "#/$defs/allowed_path_list"},
+        "denied_paths": {"$ref": "#/$defs/path_list"},
+        "acceptance_criteria": {"$ref": "#/$defs/text_list"},
+        "verification_commands": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {"$ref": "#/$defs/command"}
+        },
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 7200}
+      }
+    }
+  }
+}

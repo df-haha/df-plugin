@@ -1,0 +1,35 @@
+{
+  "name": "pilotfish-parallel",
+  "version": "0.1.0",
+  "description": "Run independent Codex repository jobs concurrently in isolated Git worktrees and integrate them all-or-nothing with final adversarial verification.",
+  "author": {
+    "name": "df-haha"
+  },
+  "repository": "https://github.com/df-haha/df-plugin",
+  "keywords": [
+    "codex",
+    "parallel",
+    "git-worktree",
+    "multi-agent",
+    "verification"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Pilotfish Parallel",
+    "shortDescription": "Parallel Codex writers with isolated worktrees",
+    "longDescription": "Runs two or three genuinely independent Codex jobs concurrently in isolated Git worktrees, validates disjoint write scopes, integrates snapshots all-or-nothing, and uses a fresh read-only xhigh Verifier for the final decision.",
+    "developerName": "df-haha",
+    "category": "Development",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "用 Pilotfish 並行處理兩個互不相依的修改",
+      "讓兩個 Executor 在獨立 worktree 同時寫入",
+      "平行完成這些不重疊任務並做最終驗證"
+    ],
+    "brandColor": "#0F766E"
+  }
+}

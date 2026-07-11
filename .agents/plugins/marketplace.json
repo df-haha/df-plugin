@@ -51,6 +51,18 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Development"
+    },
+    {
+      "name": "pilotfish-parallel",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pilotfish-parallel"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development"
     }
   ]
 }
