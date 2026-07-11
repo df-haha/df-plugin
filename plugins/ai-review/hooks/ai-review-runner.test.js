@@ -8,8 +8,58 @@ const test = require("node:test");
 
 const runner = require("./ai-review-runner.js");
 
-test("expands both into Claude Code and Antigravity reviewers", () => {
-  assert.deepEqual(runner.expandReviewers("both"), ["claude", "agy"]);
+test("expands both into Codex and Antigravity reviewers", () => {
+  assert.deepEqual(runner.expandReviewers("both"), ["codex", "agy"]);
+});
+
+test("keeps codex as a real provider and maps gemini to agy", () => {
+  assert.equal(runner.normalizeReviewer("codex"), "codex");
+  assert.equal(runner.normalizeReviewer("gemini"), "agy");
+  assert.equal(runner.normalizeReviewer(""), "codex");
+});
+
+test("builds codex review invocation for code mode without model or effort by default", () => {
+  assert.deepEqual(runner.buildInvocation("codex", "", { mode: "code" }), {
+    command: "codex",
+    args: ["review", "--uncommitted"],
+    label: "Codex",
+    omitPrompt: true,
+  });
+});
+
+test("builds codex exec invocation with model and reasoning effort overrides", () => {
+  assert.deepEqual(runner.buildInvocation("codex", "gpt-5.4-mini", { mode: "debate", effort: "high" }), {
+    command: "codex",
+    args: [
+      "exec",
+      "--ephemeral",
+      "--skip-git-repo-check",
+      "-c",
+      'model="gpt-5.4-mini"',
+      "-c",
+      'model_reasoning_effort="high"',
+    ],
+    label: "Codex",
+    omitPrompt: false,
+  });
+});
+
+test("injects model via -c config override for code mode because codex review has no -m flag", () => {
+  assert.deepEqual(runner.buildInvocation("codex", "gpt-5.3-codex-spark", { mode: "code" }), {
+    command: "codex",
+    args: ["review", "--uncommitted", "-c", 'model="gpt-5.3-codex-spark"'],
+    label: "Codex",
+    omitPrompt: true,
+  });
+});
+
+test("injects reasoning effort into codex review for code mode", () => {
+  assert.deepEqual(runner.buildInvocation("codex", "", { mode: "code", effort: "ultra" }), {
+    command: "codex",
+    args: ["review", "--uncommitted", "-c", 'model_reasoning_effort="ultra"'],
+    label: "Codex",
+    omitPrompt: true,
+  });
 });
 
 test("builds Claude Code print-mode invocation with plan permissions", () => {
@@ -68,12 +118,36 @@ test("allows Claude permission mode to opt into bypassPermissions", () => {
   });
 });
 
-test("uses Antigravity 3.5 Flash by default", () => {
+test("uses Antigravity 3.5 Flash by default with the default 600s print timeout", () => {
   assert.deepEqual(runner.buildInvocation("agy"), {
     command: "agy",
-    args: ["--print-timeout", "5m0s", "--model", "3.5-flash", "--print"],
+    args: ["--print-timeout", "600s", "--model", "3.5-flash", "--print"],
     label: "Antigravity",
   });
+});
+
+test("derives agy print timeout from the shared timeout option", () => {
+  assert.deepEqual(runner.buildInvocation("agy", "", { timeoutMs: 120_000 }).args.slice(0, 2), [
+    "--print-timeout",
+    "120s",
+  ]);
+});
+
+test("reads timeout from AI_REVIEW_TIMEOUT_MS with a 600s fallback on garbage", () => {
+  const saved = process.env.AI_REVIEW_TIMEOUT_MS;
+  try {
+    delete process.env.AI_REVIEW_TIMEOUT_MS;
+    assert.equal(runner.reviewTimeoutMs(), 600_000);
+    process.env.AI_REVIEW_TIMEOUT_MS = "120000";
+    assert.equal(runner.reviewTimeoutMs(), 120_000);
+    process.env.AI_REVIEW_TIMEOUT_MS = "not-a-number";
+    assert.equal(runner.reviewTimeoutMs(), 600_000);
+    process.env.AI_REVIEW_TIMEOUT_MS = "-5";
+    assert.equal(runner.reviewTimeoutMs(), 600_000);
+  } finally {
+    if (saved === undefined) delete process.env.AI_REVIEW_TIMEOUT_MS;
+    else process.env.AI_REVIEW_TIMEOUT_MS = saved;
+  }
 });
 
 test("keeps bracketed model aliases when explicitly requested because execFileSync does not invoke a shell", () => {

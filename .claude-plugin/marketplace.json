@@ -49,7 +49,7 @@
     },
     {
       "name": "ai-review",
-      "description": "AI 二次審查 — 使用 Codex CLI 或 Gemini CLI 對程式碼、計畫或技術決策進行獨立審查，支援單審或雙重對審",
+      "description": "AI 二次審查 — 使用 Codex、Antigravity 或 Claude Code CLI 對程式碼、計畫或技術決策進行獨立審查，支援單審或雙重對審",
       "version": "1.0.0",
       "author": { "name": "df-haha" },
       "source": "./plugins/ai-review",

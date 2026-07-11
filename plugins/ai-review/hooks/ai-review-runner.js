@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // AI Review Runner - shared execution engine for Claude Code and Codex plugins.
-// It invokes external reviewer CLIs (Claude Code and Antigravity) in print mode
+// It invokes external reviewer CLIs (Codex, Antigravity, Claude Code) in print mode
 // and writes each result to a temporary markdown file.
+// Codex model/effort defaults live in ~/.codex/config.toml; flags are only
+// injected when CODEX_MODEL / CODEX_EFFORT are explicitly set.
 "use strict";
 
 const fs = require("fs");
@@ -10,6 +12,9 @@ const { execFileSync } = require("child_process");
 
 const COOLDOWN_MS = 60_000;
 const MAX_PROMPT_CHARS = 8000;
+// 預設 10 分鐘 = Claude Code Bash tool 同步等待上限；可用 AI_REVIEW_TIMEOUT_MS 覆寫。
+// 更長的審查請改走 run_in_background + 事後 Read 結果檔（見 SKILL.md）。
+const DEFAULT_TIMEOUT_MS = 600_000;
 const DEFAULT_CLAUDE_MODEL = "claude-opus-4-6[1m]";
 const DEFAULT_CLAUDE_EFFORT = "max";
 const DEFAULT_CLAUDE_PERMISSION_MODE = "plan";
@@ -35,6 +40,15 @@ function sanitizeModel(model) {
   return (model || "").replace(/[\u0000-\u001f\u007f]/g, "").trim();
 }
 
+function sanitizeEffort(effort) {
+  return (effort || "").replace(/[^a-zA-Z-]/g, "").trim();
+}
+
+function reviewTimeoutMs() {
+  const raw = Number.parseInt(process.env.AI_REVIEW_TIMEOUT_MS || "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
+}
+
 function normalizeClaudePermissionMode(mode) {
   const value = mode || DEFAULT_CLAUDE_PERMISSION_MODE;
   if (!CLAUDE_PERMISSION_MODES.has(value)) {
@@ -46,20 +60,42 @@ function normalizeClaudePermissionMode(mode) {
 }
 
 function normalizeReviewer(reviewer) {
-  const value = (reviewer || "claude").toLowerCase();
-  if (value === "claude" || value === "claude-code" || value === "codex") return "claude";
+  const value = (reviewer || "codex").toLowerCase();
+  if (value === "codex") return "codex";
+  if (value === "claude" || value === "claude-code") return "claude";
   if (value === "agy" || value === "antigravity" || value === "gemini") return "agy";
   if (value === "both") return "both";
-  throw new Error(`未知 reviewer "${reviewer}"，支援: claude, agy, both (codex→claude, gemini→agy)`);
+  throw new Error(`未知 reviewer "${reviewer}"，支援: codex, agy, claude, both (gemini→agy)`);
 }
 
 function expandReviewers(reviewer) {
   const normalized = normalizeReviewer(reviewer);
-  return normalized === "both" ? ["claude", "agy"] : [normalized];
+  return normalized === "both" ? ["codex", "agy"] : [normalized];
 }
 
 function buildInvocation(reviewer, model = "", options = {}) {
   const normalized = normalizeReviewer(reviewer);
+
+  if (normalized === "codex") {
+    // code 模式走專用 review harness；plan/debate 走一般 exec
+    const isCodeMode = (options.mode || "code") === "code";
+    const args = isCodeMode
+      ? ["review", "--uncommitted"]
+      : ["exec", "--ephemeral", "--skip-git-repo-check"];
+    // 注意：codex review 沒有 -m 旗標，model 一律走 -c config override（review/exec 皆支援）
+    const selectedModel = sanitizeModel(model);
+    if (selectedModel) args.push("-c", `model="${selectedModel}"`);
+    const effort = sanitizeEffort(options.effort);
+    if (effort) args.push("-c", `model_reasoning_effort="${effort}"`);
+    return {
+      command: "codex",
+      args,
+      label: "Codex",
+      // codex review 的 --uncommitted 與 positional prompt 互斥，code 模式不附加 prompt
+      omitPrompt: isCodeMode,
+    };
+  }
+
   const selectedModel = sanitizeModel(
     model || (normalized === "claude" ? DEFAULT_CLAUDE_MODEL : DEFAULT_AGY_MODEL)
   );
@@ -77,7 +113,8 @@ function buildInvocation(reviewer, model = "", options = {}) {
   }
 
   if (normalized === "agy") {
-    const args = ["--print-timeout", "5m0s"];
+    const timeoutMs = options.timeoutMs || reviewTimeoutMs();
+    const args = ["--print-timeout", `${Math.ceil(timeoutMs / 1000)}s`];
     if (selectedModel) args.push("--model", selectedModel);
     args.push("--print");
     return {
@@ -182,31 +219,43 @@ function formatExecError(error, label) {
   return body || `${label} 執行錯誤，但沒有輸出 stdout/stderr。`;
 }
 
-function runReviewer({ reviewer, mode, projectDir, planPath, question, model }) {
+function runReviewer({ reviewer, mode, projectDir, planPath, question, model, effort }) {
   checkCooldown(reviewer);
 
   const outputFile = makeOutputPath(reviewer);
   const prompt = buildPrompt({ mode, planPath, question });
+  const timeoutMs = reviewTimeoutMs();
   const invocation = buildInvocation(reviewer, model, {
+    mode,
+    effort,
+    timeoutMs,
     claudePermissionMode: process.env.AI_REVIEW_CLAUDE_PERMISSION_MODE,
   });
 
   updateCooldown(reviewer);
   console.log(`REVIEWER: ${reviewer}`);
-  console.log(`MODE: ${mode}${model ? ` (model: ${model})` : ""}`);
+  console.log(`MODE: ${mode}${model ? ` (model: ${model})` : ""}${effort ? ` (effort: ${effort})` : ""}`);
   console.log(`OUTPUT: ${outputFile}`);
   console.log(`EXECUTING: ${invocation.label} ...`);
 
+  const cliArgs = invocation.omitPrompt ? invocation.args : [...invocation.args, prompt];
+  let failed = false;
   try {
-    const output = execFileSync(invocation.command, [...invocation.args, prompt], {
+    const output = execFileSync(invocation.command, cliArgs, {
       cwd: projectDir,
-      timeout: 300_000,
+      timeout: timeoutMs,
       encoding: "utf8",
       maxBuffer: 10 * 1024 * 1024,
     });
     fs.writeFileSync(outputFile, output || "", "utf8");
   } catch (error) {
+    failed = true;
     fs.writeFileSync(outputFile, formatExecError(error, invocation.label), "utf8");
+  }
+
+  if (failed) {
+    console.log(`WARNING: ${invocation.label} 執行失敗（非零 exit 或逾時），錯誤訊息已寫入 ${outputFile}`);
+    return "";
   }
 
   if (fs.existsSync(outputFile) && fs.statSync(outputFile).size > 0) {
@@ -224,10 +273,11 @@ function main() {
   const planPath = process.env.PLAN_PATH || "";
   const question = process.env.AI_REVIEW_QUESTION || process.env.CODEX_QUESTION || "";
   const model = process.env.AI_REVIEW_MODEL || process.env.CODEX_MODEL || "";
-  const reviewers = expandReviewers(process.env.REVIEWER || "claude");
+  const effort = process.env.AI_REVIEW_EFFORT || process.env.CODEX_EFFORT || "";
+  const reviewers = expandReviewers(process.env.REVIEWER || "codex");
 
   for (const reviewer of reviewers) {
-    runReviewer({ reviewer, mode, projectDir, planPath, question, model });
+    runReviewer({ reviewer, mode, projectDir, planPath, question, model, effort });
   }
 }
 
@@ -246,6 +296,8 @@ module.exports = {
   expandReviewers,
   normalizeReviewer,
   sanitizeModel,
+  sanitizeEffort,
+  reviewTimeoutMs,
   normalizeClaudePermissionMode,
   runReviewer,
 };
