@@ -1,0 +1,44 @@
+{
+  "name": "df-haha-plugins",
+  "interface": {
+    "displayName": "df-haha Plugins"
+  },
+  "plugins": [
+    {
+      "name": "ai-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ai-review"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development"
+    },
+    {
+      "name": "coolify-deploy",
+      "source": {
+        "source": "local",
+        "path": "./plugins/coolify-deploy"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development"
+    },
+    {
+      "name": "first-principles",
+      "source": {
+        "source": "local",
+        "path": "./plugins/first-principles"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

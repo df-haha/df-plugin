@@ -1,0 +1,33 @@
+{
+  "name": "coolify-deploy",
+  "version": "2.0.0",
+  "description": "Coolify deployment toolkit for Docker Compose services, database migrations, logs, and CLI setup.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "coolify",
+    "docker-compose",
+    "deployment",
+    "devops"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Coolify Deploy",
+    "shortDescription": "Guide Coolify deploys, DB migration flows, logs, and CLI setup",
+    "longDescription": "Coolify deployment workflow for Docker Compose applications. It bundles four skills: coolify-deploy for compose, Dockerfile, env, TLS, and rollback guidance; coolify-db for role isolation and migrations; coolify-logs for build and runtime log debugging; and coolify-setup for CLI, token, and permission setup.",
+    "developerName": "df-haha",
+    "category": "Development",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "用 coolify-deploy 幫我寫 docker-compose.yml",
+      "用 coolify-logs 看這次 Coolify 部署為什麼失敗",
+      "用 coolify-db 規劃 Postgres migration 與唯讀存取"
+    ],
+    "brandColor": "#0F766E"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "first-principles",
+  "version": "1.0.0",
+  "description": "First-principles reasoning framework for breaking problems down to verified facts and rebuilt solutions.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "reasoning",
+    "thinking",
+    "analysis",
+    "framework"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "First Principles",
+    "shortDescription": "Reframe problems from basic facts instead of convention",
+    "longDescription": "A first-principles reasoning workflow that helps break a problem into assumptions, verified facts, rebuilt solution paths, and explicit validation steps.",
+    "developerName": "df-haha",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
+    "defaultPrompt": [
+      "用 first-principles 拆解這個技術決策",
+      "幫我用第一性原理重構這個問題",
+      "找出這個方案背後未驗證的假設"
+    ],
+    "brandColor": "#D97706"
+  }
+}

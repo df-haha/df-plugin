@@ -1,8 +1,8 @@
-# Claude Plugins Marketplace
+# Claude/Codex Plugins Marketplace
 
-自訂 Claude Code plugins 集合。
+自訂 Claude Code / Codex plugins 集合。
 
-## 安裝方式
+## Claude Code 安裝方式
 
 ```bash
 claude plugin marketplace add df-haha/df-plugin
@@ -14,6 +14,16 @@ claude plugin marketplace add df-haha/df-plugin
 claude plugin install first-principles
 ```
 
+## Codex 安裝方式
+
+從本 repo root 加入本地 marketplace：
+
+```bash
+codex plugin marketplace add ./
+```
+
+然後在 Codex CLI 內開 `/plugins`，從 `df-haha Plugins` 安裝 `ai-review`、`coolify-deploy` 或 `first-principles`。目前 Codex marketplace 已暴露已完成 Codex manifest 的 `ai-review`、`coolify-deploy`、`first-principles`。
+
 ## 可用 Plugins
 
 | Plugin | 說明 |
@@ -23,7 +33,7 @@ claude plugin install first-principles
 | **deep-research-ryan** | 多層次深度研究引擎 — 自動調度 subagents 執行多階段研究，支援公司、產品、技術、產業、人物等 8 種研究類型（by [Ryan](https://github.com/anthropics/claude-code/tree/main/.claude/skills/deep-research)） |
 | **fact-check** | 文檔事實查核系統 — 5 層查證架構，支援實體、技術、數據、人物、論述的交叉驗證（by [Ryan](https://github.com/anthropics/claude-code/tree/main/.claude/skills/deep-research)） |
 | **daily-work-log** | 跨專案工作日誌產生器 — 掃描 Claude Code / Codex / Gemini session，首次使用引導設定，產出 markdown 日誌並透過 **df-graph**（雲端 Graph，OS 無關）建草稿寄出 |
-| **ai-review** | AI 二次審查 — 使用 Codex CLI 或 Gemini CLI 對程式碼/計畫/技術決策進行獨立審查，支援單審或 Codex+Gemini 雙重對審 |
+| **ai-review** | AI 二次審查 — 使用 Codex / Antigravity（agy）/ Claude Code CLI 對程式碼/計畫/技術決策進行獨立審查，支援單審或 Codex+Agy 雙重對審；reviewer 依宿主選擇（Claude Code 宿主預設 Codex，可 `--model`/`--effort`，未指定吃 `~/.codex/config.toml`；Codex 宿主預設 Claude `claude-opus-4-6[1m]` + max effort）、Agy 預設 `3.5-flash`；Claude Code 可用 `/ai-review`，Codex 用 `$ai-review` / `/skills` 觸發 |
 | **evaluate-business-idea** | 五維深度系統評估框架 — 為軟體/SaaS/服務點子打分，判定深度系統 vs 免洗系統，含市場/GitHub/法規調查 SOP 與 idea 資料夾模板 |
 | **handoff** | 跨 session 複雜任務交接 — 自動從本次對話收集 commit / 決策共識 / 待辦 / 相關 memory，產出結構化 handoff prompt 並落盤至 `~/.claude/handoffs/`，過程中呼叫 Codex CLI 對草稿做最後一道把關（只挑實質影響的問題），含自我清理段落避免堆積 |
 | **om-daily-work-log** | OM 營運部雙向 async coaching loop（員工只裝這一個，自給自足）— 屬下端日誌偵測主管催辦信、用 CC 查 git/spec/tasks 後在 HTML anchor 區塊回覆；主管端產澄清問題卡 compose/reply 寄出，下次 /hi 解析閉環。日誌/寄信 vendored，無須額外裝 plugin。**前置**：Python 3.8+ + **df-graph** plugin（純雲端 Graph，OS 無關，取代舊的 Windows + Outlook Desktop + outlook-local；對 Claude 說「df-graph setup」裝），再說「work-log setup」跑 onboarding。註：教練卡片 reply 寄送仍在從 COM 遷移中 |
