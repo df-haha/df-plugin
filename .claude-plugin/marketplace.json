@@ -118,6 +118,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/decision-wiki",
       "category": "development"
+    },
+    {
+      "name": "pilotfish-roles",
+      "description": "pilotfish 多模型協調層 installer（Claude Code 專用）— pilotfish-setup skill 把 6 個角色 agent + 2 個版本變體裝進 ~/.claude/agents/、委派政策裝進 ~/.claude/rules/agents.md、settings.json env 釘選模型別名，重跑即升級（diff-first）。上游 Nanako0129/pilotfish（MIT，vendored 客製版）。Codex 並行執行請用 pilotfish-parallel",
+      "version": "1.0.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/pilotfish-roles",
+      "category": "development"
     }
   ]
 }
