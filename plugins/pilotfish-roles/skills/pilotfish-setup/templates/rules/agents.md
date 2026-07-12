@@ -41,7 +41,7 @@ Main session（Fable 5）是 orchestrator（協調者）：規劃、架構、歧
     - `ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4-6[1m]`
     - `ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4-6`
     - `ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4-5-20251001`
-    改預設版本＝改 env 值＋重啟 session；agent 檔 frontmatter 一律寫別名、不寫版號（pilotfish「政策不寫模型名」原則）。
+    改預設版本＝改 env 值＋重啟 session；agent 檔 frontmatter 一律寫別名、不寫版號（pilotfish「政策不寫模型名」原則）。唯一例外：#12 的版本變體 agent（executor-opus47 / executor-opus45），其存在目的就是釘死特定版號，frontmatter 寫完整 model ID。
 12. **臨時指定其他版本**：派版本變體 agent（`executor-opus47` / `executor-opus45`，session 內即點即用）；需要新版本變體時新增 agent 檔＋重啟。Agent tool 派工參數只吃 tier 別名，無法臨時傳版號——這是 harness 限制，勿再嘗試。
 13. **禁止 Claude 5 家族下放**：Fable 5 與 Sonnet 5 不派給 subagent。`sonnet` 別名已釘 4.6 故安全；完整 ID 亦不得指定 `claude-fable-5` / `claude-sonnet-5`。
 14. **Fable 5 只在 main loop**：擔任 orchestrator 與最終 reviewer；agent 完成後由 main loop review 再採用，不直接派給 subagent 執行工作。
