@@ -45,15 +45,20 @@ test('publishes a Claude Code manifest and registers in the Claude marketplace o
   assert.deepEqual(manifest.author, { name: 'df-haha' });
 
   const marketplace = readJson('.claude-plugin/marketplace.json');
-  const entry = marketplace.plugins.find((plugin) => plugin.name === 'pilotfish-roles');
-  assert.ok(entry, 'pilotfish-roles must be registered in .claude-plugin/marketplace.json');
+  const entries = marketplace.plugins.filter((plugin) => plugin.name === 'pilotfish-roles');
+  assert.equal(entries.length, 1, 'pilotfish-roles must be registered exactly once');
+  const [entry] = entries;
   assert.equal(entry.version, manifest.version);
   assert.equal(entry.source, './plugins/pilotfish-roles');
 
   // 本 skill 寫 ~/.claude/ 路徑，Codex 宿主無法使用 — 不得登記到 Codex 側 marketplace
   assert.equal(existsSync(join(pluginRoot, '.codex-plugin')), false, 'pilotfish-roles is Claude-only');
-  const codexMarketplace = read('.agents/plugins/marketplace.json');
-  assert.equal(codexMarketplace.includes('pilotfish-roles'), false, 'must not appear in Codex marketplace');
+  const codexMarketplace = readJson('.agents/plugins/marketplace.json');
+  assert.equal(
+    codexMarketplace.plugins.some((plugin) => plugin.name === 'pilotfish-roles'),
+    false,
+    'must not appear in Codex marketplace',
+  );
 });
 
 test('setup skill declares installer contract in frontmatter', () => {

@@ -21,11 +21,12 @@ allowed-tools: Bash, Read, Write, Edit, AskUserQuestion
 ## Phase 0：前置確認
 
 1. 確認 `~/.claude/` 存在且目前宿主是 Claude Code。
-2. **`CLAUDE_CODE_SUBAGENT_MODEL` 必須未設**（它會靜默覆蓋所有 per-agent model，破壞整套分層）：
+2. **`CLAUDE_CODE_SUBAGENT_MODEL` 必須未設**（它會靜默覆蓋所有 per-agent model，破壞整套分層）。逐層檢查 shell env 與 settings 優先序鏈（user / project / project-local / managed）：
    ```bash
-   env | grep -c CLAUDE_CODE_SUBAGENT_MODEL; grep -c CLAUDE_CODE_SUBAGENT_MODEL ~/.claude/settings.json
+   env | grep CLAUDE_CODE_SUBAGENT_MODEL
+   grep -l CLAUDE_CODE_SUBAGENT_MODEL ~/.claude/settings.json .claude/settings.json .claude/settings.local.json /etc/claude-code/managed-settings.json 2>/dev/null
    ```
-   兩者都應為 0；不為 0 時停下，先請使用者移除再繼續。
+   任一處命中都停下，回報命中的具體來源，請使用者移除後再繼續。
 3. 偵測既有安裝：`ls ~/.claude/agents/` 若已有同名檔 → 本次進入**升級模式**（Phase 1/2 一律先 diff、不盲蓋）。
 
 ## Phase 1：安裝 agent 檔（保持原名，不走 plugin 命名空間）
@@ -33,17 +34,17 @@ allowed-tools: Bash, Read, Write, Edit, AskUserQuestion
 刻意用「複製到 `~/.claude/agents/`」而非 plugin 原生 agents 目錄：plugin 原生 agent 會被加上
 `pilotfish-roles:` 前綴，路由表與使用習慣全要跟著改。installer 形式讓 `executor`、`scout` 保持素名。
 
-1. 用 AskUserQuestion 問是否安裝 2 個版本變體（executor-opus47 / executor-opus45）；6 個核心角色一律安裝。
-2. 逐檔處理 `templates/agents/*.md` → `~/.claude/agents/<同名>.md`：
-   - 目標不存在 → 直接複製。
-   - 目標已存在 → `diff` 模板與本機檔；**無差異**跳過，**有差異**把 diff 呈現給使用者選（保留本機／採用模板／手動合併）。本機檔可能載有使用者客製，是資產不是垃圾，永不盲蓋。
-3. 完成後列出安裝清單（檔名＋該檔 frontmatter 的 `model:` 值）。
+1. 用 AskUserQuestion 問是否安裝 2 個版本變體（executor-opus47 / executor-opus45），組出**本次安裝清單**：6 個核心角色一律在列，變體依回答加入。之後只處理清單內的檔案，不要用 glob 全掃（否則變體詢問形同虛設）。
+2. 逐檔處理清單內的 `templates/agents/<名>.md` → `~/.claude/agents/<同名>.md`：
+   - 目標不存在 → 直接複製，清單標記「新建」。
+   - 目標已存在 → 先備份到 `~/.claude/backups/agents-<時間戳>/`，再 `diff` 模板與本機檔；**無差異**跳過（標記「跳過」），**有差異**把 diff 呈現給使用者選（保留本機／採用模板／手動合併），依選擇標記「保留」或「覆蓋」。本機檔可能載有使用者客製，是資產不是垃圾，永不盲蓋。
+3. 完成後列出安裝清單（檔名＋該檔 frontmatter 的 `model:` 值＋新建/覆蓋/保留/跳過標記）——回滾時以此清單為準。
 
 ## Phase 2：委派政策（draft-first，人審後才落正式位置）
 
 1. 把 `templates/rules/agents.md` 複製到暫存路徑（scratchpad 或 `/tmp`）作為草稿。
 2. `~/.claude/rules/agents.md` 不存在 → 呈現草稿要點（角色路由表＋委派規則條數）請使用者確認後安裝。
-   已存在 → `diff` 草稿與本機檔呈現差異，讓使用者決定：整檔採用／保留本機／逐段合併。
+   已存在 → 先備份到 `~/.claude/backups/`（同 Phase 3 命名慣例），再 `diff` 草稿與本機檔呈現差異，讓使用者決定：整檔採用／保留本機／逐段合併。
 3. **未經使用者確認前不得寫入** `~/.claude/rules/`。
 4. 提醒：政策內引用的 review 工具鏈（dev-workflow 等）是 df-haha rules 全套的一部分，新機器若沒有那些 rules，相關條文照常保留即可（引用落空不影響路由本身）。
 
@@ -52,17 +53,23 @@ allowed-tools: Bash, Read, Write, Edit, AskUserQuestion
 別名解析未釘選前，`opus` / `sonnet` / `haiku` 會解析到 CC 當下預設（可能是最新版模型），
 與政策「版本受控」的前提矛盾——**這一步不是可選的**。
 
-1. 先 Read `~/.claude/settings.json` 確認現況（改前必讀，不憑記憶）。
-2. 備份：
+> 適用範圍：本 skill 假設 **Anthropic API 直連**。Bedrock / Vertex 部署的模型 ID 命名不同，
+> 這三個預設值不適用——偵測到該類部署（如 `CLAUDE_CODE_USE_BEDROCK` / `VERTEX` 相關 env）先停下與使用者確認。
+
+1. 先 Read `~/.claude/settings.json` 確認現況（改前必讀，不憑記憶）。檔案不存在（新機器常見）→ 建立內容為 `{}` 的新檔並跳過備份步驟。
+2. 備份既有檔（任一步失敗即**中止**，不得繼續改 settings）：
    ```bash
-   mkdir -p ~/.claude/backups && cp ~/.claude/settings.json ~/.claude/backups/settings.json.pilotfish-$(date +%Y%m%d-%H%M%S)
+   mkdir -p ~/.claude/backups && chmod 700 ~/.claude/backups && \
+   BK=~/.claude/backups/settings.json.pilotfish-$(date +%Y%m%d-%H%M%S) && \
+   cp ~/.claude/settings.json "$BK" && chmod 600 "$BK"
    ```
 3. 用 AskUserQuestion 問三個釘選值，預設值（df-haha 2026-07-11 拍板，可改）：
    - `ANTHROPIC_DEFAULT_OPUS_MODEL` = `claude-opus-4-6[1m]`
    - `ANTHROPIC_DEFAULT_SONNET_MODEL` = `claude-sonnet-4-6`
    - `ANTHROPIC_DEFAULT_HAIKU_MODEL` = `claude-haiku-4-5-20251001`
-4. 只在 `env` 區塊 upsert 這三鍵。**不碰**頂層 `model`（主迴圈模型是個人選擇；另注意 `"best"` 不支援 `[1m]` 後綴）。
-5. 紅線：不新增 `CLAUDE_CODE_SUBAGENT_MODEL`。
+4. 只在 `env` 區塊 upsert 這三鍵，其餘內容原樣保留。**不碰**頂層 `model`（主迴圈模型是個人選擇；另注意 `"best"` 不支援 `[1m]` 後綴）。
+5. 改完立即驗證整檔仍是合法 JSON（如 `python3 -m json.tool ~/.claude/settings.json`）；驗證失敗 → 用步驟 2 的備份還原後回報，不留半壞檔。
+6. 紅線：不新增 `CLAUDE_CODE_SUBAGENT_MODEL`。
 
 ## Phase 4：重啟與驗證
 
@@ -75,7 +82,7 @@ env 與 agent 檔改動需重啟 session 才生效。請使用者重啟後執行
 ## 升級 / 回滾
 
 - **升級**：plugin 更新後重跑本 skill 即可——Phase 1/2 的 diff-first 流程會把模板變更與本機客製攤開讓使用者逐項決定。上游（Nanako0129/pilotfish）的升級由 plugin 維護者手動 diff 其 `templates/agents/` 後搬移，不在本 skill 範圍。
-- **回滾**：還原 `~/.claude/backups/settings.json.pilotfish-*` 最新備份；刪除本次安裝的 `~/.claude/agents/` 檔案；移除或還原 `~/.claude/rules/agents.md`。
+- **回滾**：以 Phase 1 安裝清單為準——標記「新建」的 `~/.claude/agents/` 檔才刪除，標記「覆蓋」的用 `~/.claude/backups/agents-<時間戳>/` 還原；**不要按檔名整批刪**（會誤刪使用者原有同名檔）。settings.json 還原 `~/.claude/backups/settings.json.pilotfish-*` 最新備份；`~/.claude/rules/agents.md` 同理：本次新建才移除，否則以備份還原。
 
 ## 授權
 
