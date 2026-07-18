@@ -66,7 +66,7 @@
     {
       "name": "handoff",
       "description": "跨 session 複雜任務交接 — 自動從本次對話收集 commit / 決策共識 / 待辦 / 相關 memory，產出結構化 handoff prompt 並落盤至 ~/.claude/handoffs/，過程中呼叫 Codex CLI 對草稿做最後一道把關（只挑實質影響的問題），含自我清理段落避免堆積",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "author": { "name": "df-haha" },
       "source": "./plugins/handoff",
       "category": "productivity"

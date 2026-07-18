@@ -150,11 +150,14 @@ sed -e 's/\x1b\[[0-9;]*m//g' /tmp/codex-handoff-review.log
 
 ```
 ✅ Handoff 已落盤：~/.claude/handoffs/<檔名>.md
+📂 Repo：<pwd 絕對路徑>
 🔍 Codex 審核：<無實質問題 / 已套用 N 項 BLOCKER 修正 / IMPORTANT 待你決定 / skipped: 原因>
 
 📋 複製上方完整 prompt（從「你好！上個 session...」到最末），貼到下個 session 的第一句話即可。
 新 session 會依 prompt 內含的「開工順序」第 1 步自動 rm 這份 md，不需手動清。
 ```
+
+> 📂 Repo 行取 Step 1 的 `pwd`（多 worktree 專案取當前 worktree 根目錄），讓使用者複製後直接 cd。
 
 ---
 
