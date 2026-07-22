@@ -145,22 +145,25 @@ Phase 2 完成後啟動 1 個衝突偵測 subagent，讀取所有 phase1 + phase
 
 ### 「獨立來源」操作化定義
 
-**舊版漏洞**：三家媒體都引同一份 Gartner 報告，會被誤算為 3 個獨立來源（其實只有 1 個原始來源）。
+<!-- BEGIN SHARED:verification-core:independence v1 sha:a475065f144d (generated；改 shared/verification-core.md 後跑 node scripts/verify-shared-core.mjs --write，禁止手改本區塊) -->
+## 獨立來源判定規則
 
-**「獨立」判定規則**（從嚴）：
+> 需要幾個獨立來源才達標由各 plugin 自訂（本核心只定義「什麼算獨立」）。
+
+### 「獨立」判定規則（從嚴）
 
 1. **同一份原始研究/資料庫的 N 篇轉述 = 1 個獨立來源**（無論轉述者多權威）
    - 範例：TechCrunch、The Verge、Reuters 都引「Gartner 2025 Q1 雲端市佔報告」→ 算 1 個（Gartner）不是 3 個
    - 範例：Bloomberg、WSJ、FT 都引「SEC 10-K Form」→ 算 1 個（SEC filing）不是 3 個
 
-2. **3 個來源裡至少 2 個必須追溯到不同的原始研究/資料庫**
-   - 例如：Gartner 報告 + IDC 報告 + 公司財報 = ✅ 3 個獨立
-   - 例如：Gartner 報告 + 3 篇引 Gartner 的媒體 = ❌ 仍只有 1 個
-   - 例如：Gartner 報告 + Gartner 另一份不同主題報告 = ⚠️ 半獨立（同機構不同研究，視為 1.5 個）
+2. **無論門檻幾個來源，其中至少 2 個必須追溯到不同的原始研究/資料庫，才可能構成 ≥2 個獨立來源**
+   - 例如：Gartner 報告 + IDC 報告 + 公司財報 = 3 個獨立
+   - 例如：Gartner 報告 + 3 篇引 Gartner 的媒體 = 仍只有 1 個
+   - 例如：Gartner 報告 + Gartner 另一份不同主題報告 = 半獨立（同機構不同研究，視為 1.5 個）
 
 3. **官方公司來源不能與「公司公關稿轉述媒體」混算**
    - 例如：Apple 10-K + Apple Newsroom 公告 + 引 Apple 公告的 TechCrunch 報導 = 1 個獨立來源（都是 Apple 視角）
-   - 需要再加 ≥1 個獨立第三方（如 Counterpoint Research、Canalys）才算 ≥2
+   - 需要再加 1 個以上獨立第三方（如 Counterpoint Research、Canalys）才算 2 個以上
 
 4. **AI 摘要不算獨立來源**
    - ChatGPT / Perplexity / Google AI Overview 等的摘要 → L6，僅作線索，不計入三角驗證的 N
@@ -168,24 +171,29 @@ Phase 2 完成後啟動 1 個衝突偵測 subagent，讀取所有 phase1 + phase
 5. **同一作者的 N 篇文章 = 1 個獨立來源**
    - Ben Thompson Stratechery 一週寫 3 篇都引用同一推理 → 算 1 個（Thompson 視角）
 
-**Subagent 在報告中標示獨立性**：
+### 查核輸出中標示獨立性
+
 ```
 財務數字驗證：營收 $X
 - 來源 1：Apple 10-K (sec.gov, 2025-Q1) [L1，原始資料]
 - 來源 2：Bloomberg 報導 (引 10-K, 2025-04-15) [L2，但同一原始 = 不計入獨立]
 - 來源 3：Canalys 報告 (canalys.com, 2025-03) [L3，獨立研究]
 - 來源 4：Counterpoint Research (counterpointresearch.com, 2025-04) [L3，獨立研究]
-→ 獨立來源數：3（10-K / Canalys / Counterpoint）✅ 達標
+→ 獨立來源數：3（10-K / Canalys / Counterpoint）（是否達標依各 plugin 自訂門檻判定）
 ```
+<!-- END SHARED:verification-core:independence -->
 
 ---
 
 ## 6. 來源可信度分級
 
+<!-- BEGIN SHARED:verification-core:source-class v1 sha:f532c86104de (generated；改 shared/verification-core.md 後跑 node scripts/verify-shared-core.mjs --write，禁止手改本區塊) -->
+## 來源可信度分級
+
 ### 軸分離說明
 
 L1-L6 **只評估來源可信度**（該來源發布的資訊有多大機率為真）。其他維度獨立處理：
-- **獨立性**：由 §5 三角驗證規則另行判定（同源 N 篇 = 1 個獨立來源），不影響 L 級
+- **獨立性**：由三角驗證規則另行判定（同源 N 篇 = 1 個獨立來源），不影響 L 級
 - **可及性**（paywall / unreachable）：是第三軸，不得因 paywall 降 L 級——付費牆只影響驗證可行性，不影響來源品質
 
 ### 6 級可信度分級表
@@ -199,15 +207,9 @@ L1-L6 **只評估來源可信度**（該來源發布的資訊有多大機率為�
 | L5 一般媒體 | 一般新聞網站、部落格、Medium、個人網站 | 低 | 需交叉驗證 |
 | L6 AI/聚合 | 維基百科、AI 生成摘要、SEO 內容農場 | 最低 | 僅作線索，不可直接引用 |
 
-### 衝突裁定優先級
-
-L1 > L2 > L3 > L4 > 反事實推理 > L5 > L6
-
 ### 30+ 常見網域對照表
 
-**舊版漏洞**：6 級分級只給「範例」未給「網域 mapping」，subagent 拿到 URL 要自行判斷會憑感覺。
-
-**常見網域對照（按 L 級從高到低）**：
+查核者拿到 URL 後對照本表歸級；表中沒有的網域用「擁有者背景 + 內容類型」推導（範例：`somecompany.com/blog/` 是公司自家部落格 → L5 一般媒體；`somelab.edu/paper/` 是學術 → L1-L3 看是否經同行評審）。
 
 #### L1 一手來源（官方/政府/SEC）
 - `sec.gov`（美國證券交易委員會 EDGAR）
@@ -255,8 +257,24 @@ L1 > L2 > L3 > L4 > 反事實推理 > L5 > L6
 - ChatGPT / Perplexity / Google AI Overview / Bing Chat 等 AI 摘要
 - `quora.com`（除非作者是領域權威）
 - SEO 內容農場（如 `*-howto.com`、`*-guide.io` 等模式）
+<!-- END SHARED:verification-core:source-class -->
 
-**Subagent 操作**：拿到 URL → 對照本表歸級 → 表中沒有的網域 → 用「擁有者背景 + 內容類型」推導（範例：`somecompany.com/blog/` 是公司自家部落格 → L5 一般媒體；`somelab.edu/paper/` 是學術 → L1-L3 看是否經同行評審）。
+### 衝突裁定優先級
+
+L1 > L2 > L3 > L4 > 反事實推理 > L5 > L6
+
+<!-- BEGIN SHARED:verification-core:access-state v1 sha:aa96c6ef86fd (generated；改 shared/verification-core.md 後跑 node scripts/verify-shared-core.mjs --write，禁止手改本區塊) -->
+## 可及性軸（Access State）
+
+可及性（access state）是獨立於可信度的第三軸。
+
+### 原則
+
+1. paywall（付費牆）／登入牆／地區限制＝取得障礙，**不得因此調降來源 L 級**（WSJ、FT、The Information 均為付費牆且屬 L2）
+2. 無法重抓驗證的引用標「無法查證（UNVERIFIED）」，不是「錯誤」；兩者必須分開統計
+3. 每筆無法查證記錄必附：使用工具、錯誤碼/原因、重試次數、替代來源搜索結果
+4. 關鍵主張若只剩無法查證的證據 → 標 ⬜ 並降低該主張信心，不得以 paywall 為由自動放行
+<!-- END SHARED:verification-core:access-state -->
 
 ### 兩個同級來源衝突的仲裁規則
 

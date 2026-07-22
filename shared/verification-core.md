@@ -1,82 +1,14 @@
-# 5 層查證詳細 Checklist
+# Verification Core — 查核語意 SSOT
 
-> 由原 8 層精簡合併：層 1 保留、層 2+8 合併、層 3+4 合併、層 5+6 合併、層 7 保留
+> **本檔是查核語意的單一真相來源（SSOT）。** 消費者 plugin 內的對應區塊由 `node scripts/verify-shared-core.mjs --write` 生成，**禁止手改 generated block**；用 `--check` 驗證漂移。
+>
+> 修改本檔後執行 `node scripts/verify-shared-core.mjs --write` 同步所有消費者。
 
----
-
-## 第一層：事實查核
-
-- [ ] 實體是否存在（公司/技術/人物/廠商/服務）
-- [ ] 名稱拼寫正確（多語言檢查）
-- [ ] 基本資訊準確（時間、地點、規模）
-- [ ] 關鍵人物真實存在（CEO、創辦人、專家）
-
-## 第二層：時效性 + 來源查證
-
-### 時效性
-- [ ] 實體當前狀態（營運中/已停業/已被收購/服務下線）
-- [ ] 已停業/下線仍需驗證存在性與商業模式（用於案例分析）
-- [ ] 重大變更（收購/合併/停業/轉型）
-- [ ] 資料時效性（超過 12 個月標註 ⚠️，6-12 個月標註提醒）
-- [ ] 是否有最新發展未反映
-- [ ] 歷史案例需標註時間背景
-
-### 來源查證
-- [ ] 每個來源的可信度評級（L1-L6，見下方共用查核核心）
-- [ ] 付費牆/不可及屬 access 軸，不得因此降低 L 級
-- [ ] 公關稿/付費刊登 → 標註為公司視角（影響獨立性軸），不逕降可信度
-- [ ] 是否有立場偏見或利益衝突
-- [ ] 所有關鍵數據是否標註來源
-- [ ] 為正確但缺來源的資訊補充 3+ 個可靠來源
-
-## 第三層：交叉驗證 + 數據溯源
-
-### 交叉驗證
-- [ ] 至少 3 個獨立來源交叉比對（「獨立」判定見共用查核核心之獨立來源規則；同一原始研究的多篇轉述只算 1 個）
-- [ ] 官方來源（官網、財報）
-- [ ] 第三方來源（新聞、產業報告）
-- [ ] 社群驗證（LinkedIn、Glassdoor、GitHub）
-
-### 數據溯源與計算
-- [ ] 追溯原始資料來源
-- [ ] 驗證數據計算方法
-- [ ] 檢查是否斷章取義
-- [ ] 數學正確性：百分比加總、成長率計算、CAGR、市場規模推算
-- [ ] 統計合理性：樣本數、統計顯著性
-- [ ] 單位一致性：同指標一致單位、貨幣標註、時間範圍一致
-
-## 第四層：邏輯一致性 + 隱藏錯誤
-
-### 邏輯一致性
-- [ ] 前後文是否矛盾
-- [ ] 數據推論是否合理
-- [ ] 因果關係是否成立
-- [ ] 結論是否過度推論
-
-### 隱藏錯誤偵測
-
-完整 7 項見共用查核核心之數據自洽 Checklist。
-
-## 第五層：技術與術語查證
-
-### 技術查核（反籠統）
-反籠統規則在技術架構/白皮書章節嚴格執行，商業概述允許合理概括。之所以要求具體術語，是因為模糊技術描述可能導致讀者對技術能力產生錯誤預期。
-- [ ] 技術/框架是否真實存在（官方文檔/GitHub 可查證）
-- [ ] 技術名稱拼寫正確（大小寫、版本號）
-- [ ] 禁止籠統描述（技術章節中）：❌「AI 技術」→ ✅ 具體框架名+版本
-- [ ] 技術版本是否為當前版本
-- [ ] 技術生命週期狀態（活躍/維護/停止開發）
-- [ ] 流行詞濻用檢測
-
-### 專業術語
-- [ ] 商業術語使用是否符合定義（B2B/B2C、SaaS/PaaS、MVP/PMF）
-- [ ] 產業術語使用準確性
+core_version: 1
 
 ---
 
-## 共用查核核心（Shared Verification Core）
-
-<!-- BEGIN SHARED:verification-core:source-class v1 sha:f532c86104de (generated；改 shared/verification-core.md 後跑 node scripts/verify-shared-core.mjs --write，禁止手改本區塊) -->
+<!-- SECTION:source-class -->
 ## 來源可信度分級
 
 ### 軸分離說明
@@ -146,9 +78,9 @@ L1-L6 **只評估來源可信度**（該來源發布的資訊有多大機率為�
 - ChatGPT / Perplexity / Google AI Overview / Bing Chat 等 AI 摘要
 - `quora.com`（除非作者是領域權威）
 - SEO 內容農場（如 `*-howto.com`、`*-guide.io` 等模式）
-<!-- END SHARED:verification-core:source-class -->
+<!-- /SECTION:source-class -->
 
-<!-- BEGIN SHARED:verification-core:independence v1 sha:a475065f144d (generated；改 shared/verification-core.md 後跑 node scripts/verify-shared-core.mjs --write，禁止手改本區塊) -->
+<!-- SECTION:independence -->
 ## 獨立來源判定規則
 
 > 需要幾個獨立來源才達標由各 plugin 自訂（本核心只定義「什麼算獨立」）。
@@ -184,9 +116,9 @@ L1-L6 **只評估來源可信度**（該來源發布的資訊有多大機率為�
 - 來源 4：Counterpoint Research (counterpointresearch.com, 2025-04) [L3，獨立研究]
 → 獨立來源數：3（10-K / Canalys / Counterpoint）（是否達標依各 plugin 自訂門檻判定）
 ```
-<!-- END SHARED:verification-core:independence -->
+<!-- /SECTION:independence -->
 
-<!-- BEGIN SHARED:verification-core:access-state v1 sha:aa96c6ef86fd (generated；改 shared/verification-core.md 後跑 node scripts/verify-shared-core.mjs --write，禁止手改本區塊) -->
+<!-- SECTION:access-state -->
 ## 可及性軸（Access State）
 
 可及性（access state）是獨立於可信度的第三軸。
@@ -197,9 +129,9 @@ L1-L6 **只評估來源可信度**（該來源發布的資訊有多大機率為�
 2. 無法重抓驗證的引用標「無法查證（UNVERIFIED）」，不是「錯誤」；兩者必須分開統計
 3. 每筆無法查證記錄必附：使用工具、錯誤碼/原因、重試次數、替代來源搜索結果
 4. 關鍵主張若只剩無法查證的證據 → 標 ⬜ 並降低該主張信心，不得以 paywall 為由自動放行
-<!-- END SHARED:verification-core:access-state -->
+<!-- /SECTION:access-state -->
 
-<!-- BEGIN SHARED:verification-core:data-consistency v1 sha:c32e678f2294 (generated；改 shared/verification-core.md 後跑 node scripts/verify-shared-core.mjs --write，禁止手改本區塊) -->
+<!-- SECTION:data-consistency -->
 ## 數據自洽 Checklist
 
 ### Canonical 7 項檢查
@@ -222,4 +154,4 @@ L1-L6 **只評估來源可信度**（該來源發布的資訊有多大機率為�
 | 正規化值 | 統一單位/幣別後的值 |
 | 兩處位置 | 不一致出現的兩個位置（章節+段落） |
 | 換算假設 | 採用的匯率日期、單位換算基準等 |
-<!-- END SHARED:verification-core:data-consistency -->
+<!-- /SECTION:data-consistency -->

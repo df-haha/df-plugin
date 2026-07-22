@@ -51,6 +51,11 @@
 
 ### data_self_consistency canonical checklist（7 項；文件與 workflow prompt 共用）
 
+<!-- BEGIN SHARED:verification-core:data-consistency v1 sha:c32e678f2294 (generated；改 shared/verification-core.md 後跑 node scripts/verify-shared-core.mjs --write，禁止手改本區塊) -->
+## 數據自洽 Checklist
+
+### Canonical 7 項檢查
+
 1. 跨章節同指標數字一致
 2. 單位換算（萬/億、million/billion）
 3. 幣別與匯率日期、名目/實質金額
@@ -59,7 +64,17 @@
 6. 百分比 vs 百分點 vs 絕對數
 7. 加總、成長率、衍生計算正確性
 
-每筆 warning 附：原始值、正規化值、兩個出現位置、採用的換算假設。
+### Warning 記錄格式
+
+每筆 warning 必附以下 4 欄：
+
+| 欄位 | 說明 |
+|------|------|
+| 原始值 | 報告中出現的原始數字/表述 |
+| 正規化值 | 統一單位/幣別後的值 |
+| 兩處位置 | 不一致出現的兩個位置（章節+段落） |
+| 換算假設 | 採用的匯率日期、單位換算基準等 |
+<!-- END SHARED:verification-core:data-consistency -->
 
 ### 評級分數（canonical，SSOT）
 
@@ -78,7 +93,7 @@
 - **Python 最低版本**：3.9+
 - **並行上限**：Phase 1 每批 6、Phase 2 每批 5、Synthesis 3、補查 3
 - **Exa rate limit**：全域併發預算（/search 10 QPS、/contents 100 QPS 為 API key 層級共用額度）；429 分類重試機制不變
-- **版本**：repo 發佈版 v2.0.0（lineage：upstream v.260625）
+- **版本**：repo 發佈版 v2（精確版號以 plugin.json 為準；lineage：upstream v.260625）
 
 ---
 
@@ -86,17 +101,7 @@
 
 ### 1. 數據自洽檢查
 
-依 §0 canonical checklist 7 項逐一掃描報告中的所有數字：
-
-1. 跨章節同指標數字一致（例：執行摘要的營收 vs 財務章節的營收）
-2. 單位換算（萬/億、million/billion）
-3. 幣別與匯率日期、名目/實質金額
-4. 資料期間 vs 發布日期錯位（過去數據描述為現況）
-5. 地域範圍混淆（全球/區域/國家）
-6. 百分比 vs 百分點 vs 絕對數
-7. 加總、成長率、衍生計算正確性
-
-每筆 warning 附：原始值、正規化值、兩個出現位置、採用的換算假設。
+依 §0「數據自洽 checklist」（generated block）七項執行，warning 附 §0 規定 4 欄位（原始值/正規化值/兩處位置/換算假設）。
 發現不一致 → 記錄於輸出，標明位置和建議修正。
 
 ### 2. 維度覆蓋檢查
