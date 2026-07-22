@@ -1,0 +1,32 @@
+{
+  "name": "deep-research-ryan",
+  "version": "2.0.0",
+  "description": "Multi-phase research workflow for evidence-based reports and decisions. 完整編排（Workflow 模式）需 Claude Code 宿主；Codex 宿主以 prose 流程執行。",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "research",
+    "market",
+    "technology",
+    "analysis"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Deep Research",
+    "shortDescription": "Run structured, evidence-based deep research",
+    "longDescription": "A multi-phase research workflow for companies, products, technologies, industries, people, and business decisions. 完整編排（Workflow 模式）需 Claude Code 宿主；Codex 宿主以 prose 流程執行。",
+    "developerName": "df-haha",
+    "category": "Research",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
+    "defaultPrompt": [
+      "\u6df1\u5ea6\u7814\u7a76\u9019\u5bb6\u516c\u53f8",
+      "\u5206\u6790\u9019\u500b\u5e02\u5834\u662f\u5426\u503c\u5f97\u9032\u5165",
+      "\u7814\u7a76\u9019\u9805\u6280\u8853\u7684\u98a8\u96aa\u8207\u6a5f\u6703"
+    ],
+    "brandColor": "#7C3AED"
+  }
+}

@@ -63,6 +63,18 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Development"
+    },
+    {
+      "name": "deep-research-ryan",
+      "source": {
+        "source": "local",
+        "path": "./plugins/deep-research-ryan"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Research"
     }
   ]
 }
