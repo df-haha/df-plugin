@@ -1,6 +1,6 @@
 {
   "name": "deep-research-ryan",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Multi-phase research workflow for evidence-based reports and decisions. 完整編排（Workflow 模式）需 Claude Code 宿主；Codex 宿主以 prose 流程執行。",
   "author": {
     "name": "df-haha"

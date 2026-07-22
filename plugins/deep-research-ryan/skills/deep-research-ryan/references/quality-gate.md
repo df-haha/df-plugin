@@ -51,6 +51,11 @@
 
 ### data_self_consistency canonical checklist（7 項；文件與 workflow prompt 共用）
 
+<!-- BEGIN SHARED:verification-core:data-consistency v1 sha:c32e678f2294 (generated；改 shared/verification-core.md 後跑 node scripts/verify-shared-core.mjs --write，禁止手改本區塊) -->
+## 數據自洽 Checklist
+
+### Canonical 7 項檢查
+
 1. 跨章節同指標數字一致
 2. 單位換算（萬/億、million/billion）
 3. 幣別與匯率日期、名目/實質金額
@@ -59,7 +64,17 @@
 6. 百分比 vs 百分點 vs 絕對數
 7. 加總、成長率、衍生計算正確性
 
-每筆 warning 附：原始值、正規化值、兩個出現位置、採用的換算假設。
+### Warning 記錄格式
+
+每筆 warning 必附以下 4 欄：
+
+| 欄位 | 說明 |
+|------|------|
+| 原始值 | 報告中出現的原始數字/表述 |
+| 正規化值 | 統一單位/幣別後的值 |
+| 兩處位置 | 不一致出現的兩個位置（章節+段落） |
+| 換算假設 | 採用的匯率日期、單位換算基準等 |
+<!-- END SHARED:verification-core:data-consistency -->
 
 ### 評級分數（canonical，SSOT）
 

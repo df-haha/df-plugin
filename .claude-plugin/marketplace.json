@@ -26,15 +26,15 @@
     {
       "name": "deep-research-ryan",
       "description": "多階段深度研究引擎 — 廣度掃描→深度搜索→多輪辯論→報告合成→引用驗證→三閘門品質檢查，8 大研究類型，跨平台（Windows/macOS/Linux）",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "author": { "name": "df-haha" },
       "source": "./plugins/deep-research-ryan",
       "category": "research"
     },
     {
       "name": "fact-check",
-      "description": "文檔事實查核系統 — 5 層查證架構，支援實體、技術、數據、人物、論述的交叉驗證",
-      "version": "1.0.0",
+      "description": "文檔事實查核系統 — 5 層查證架構，支援實體、技術、數據、人物、論述的交叉驗證；來源評級採 L1-L6（與 deep-research-ryan 共用 verification-core）",
+      "version": "1.1.0",
       "author": { "name": "df-haha" },
       "source": "./plugins/fact-check",
       "category": "research"
