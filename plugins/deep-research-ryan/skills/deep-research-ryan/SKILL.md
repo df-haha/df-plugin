@@ -19,7 +19,7 @@ description: "多階段深度研究引擎：自動調度 subagent 完成廣度�
 - **路徑表示**：本文件範例路徑用 `~/.claude/...`（macOS/Linux 樣式）**與** `%USERPROFILE%\.claude\...`（Windows 樣式）示意兩平台對應位置。**實際派 subagent / 呼叫 Claude Code 內建工具（Read/Grep/Glob）時必須先展開為絕對路徑**（`~` / `%USERPROFILE%` 是 shell 展開符號、Read/Grep/Glob 工具契約不展開；Bash tool 對 `~` 通常會展開但 Windows PowerShell / CMD 未必）——展開方法見 `references/agent-config.md` §5（用 `python -c "import os; print(os.path.expanduser('~'))"` 拿 `{home}` 再拼路徑）
 - **subagent 自律規則**：本技能已消除主流程 POSIX 命令，但 subagent LLM 若自發想跑 `grep`/`awk`/`sed`，PowerShell 環境會失敗。subagent 應**優先用 Claude Code 內建工具**（Grep/Glob/Read）；prompt 模板已改寫，主對話發任務時遵守即可
 
-**環境診斷**：跑 `python <本技能目錄>/scripts/doctor.py`（macOS/Linux）或 `python <本技能目錄>\scripts\doctor.py`（Windows）驗環境。腳本會檢查 Python 版本、Node.js、Claude Code CLI，並印本次驗到什麼、缺什麼。
+**環境診斷**：跑 `python <本技能目錄>\scripts\doctor.py`（Windows）／`python3 <本技能目錄>/scripts/doctor.py`（macOS/Linux）驗環境。腳本會檢查 Python 版本、Node.js、Claude Code CLI，並印本次驗到什麼、缺什麼。
 
 ---
 
@@ -231,6 +231,7 @@ Workflow({
     depth: "quick" | "standard" | "deep",
     digestFile: "<runDir>/research-digest_{YYYYMMDD}.md 絕對路徑",
     gapFile: "<runDir>/gap-analysis_{YYYYMMDD}.md 絕對路徑",
+    s3: true,  // 選填，standard 模式且爭議結論 ≥2 時設 true 強制啟用 S-3
     finalReportFile: "<runDir>/report/{主題}_{研究類型}_{YYYYMMDD}.md 絕對路徑"
   }
 })
@@ -242,9 +243,11 @@ Workflow({
 - `finalReportFile`（Merge phase 合併後的最終報告，Citation/QG 驗證對象）
 - `{runDir}/citation-verify.md`（引用驗證結果 + rubric 5 項評分）
 - `{runDir}/qg-result.md`（QG 三閘門結果）
-- 回傳 `{ citationPass, qgPass, attempts, finalStatus }` 給主對話
+- 回傳 `{ finalStatus, citation: {status, rate, rounds, rubric, metrics}, qg: {status, rounds, gates, warningCount}, citationBlocked, correctionLog, nextStep }` 給主對話
 
-主對話接續執行 README 生成 + 更新 MANIFEST 為 DONE。
+主對話依 `finalStatus` 分流：
+  - `DONE` / `DONE_WITH_WARNINGS` → 生成 README.md → 更新 MANIFEST 為 DONE
+  - `NEED_MANUAL_REVIEW` / `QG_AGENT_FAILED` → Read qg-result.md 與 citation-verify.md 後人工審視，**不得標 DONE**
 
 #### ⚠️ 三條呼叫前必看
 
@@ -391,10 +394,11 @@ Quality Gate Subagent（1 個獨立 subagent）                    ← 不佔主
     ↓
 主對話讀取 qg-result.md（精簡結論）
     ├─ PASS → 生成 README.md → 更新 MANIFEST 為 DONE，告知用戶
-    └─ PASS_WITH_WARNINGS → 啟動補查（若有 ⬜ 或 ⚠️）→ **重跑 QG**（強制閉環）→
-        ├─ 重跑後 PASS → README.md → DONE
-        ├─ 重跑後仍 WARNINGS → 標記寫入 README → DONE
-        └─ 重跑 2 輪仍 FAIL → 標 FAIL，告知用戶手動審視
+    ├─ PASS_WITH_WARNINGS → 補查 + **重跑 QG**（強制閉環）→
+    │   ├─ 重跑後 PASS → README.md → DONE
+    │   ├─ 重跑後仍 WARNINGS → 標記寫入 README → DONE_WITH_WARNINGS
+    │   └─ 重跑 2 輪仍 FAIL → 標 FAIL，告知用戶手動審視
+    └─ FAIL → 人工審視 qg-result.md 與 citation-verify.md，**不得標 DONE**
 ```
 
 ---
@@ -468,13 +472,13 @@ Phase 2 完成後啟動 1 個衝突偵測 subagent，讀取所有 phase1/ + phas
 
 ## Synthesis（2-3 個並行 Subagents）
 
-各 Synthesis subagent 讀取 **research-digest.md**（而非原始 Phase 1/2 檔案），加上各自的 reference：
+各 Synthesis subagent 讀取 **research-digest.md ＋ phase2/*.md 原始輸出**，加上各自的 reference：
 
 | Subagent | 負責 | 讀取 |
 |----------|------|------|
-| S-1 分析報告 | 整合數據、橫向對標、信心評級 | research-digest + `output-template.md` + `frameworks.md` |
-| S-2 行動手冊 | 供應商排序、路線圖、成本表、行動清單 | research-digest + `output-template.md` |
-| S-3 前瞻分析（深度時） | 三情境展望、假說驗證、Pre-mortem | research-digest + `frameworks.md` |
+| S-1 分析報告 | 整合數據、橫向對標、信心評級 | research-digest + phase2/*.md + `output-template.md` + `frameworks.md` |
+| S-2 行動手冊 | 供應商排序、路線圖、成本表、行動清單 | research-digest + phase2/*.md + `output-template.md` |
+| S-3 前瞻分析（深度時） | 三情境展望、假說驗證、Pre-mortem | research-digest + phase2/*.md + `frameworks.md` |
 
 分工細節見 `references/synthesis-spec.md`。S-1 + S-2（+ S-3）合併為最終報告。
 
@@ -500,7 +504,8 @@ Synthesis 產出報告後，啟動 **1 個 Quality Gate subagent**（prompt 模�
 
 產出 **qg-result.md**，主對話只讀此精簡結論：
 - **PASS** → 更新 MANIFEST 為 DONE
-- **PASS_WITH_WARNINGS** → 評估是否需要補查（啟動 1-2 個補查 subagent），然後 DONE
+- **PASS_WITH_WARNINGS** → 補查 + 重跑 QG（強制閉環，最多 2 輪）→ 最終 PASS 則 DONE，否則 DONE_WITH_WARNINGS
+- **FAIL** → 人工審視 qg-result.md 與 citation-verify.md，**不得標 DONE**
 
 ---
 

@@ -16,6 +16,9 @@
 //   - gapFile: 絕對路徑，Gap Analysis 產出的 gap-analysis.md（缺口清單 + 假說）
 //   - finalReportFile: 絕對路徑，最終合併報告的寫入位置
 //
+// args 選填：
+//   - s3（boolean）: standard 模式且 gap-analysis 爭議結論 ≥2 時由主對話設 true，強制啟用 S-3
+//
 // 預期前置條件（主對話已完成）：
 //   - digestFile 已存在（Gap Analysis subagent 產出）
 //   - {runDir}/phase1/*.md、{runDir}/phase2/*.md 已落地
@@ -42,6 +45,15 @@ const { runDir, skillDir, researchType, depth, digestFile, gapFile, finalReportF
 
 if (!runDir || !skillDir || !researchType || !depth || !digestFile || !gapFile || !finalReportFile) {
   throw new Error(`args 必填 runDir / skillDir / researchType / depth / digestFile / gapFile / finalReportFile（實收到 ${typeof args}: ${JSON.stringify(args).slice(0, 300)}）`)
+}
+
+const VALID_RESEARCH_TYPES = ['company', 'product', 'tech', 'industry', 'person', 'region', 'model', 'social']
+const VALID_DEPTHS = ['quick', 'standard', 'deep']
+if (!VALID_RESEARCH_TYPES.includes(researchType)) {
+  throw new Error(`researchType 必須是 ${VALID_RESEARCH_TYPES.join('/')} 之一（收到：${researchType}）`)
+}
+if (!VALID_DEPTHS.includes(depth)) {
+  throw new Error(`depth 必須是 ${VALID_DEPTHS.join('/')} 之一（收到：${depth}）`)
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -234,7 +246,7 @@ const ANTI_INJECTION = `
 const DEPTH_THRESHOLDS_B = { deep: 0.80, standard: 0.70, quick: 0.60 }
 const TYPE_THRESHOLDS_B = {
   company: 0.80, product: 0.70, tech: 0.70, industry: 0.70,
-  person: 0.60, region: 0.60, model: 0.70, social: 0.60,
+  person: 0.60, region: 0.60, model: 0.80, social: 0.60,
 }
 const getGateBThreshold = (d, t) => Math.max(DEPTH_THRESHOLDS_B[d] || 0.70, TYPE_THRESHOLDS_B[t] || 0.70)
 
@@ -328,16 +340,16 @@ const citationRepairPrompt = (mismatches) => `${ANTI_INJECTION}
 你是 Deep Research v2.0.0 的 Citation Repair subagent。
 
 【任務】
-完整 mismatch 清單在 ${runDir}/citation-verify.md，本 prompt 僅列前 10 筆摘要；你必須 Read 該檔處理全部 mismatch。
-
-以下是前 ${Math.min(mismatches.length, 10)} 筆摘要：
+完整 mismatch 清單與 unreachable 記錄在 ${runDir}/citation-verify.md，請 Read 該檔處理全部 mismatch 並對 unreachable 重試抓取／找替代來源。
+${mismatches.length > 0 ? `
+本 prompt 列前 ${Math.min(mismatches.length, 10)} 筆摘要：
 ${mismatches.slice(0, 10).map((m, i) => `
 ${i + 1}. URL: ${m.url}
    章節: ${m.section || '未知'}
    原引文: ${m.claim}
    不符原因: ${m.reason}
 `).join('\n')}
-${mismatches.length > 10 ? `... 還有 ${mismatches.length - 10} 個 mismatch，請 Read ${runDir}/citation-verify.md 查看完整清單` : ''}
+${mismatches.length > 10 ? `... 還有 ${mismatches.length - 10} 個 mismatch，請 Read ${runDir}/citation-verify.md 查看完整清單` : ''}` : `本 prompt 無 mismatch 摘要（mismatchList 為空）；完整問題清單在 ${runDir}/citation-verify.md，請 Read 該檔處理全部 mismatch 並對 unreachable 重試抓取／找替代來源。`}
 
 對每個 mismatch，採三選一策略：
 （A）重抓 URL 確認引文 → 改寫報告引文以符合來源（首選）
@@ -376,7 +388,7 @@ const qgPrompt = (round) => `${ANTI_INJECTION}
 - 按維度重要性加權計算整體信心指數（公式見 ${skillDir}/references/verification.md §9）
 - 動態門檻 = max(depth 門檻, type 門檻)：
   - depth 門檻：deep 0.80 / standard 0.70 / quick 0.60
-  - type 門檻：company（含投資決策維度）0.80 / person/region/social 0.60 / 其他 0.70
+  - type 門檻：company（含投資決策維度）與 model（商業模式可行性）0.80 / person/region/social 0.60 / 其他 0.70
 - 本次期望門檻 = ${getGateBThreshold(depth, researchType)}
 
 **閘門 C（LLM-as-judge rubric）**：
@@ -446,7 +458,7 @@ const synthSpecs = [
   { id: 'S-1', task: '分析報告整合', refs: `${skillDir}/references/output-template.md, ${skillDir}/references/frameworks.md` },
   { id: 'S-2', task: '行動手冊（供應商排序、路線圖、成本表）', refs: `${skillDir}/references/output-template.md` },
 ]
-if (depth === 'deep') {
+if (depth === 'deep' || argsObj.s3 === true) {
   synthSpecs.push({ id: 'S-3', task: '前瞻分析（三情境展望 + 假說驗證 + Pre-mortem）', refs: `${skillDir}/references/frameworks.md` })
 }
 
@@ -590,6 +602,11 @@ while (citationRound < MAX_CITATION_ROUNDS && budget.remaining() > 30_000) { // 
 
     // 附加指標到 citationResult 供收尾 return
     citationResult._metrics = { retrievability, support_rate, strict_support_coverage, unreachable_rate }
+  } else {
+    // totalUrls === 0：報告無任何引用 URL，不可驗證 → 保守 FAIL
+    log('⚠️ Citation totalUrls=0（報告無任何引用 URL），不可驗證 → 強制 FAIL')
+    correctionLog.push({ stage: 'citation', field: 'status', orig: citationResult.status, corrected: 'FAIL', basis: 'totalUrls=0 → 不可驗證，保守 FAIL' })
+    citationResult.status = 'FAIL'
   }
   // ━━━ END POST-VALIDATION ━━━
 
@@ -604,15 +621,10 @@ while (citationRound < MAX_CITATION_ROUNDS && budget.remaining() > 30_000) { // 
     break
   }
 
-  // FAIL → 派補查
+  // FAIL → 一律派補查（即使 mismatchList 為空也讓 repair agent 讀 citation-verify.md 全量處理）
   phase('CitationRepair')
   const mismatches = citationResult.mismatchList || []
-  if (mismatches.length === 0) {
-    log('FAIL 但無 mismatch 清單，無法補查 → citationBlocked')
-    citationBlocked = true
-    break
-  }
-  log(`派補查 subagent 處理 ${mismatches.length} 個 mismatch`)
+  log(`派補查 subagent${mismatches.length > 0 ? `處理 ${mismatches.length} 個 mismatch` : '（mismatchList 為空，repair agent 將讀 citation-verify.md 全量處理）'}`)
   await agent(citationRepairPrompt(mismatches), {
     model: 'sonnet', // 補查修正是機械工作（對齊 agent-config §1 模型分層）
     label: `引用修補 R${citationRound}`,
@@ -674,7 +686,19 @@ while (qgRound < MAX_QG_ROUNDS && budget.remaining() > 30_000) { // budget guard
     gates.B_weighted.threshold = bThreshold
   }
 
-  // 閘門 C 機械重算
+  // 閘門 C：若 citationResult?.rubric 存在，從已驗證的 citation rubric 重算 rubric_avg（優先於 QG agent 自報值）
+  if (citationResult?.rubric) {
+    const _rb = citationResult.rubric
+    const _verifiedAvg = (_rb.factual_accuracy + _rb.citation_accuracy + _rb.completeness + _rb.source_quality + _rb.tool_efficiency) / 5
+    const _reportedAvg = gates.C_llm_judge.rubric_avg
+    if (Math.abs(_verifiedAvg - _reportedAvg) > 0.05) {
+      log(`⚠️ 閘門 C rubric_avg 校正：QG 自報 ${_reportedAvg.toFixed(3)} → citation rubric 算出 ${_verifiedAvg.toFixed(3)}（差 ${Math.abs(_verifiedAvg - _reportedAvg).toFixed(3)}）`)
+      correctionLog.push({ stage: 'qg', field: 'gates.C_llm_judge.rubric_avg', orig: _reportedAvg, corrected: _verifiedAvg, basis: `citation rubric 5 項平均=${_verifiedAvg.toFixed(3)}` })
+      gates.C_llm_judge.rubric_avg = _verifiedAvg
+    }
+  }
+
+  // 閘門 C 機械重算（用可能已校正的 rubric_avg）
   const cThreshold = getGateCThreshold(depth)
   const _cPass = gates.C_llm_judge.rubric_avg >= cThreshold
   if (gates.C_llm_judge.pass !== _cPass) {

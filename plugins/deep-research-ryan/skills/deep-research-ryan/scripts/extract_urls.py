@@ -21,9 +21,12 @@ import re
 import sys
 from pathlib import Path
 
-# Match http/https URL, stopping at whitespace, close paren/bracket, comma, quote.
+# Match http/https URL, stopping at whitespace, close bracket, angle bracket, quote.
+# Close paren ')' is intentionally INCLUDED in the match so that URLs like
+# Function_(mathematics) are captured whole; unbalanced trailing ')' is stripped
+# by the post-match balanced-paren logic below.
 # Trailing punctuation `.,;:` is stripped after match (common in prose).
-URL_RE = re.compile(r'https?://[^\s)\]<>"\'`]+', re.IGNORECASE)
+URL_RE = re.compile(r'https?://[^\s\]<>"\'`]+', re.IGNORECASE)
 TRAILING_PUNCT = '.,;:!?'
 
 
@@ -33,6 +36,8 @@ def extract_from_text(text: str) -> list[str]:
     for m in URL_RE.finditer(text):
         u = m.group(0)
         while u and u[-1] in TRAILING_PUNCT:
+            u = u[:-1]
+        while u.endswith(')') and u.count('(') < u.count(')'):
             u = u[:-1]
         if u and u not in seen:
             seen.add(u)

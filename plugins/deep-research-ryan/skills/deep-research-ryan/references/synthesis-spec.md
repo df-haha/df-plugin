@@ -20,6 +20,7 @@
 
 **讀取**：
 - `research-digest.md`（Phase 1+2 精華摘要）
+- `phase2/*.md`（Phase 2 深度搜索原始輸出）
 - `references/output-template.md`（報告格式模板）
 - `references/frameworks.md`（分析框架）
 - `conflicts_*.md` / `resolution_*.md`（如有）
@@ -42,6 +43,7 @@
 
 **讀取**：
 - `research-digest.md`
+- `phase2/*.md`（Phase 2 深度搜索原始輸出）
 - `references/output-template.md`（行動手冊模板區段）
 
 **任務**：
@@ -67,10 +69,12 @@
 | 標準研究 | 當 Gap Analysis 發現 ≥2 個爭議性結論時啟用 |
 | 快速掃描 | **不啟用**（S-1 + S-2 即可）|
 
+> Workflow 模式：standard + 爭議結論 ≥2 時，由主對話以 `args.s3=true` 傳入強制啟用。
+
 **讀取**：
 - `research-digest.md`
+- `phase2/*.md`（Phase 2 深度搜索原始輸出，含 devils-advocate_*.md 如已執行）
 - `references/frameworks.md`（情境分析 §9 + Steel-man §10 + 假設審計 §11）
-- `phase2/devils-advocate_*.md`（如 Devil's Advocate subagent 已執行）
 - `gap-analysis_*.md`（假設審計預備資料，步驟 9）
 
 **任務**：

@@ -583,13 +583,13 @@ WebFetch({ url: "https://registry.npmjs.org/express", prompt: "extract descripti
 **備援**（若特殊場景需離線 shell）：透過 `Bash` 工具執行 `curl` 命令（Windows 10 build 17063+ 內建 curl）：
 
 ```bash
-# 單一資源查詢（Windows / macOS / Linux 都用 `python`；不要用 `python3`——Windows 通常沒這個 alias）
+# 單一資源查詢（python＝Windows／python3＝macOS/Linux）
 curl -s "https://registry.smithery.ai/skills/anthropics/brave-search" | python -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
 
 # 列表查詢（分頁）
 curl -s "https://registry.smithery.ai/skills?page=1&pageSize=100"
 
-# npm 套件查詢
+# npm 套件查詢（python＝Windows／python3＝macOS/Linux）
 curl -s "https://registry.npmjs.org/express" | python -c "import sys,json; d=json.load(sys.stdin); print(d.get('description',''))"
 ```
 
