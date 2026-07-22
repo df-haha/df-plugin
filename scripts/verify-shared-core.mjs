@@ -85,16 +85,36 @@ function parseCanonical(filePath) {
   }
   const coreVersion = parseInt(versionMatch[1], 10);
 
+  // 先獨立計數 open/close marker——non-greedy 配對會把巢狀的第二個 open 吞進內容，
+  // 所以重複/巢狀偵測不能依賴配對結果，必須先全域數 marker 出現次數
+  const openCounts = new Map();
+  const closeCounts = new Map();
+  for (const mm of raw.matchAll(/<!-- SECTION:(\S+) -->/g)) {
+    openCounts.set(mm[1], (openCounts.get(mm[1]) || 0) + 1);
+  }
+  for (const mm of raw.matchAll(/<!-- \/SECTION:(\S+) -->/g)) {
+    closeCounts.set(mm[1], (closeCounts.get(mm[1]) || 0) + 1);
+  }
+  for (const id of new Set([...openCounts.keys(), ...closeCounts.keys()])) {
+    const o = openCounts.get(id) || 0;
+    const c = closeCounts.get(id) || 0;
+    if (o !== 1 || c !== 1) {
+      throw new Error(
+        `${CANONICAL_PATH}: SECTION id "${id}" has ${o} open / ${c} close marker(s) — each id must appear exactly once (duplicate or nested markers?)`
+      );
+    }
+  }
+
   const sections = new Map();
   const sectionRe = /<!-- SECTION:(\S+) -->\n([\s\S]*?)<!-- \/SECTION:\1 -->/g;
   let m;
-  const seenIds = new Set();
   while ((m = sectionRe.exec(raw)) !== null) {
-    if (seenIds.has(m[1])) {
-      throw new Error(`${CANONICAL_PATH}: duplicate SECTION id "${m[1]}" — each id must appear exactly once`);
+    const body = m[2];
+    // 內容中不得再出現任何 SECTION marker（防不同 id 巢狀）
+    if (/<!-- \/?SECTION:/.test(body)) {
+      throw new Error(`${CANONICAL_PATH}: SECTION "${m[1]}" contains a nested SECTION marker`);
     }
-    seenIds.add(m[1]);
-    sections.set(m[1], normalize(m[2]));
+    sections.set(m[1], normalize(body));
   }
 
   return { coreVersion, sections };
@@ -180,6 +200,12 @@ function processFile(filePath, sectionIds, canonical, mode) {
     const existingBlock = content.slice(blockStart, endIdx);
     const existingNormalized = normalize(existingBlock);
 
+    // block 內不得再出現任何 SHARED marker（防跨 id 巢狀導致 --write 截斷錯位）
+    if (existingBlock.includes("SHARED:verification-core:")) {
+      errors.push({ file: filePath, section: id, error: "nested SHARED marker inside block" });
+      continue;
+    }
+
     if (mode === "check") {
       // 比對 marker 中的版本號與 canonical core_version
       const markerVersionMatch = beginMatch[0].match(/v(\d+)/);
@@ -215,11 +241,7 @@ function processFile(filePath, sectionIds, canonical, mode) {
     }
   }
 
-  if (mode === "write" && errors.length === 0) {
-    // 寫出固定 LF
-    writeFileSync(abs, content, "utf8");
-  }
-
+  // processFile 是純函式：不寫檔，寫入一律由 main() 在全部 consumer 驗證通過後統一執行
   return { errors, content };
 }
 
