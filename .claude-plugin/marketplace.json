@@ -25,8 +25,8 @@
     },
     {
       "name": "deep-research-ryan",
-      "description": "多層次深度研究引擎 — 自動調度 subagents 執行多階段研究，支援公司、產品、技術、產業、人物等 8 種研究類型",
-      "version": "1.0.0",
+      "description": "多階段深度研究引擎 — 廣度掃描→深度搜索→多輪辯論→報告合成→引用驗證→三閘門品質檢查，8 大研究類型，跨平台（Windows/macOS/Linux）",
+      "version": "2.0.0",
       "author": { "name": "df-haha" },
       "source": "./plugins/deep-research-ryan",
       "category": "research"

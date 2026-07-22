@@ -38,7 +38,7 @@ codex plugin marketplace add ./
 |--------|------|
 | **first-principles** | 第一性原理思考框架 — 基於 Elon Musk 的第一性原理方法論，自動拆解問題到最基本的事實與假設 |
 | **markitdown** | 使用 Microsoft MarkItDown 將 PDF、PPT、Word、Excel 等檔案轉換為 Markdown |
-| **deep-research-ryan** | 多層次深度研究引擎 — 自動調度 subagents 執行多階段研究，支援公司、產品、技術、產業、人物等 8 種研究類型（by [Ryan](https://github.com/anthropics/claude-code/tree/main/.claude/skills/deep-research)） |
+| **deep-research-ryan** | 多階段深度研究引擎 v2.0.0 — 廣度掃描→深度搜索→多輪辯論+Judge→報告合成（Merge）→引用驗證→三閘門品質檢查（QG），8 種研究類型；Workflow 編排自動調度 subagents；跨平台（Windows/macOS/Linux）（by [Ryan](https://github.com/anthropics/claude-code/tree/main/.claude/skills/deep-research)） |
 | **fact-check** | 文檔事實查核系統 — 5 層查證架構，支援實體、技術、數據、人物、論述的交叉驗證（by [Ryan](https://github.com/anthropics/claude-code/tree/main/.claude/skills/deep-research)） |
 | **daily-work-log** | 跨專案工作日誌產生器 — 掃描 Claude Code / Codex / Gemini session，首次使用引導設定，產出 markdown 日誌並透過 **df-graph**（雲端 Graph，OS 無關）建草稿寄出 |
 | **ai-review** | AI 二次審查 — 使用 Codex / Antigravity（agy）/ Claude Code CLI 對程式碼/計畫/技術決策進行獨立審查，支援單審或 Codex+Agy 雙重對審；reviewer 依宿主選擇（Claude Code 宿主預設 Codex，可 `--model`/`--effort`，未指定吃 `~/.codex/config.toml`；Codex 宿主預設 Claude `claude-opus-4-6[1m]` + max effort）、Agy 預設 `3.5-flash`；Claude Code 可用 `/ai-review`，Codex 用 `$ai-review` / `/skills` 觸發 |
