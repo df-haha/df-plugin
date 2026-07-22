@@ -237,7 +237,7 @@ Workflow({
 })
 ```
 
-所有 args 均為必填絕對路徑；缺任一 throw。
+除 `s3`（選填 boolean，僅 standard 模式生效，quick 模式即使傳 true 也忽略）外，其餘 args 均為必填絕對路徑或必填字串；缺任一 throw，researchType / depth 有 enum 驗證。
 
 腳本完成後產出：
 - `finalReportFile`（Merge phase 合併後的最終報告，Citation/QG 驗證對象）
@@ -246,7 +246,8 @@ Workflow({
 - 回傳 `{ finalStatus, citation: {status, rate, rounds, rubric, metrics}, qg: {status, rounds, gates, warningCount}, citationBlocked, correctionLog, nextStep }` 給主對話
 
 主對話依 `finalStatus` 分流：
-  - `DONE` / `DONE_WITH_WARNINGS` → 生成 README.md → 更新 MANIFEST 為 DONE
+  - `DONE` → 生成 README.md → 更新 MANIFEST 為 DONE
+  - `DONE_WITH_WARNINGS` → 先 Read qg-result.md：**無** high-severity warning → README + DONE（README 標註 warnings）；**有** → 依下方「必看 #3」手動補完＋定向重驗後才可 DONE
   - `NEED_MANUAL_REVIEW` / `QG_AGENT_FAILED` → Read qg-result.md 與 citation-verify.md 後人工審視，**不得標 DONE**
 
 #### ⚠️ 三條呼叫前必看

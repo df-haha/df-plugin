@@ -35,10 +35,16 @@ def extract_from_text(text: str) -> list[str]:
     seen = set()
     for m in URL_RE.finditer(text):
         u = m.group(0)
-        while u and u[-1] in TRAILING_PUNCT:
-            u = u[:-1]
-        while u.endswith(')') and u.count('(') < u.count(')'):
-            u = u[:-1]
+        # 交替剝除尾端標點與不平衡右括號直到穩定（處理 `(https://a.com/b.)` 這類巢狀殘尾）
+        changed = True
+        while changed:
+            changed = False
+            while u and u[-1] in TRAILING_PUNCT:
+                u = u[:-1]
+                changed = True
+            while u.endswith(')') and u.count('(') < u.count(')'):
+                u = u[:-1]
+                changed = True
         if u and u not in seen:
             seen.add(u)
             urls.append(u)

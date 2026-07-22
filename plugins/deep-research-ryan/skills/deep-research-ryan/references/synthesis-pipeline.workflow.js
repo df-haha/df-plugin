@@ -458,7 +458,8 @@ const synthSpecs = [
   { id: 'S-1', task: '分析報告整合', refs: `${skillDir}/references/output-template.md, ${skillDir}/references/frameworks.md` },
   { id: 'S-2', task: '行動手冊（供應商排序、路線圖、成本表）', refs: `${skillDir}/references/output-template.md` },
 ]
-if (depth === 'deep' || argsObj.s3 === true) {
+// s3 只在 standard 生效（quick 依規格不啟用 S-3，即使誤傳 s3=true 也忽略）
+if (depth === 'deep' || (depth === 'standard' && argsObj.s3 === true)) {
   synthSpecs.push({ id: 'S-3', task: '前瞻分析（三情境展望 + 假說驗證 + Pre-mortem）', refs: `${skillDir}/references/frameworks.md` })
 }
 
@@ -686,16 +687,19 @@ while (qgRound < MAX_QG_ROUNDS && budget.remaining() > 30_000) { // budget guard
     gates.B_weighted.threshold = bThreshold
   }
 
-  // 閘門 C：若 citationResult?.rubric 存在，從已驗證的 citation rubric 重算 rubric_avg（優先於 QG agent 自報值）
+  // 閘門 C：若 citationResult?.rubric 存在，一律以已驗證的 citation rubric 重算 rubric_avg
+  // （QG agent 自報值僅供對照——即使差距微小也用重算值，避免邊界值〔如 0.74 vs 0.75〕靠自報溜過門檻）
   if (citationResult?.rubric) {
     const _rb = citationResult.rubric
     const _verifiedAvg = (_rb.factual_accuracy + _rb.citation_accuracy + _rb.completeness + _rb.source_quality + _rb.tool_efficiency) / 5
     const _reportedAvg = gates.C_llm_judge.rubric_avg
     if (Math.abs(_verifiedAvg - _reportedAvg) > 0.05) {
-      log(`⚠️ 閘門 C rubric_avg 校正：QG 自報 ${_reportedAvg.toFixed(3)} → citation rubric 算出 ${_verifiedAvg.toFixed(3)}（差 ${Math.abs(_verifiedAvg - _reportedAvg).toFixed(3)}）`)
-      correctionLog.push({ stage: 'qg', field: 'gates.C_llm_judge.rubric_avg', orig: _reportedAvg, corrected: _verifiedAvg, basis: `citation rubric 5 項平均=${_verifiedAvg.toFixed(3)}` })
-      gates.C_llm_judge.rubric_avg = _verifiedAvg
+      log(`⚠️ 閘門 C rubric_avg 差距顯著：QG 自報 ${_reportedAvg.toFixed(3)} vs citation rubric 算出 ${_verifiedAvg.toFixed(3)}（差 ${Math.abs(_verifiedAvg - _reportedAvg).toFixed(3)}）`)
     }
+    if (_verifiedAvg !== _reportedAvg) {
+      correctionLog.push({ stage: 'qg', field: 'gates.C_llm_judge.rubric_avg', orig: _reportedAvg, corrected: _verifiedAvg, basis: `citation rubric 5 項平均=${_verifiedAvg.toFixed(3)}（無條件採用重算值）` })
+    }
+    gates.C_llm_judge.rubric_avg = _verifiedAvg
   }
 
   // 閘門 C 機械重算（用可能已校正的 rubric_avg）
@@ -786,8 +790,10 @@ return {
   nextStep:
     citationBlocked
       ? '引用驗證失敗或 agent 回傳 null → 主對話讀 citation-verify.md 決定是否人工補修'
-      : finalStatus === 'DONE' || finalStatus === 'DONE_WITH_WARNINGS'
+      : finalStatus === 'DONE'
       ? '主對話生成 README.md → 更新 MANIFEST 為 DONE'
+      : finalStatus === 'DONE_WITH_WARNINGS'
+      ? '主對話讀 qg-result.md：無 high-severity warning → README + DONE（標註 warnings）；有 → 依 SKILL.md「呼叫前必看 #3」手動補完＋定向重驗後才可 DONE'
       : '主對話讀 qg-result.md / citation-verify.md → 決定是否人工審視',
   correctionLog,
   citationBlocked,
