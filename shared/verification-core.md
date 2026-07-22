@@ -91,7 +91,7 @@ L1-L6 **只評估來源可信度**（該來源發布的資訊有多大機率為�
    - 範例：TechCrunch、The Verge、Reuters 都引「Gartner 2025 Q1 雲端市佔報告」→ 算 1 個（Gartner）不是 3 個
    - 範例：Bloomberg、WSJ、FT 都引「SEC 10-K Form」→ 算 1 個（SEC filing）不是 3 個
 
-2. **3 個來源裡至少 2 個必須追溯到不同的原始研究/資料庫**
+2. **無論門檻幾個來源，其中至少 2 個必須追溯到不同的原始研究/資料庫，才可能構成 ≥2 個獨立來源**
    - 例如：Gartner 報告 + IDC 報告 + 公司財報 = 3 個獨立
    - 例如：Gartner 報告 + 3 篇引 Gartner 的媒體 = 仍只有 1 個
    - 例如：Gartner 報告 + Gartner 另一份不同主題報告 = 半獨立（同機構不同研究，視為 1.5 個）
@@ -114,7 +114,7 @@ L1-L6 **只評估來源可信度**（該來源發布的資訊有多大機率為�
 - 來源 2：Bloomberg 報導 (引 10-K, 2025-04-15) [L2，但同一原始 = 不計入獨立]
 - 來源 3：Canalys 報告 (canalys.com, 2025-03) [L3，獨立研究]
 - 來源 4：Counterpoint Research (counterpointresearch.com, 2025-04) [L3，獨立研究]
-→ 獨立來源數：3（10-K / Canalys / Counterpoint）達標
+→ 獨立來源數：3（10-K / Canalys / Counterpoint）（是否達標依各 plugin 自訂門檻判定）
 ```
 <!-- /SECTION:independence -->
 

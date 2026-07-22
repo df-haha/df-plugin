@@ -45,6 +45,25 @@ const CONSUMERS = [
   },
 ];
 
+const USAGE = `verify-shared-core.mjs — Sync shared verification-core blocks
+
+Usage:
+  node scripts/verify-shared-core.mjs [--check|--write|--help]
+
+Modes:
+  --check  (default)  Verify all consumer blocks match canonical content
+  --write             Overwrite consumer blocks with canonical content
+  --help              Show this help
+
+Consumers:
+${CONSUMERS.map((c) => `  ${c.file}\n    sections: ${c.sections.join(", ")}`).join("\n")}
+`;
+
+// 讀檔後一律正規化 CRLF→LF，確保跨平台行為一致
+function readNormalized(filePath) {
+  return readFileSync(filePath, "utf8").replace(/\r\n/g, "\n");
+}
+
 function normalize(text) {
   return text
     .replace(/\r\n/g, "\n")
@@ -58,7 +77,7 @@ function sha256Short(text) {
 }
 
 function parseCanonical(filePath) {
-  const raw = readFileSync(filePath, "utf8");
+  const raw = readNormalized(filePath);
 
   const versionMatch = raw.match(/^core_version:\s*(\d+)/m);
   if (!versionMatch) {
@@ -69,7 +88,12 @@ function parseCanonical(filePath) {
   const sections = new Map();
   const sectionRe = /<!-- SECTION:(\S+) -->\n([\s\S]*?)<!-- \/SECTION:\1 -->/g;
   let m;
+  const seenIds = new Set();
   while ((m = sectionRe.exec(raw)) !== null) {
+    if (seenIds.has(m[1])) {
+      throw new Error(`${CANONICAL_PATH}: duplicate SECTION id "${m[1]}" — each id must appear exactly once`);
+    }
+    seenIds.add(m[1]);
     sections.set(m[1], normalize(m[2]));
   }
 
@@ -90,9 +114,43 @@ function beginRe(id) {
   );
 }
 
+// 驗證 consumer 檔案的 marker 完整性：每個 section 的 BEGIN/END 各只能出現一次
+function validateMarkerCounts(content, sectionIds, filePath) {
+  const errors = [];
+  for (const id of sectionIds) {
+    const beginPattern = new RegExp(
+      `<!-- BEGIN SHARED:verification-core:${id} `, "g"
+    );
+    const endPattern = new RegExp(
+      `<!-- END SHARED:verification-core:${id} -->`, "g"
+    );
+    const beginCount = (content.match(beginPattern) || []).length;
+    const endCount = (content.match(endPattern) || []).length;
+    if (beginCount !== 1) {
+      errors.push({ file: filePath, section: id, error: `expected exactly 1 BEGIN marker, found ${beginCount}` });
+    }
+    if (endCount !== 1) {
+      errors.push({ file: filePath, section: id, error: `expected exactly 1 END marker, found ${endCount}` });
+    }
+  }
+  return errors;
+}
+
 function processFile(filePath, sectionIds, canonical, mode) {
   const abs = resolve(ROOT, filePath);
-  let content = readFileSync(abs, "utf8");
+  let content;
+  try {
+    content = readNormalized(abs);
+  } catch (e) {
+    return [{ file: filePath, section: "*", error: `cannot read file: ${e.message}` }];
+  }
+
+  // 先檢查重複/巢狀 marker
+  const markerErrors = validateMarkerCounts(content, sectionIds, filePath);
+  if (markerErrors.length > 0) {
+    return markerErrors;
+  }
+
   const errors = [];
 
   for (const id of sectionIds) {
@@ -123,6 +181,16 @@ function processFile(filePath, sectionIds, canonical, mode) {
     const existingNormalized = normalize(existingBlock);
 
     if (mode === "check") {
+      // 比對 marker 中的版本號與 canonical core_version
+      const markerVersionMatch = beginMatch[0].match(/v(\d+)/);
+      if (markerVersionMatch && parseInt(markerVersionMatch[1], 10) !== canonical.coreVersion) {
+        errors.push({
+          file: filePath,
+          section: id,
+          error: `version mismatch: marker v${markerVersionMatch[1]} but canonical core_version is ${canonical.coreVersion}`,
+        });
+      }
+
       if (existingNormalized !== canonicalContent) {
         errors.push({
           file: filePath,
@@ -148,29 +216,33 @@ function processFile(filePath, sectionIds, canonical, mode) {
   }
 
   if (mode === "write" && errors.length === 0) {
+    // 寫出固定 LF
     writeFileSync(abs, content, "utf8");
   }
 
-  return errors;
+  return { errors, content };
 }
 
 function main() {
   const args = process.argv.slice(2);
 
+  // M9: CLI 驗證——只允許 --check / --write / --help / 無參數
+  const ALLOWED = new Set(["--check", "--write", "--help"]);
+  const unknown = args.filter((a) => !ALLOWED.has(a));
+  if (unknown.length > 0) {
+    console.error(`Unknown argument(s): ${unknown.join(", ")}\n`);
+    console.log(USAGE);
+    process.exit(2);
+  }
+
+  if (args.includes("--check") && args.includes("--write")) {
+    console.error("Error: --check and --write are mutually exclusive.\n");
+    console.log(USAGE);
+    process.exit(2);
+  }
+
   if (args.includes("--help")) {
-    console.log(`verify-shared-core.mjs — Sync shared verification-core blocks
-
-Usage:
-  node scripts/verify-shared-core.mjs [--check|--write|--help]
-
-Modes:
-  --check  (default)  Verify all consumer blocks match canonical content
-  --write             Overwrite consumer blocks with canonical content
-  --help              Show this help
-
-Consumers:
-${CONSUMERS.map((c) => `  ${c.file}\n    sections: ${c.sections.join(", ")}`).join("\n")}
-`);
+    console.log(USAGE);
     process.exit(0);
   }
 
@@ -188,15 +260,55 @@ ${CONSUMERS.map((c) => `  ${c.file}\n    sections: ${c.sections.join(", ")}`).jo
   console.log(`Mode: ${mode}`);
   console.log(`Canonical: ${CANONICAL_PATH} (core_version: ${canonical.coreVersion}, ${canonical.sections.size} sections)\n`);
 
+  // M7: --write 兩階段——先 dry-run 全部 consumer，全過才逐檔寫入
+  if (mode === "write") {
+    const dryRunResults = [];
+    let hasErrors = false;
+
+    for (const consumer of CONSUMERS) {
+      const result = processFile(consumer.file, consumer.sections, canonical, "write");
+      // processFile 回傳 array 表示讀檔或 marker 階段就失敗
+      if (Array.isArray(result)) {
+        dryRunResults.push({ consumer, errors: result, content: null });
+        hasErrors = true;
+      } else {
+        dryRunResults.push({ consumer, errors: result.errors, content: result.content });
+        if (result.errors.length > 0) hasErrors = true;
+      }
+    }
+
+    if (hasErrors) {
+      console.error("Dry-run failed — no files written.\n");
+      for (const { consumer, errors } of dryRunResults) {
+        for (const err of errors) {
+          console.error(`  FAIL  ${err.file} [${err.section}]: ${err.error}`);
+        }
+      }
+      const totalErrors = dryRunResults.reduce((s, r) => s + r.errors.length, 0);
+      console.error(`\n${totalErrors} error(s) found during dry-run.`);
+      process.exit(1);
+    }
+
+    // 全過——逐檔寫入
+    for (const { consumer, content } of dryRunResults) {
+      const abs = resolve(ROOT, consumer.file);
+      writeFileSync(abs, content, "utf8");
+      console.log(`  WROTE ${consumer.file} (${consumer.sections.length} sections)`);
+    }
+
+    console.log(`\nAll blocks written successfully.`);
+    process.exit(0);
+  }
+
+  // --check 模式
   let allErrors = [];
 
   for (const consumer of CONSUMERS) {
-    const errors = processFile(consumer.file, consumer.sections, canonical, mode);
+    const result = processFile(consumer.file, consumer.sections, canonical, mode);
+    const errors = Array.isArray(result) ? result : result.errors;
     allErrors = allErrors.concat(errors);
 
-    if (mode === "write" && errors.length === 0) {
-      console.log(`  WROTE ${consumer.file} (${consumer.sections.length} sections)`);
-    } else if (mode === "check" && errors.length === 0) {
+    if (errors.length === 0) {
       console.log(`  OK    ${consumer.file}`);
     }
 
@@ -210,7 +322,7 @@ ${CONSUMERS.map((c) => `  ${c.file}\n    sections: ${c.sections.join(", ")}`).jo
     console.error(`${allErrors.length} error(s) found.`);
     process.exit(1);
   } else {
-    console.log(`All blocks ${mode === "write" ? "written" : "verified"} successfully.`);
+    console.log(`All blocks verified successfully.`);
     process.exit(0);
   }
 }

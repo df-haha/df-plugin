@@ -477,7 +477,7 @@ Gap Analysis 階段提出的假說，經 Phase 2 深度搜索後的驗證結果�
 ```markdown
 # {主題} — 深度研究報告
 
-> 由 Deep Research v2.0.0 自動產出 ｜ 研究日期：{YYYY-MM-DD} ｜ 研究深度：{快速掃描/標準研究/深度分析}
+> 由 Deep Research v2 自動產出 ｜ 研究日期：{YYYY-MM-DD} ｜ 研究深度：{快速掃描/標準研究/深度分析}
 
 ---
 

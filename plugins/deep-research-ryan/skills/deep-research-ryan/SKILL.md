@@ -3,7 +3,7 @@ name: deep-research-ryan
 description: "多階段深度研究引擎：自動調度 subagent 完成廣度掃描→深度搜索→多輪辯論→報告合成→引用驗證→三閘門品質檢查，產出分析報告＋行動手冊。支援 8 大研究類型，跨平台（Windows/macOS/Linux）。大量消耗額度，建議額度充足時執行。觸發詞：『deep-research』『深度研究 [主題]』『幫我研究 [主題]』『分析可行性』。"
 ---
 
-# Deep Research v2.0.0
+# Deep Research v2
 
 基於 upstream v.260625 跨平台版。
 
@@ -29,7 +29,7 @@ description: "多階段深度研究引擎：自動調度 subagent 完成廣度�
 
 ### 版本沿革摘要
 
-本版（v2.0.0）整合了多輪辯論＋Judge 仲裁、資料點級評級、LLM-as-judge 三閘門品質檢查、Workflow 編排模式、投資決策/GTM 行銷維度等全部歷史演進。
+本版（v2）整合了多輪辯論＋Judge 仲裁、資料點級評級、LLM-as-judge 三閘門品質檢查、Workflow 編排模式、投資決策/GTM 行銷維度等全部歷史演進。
 完整版本史見 `references/CHANGELOG.md`。
 
 ---
@@ -47,7 +47,7 @@ AskUserQuestion 參數：
 
 ```
 header: "Deep Research"
-question: "🔬 Deep Research v2.0.0 — 多階段深度研究引擎，自動調度 subagent 完成廣度掃描→深度搜索→多輪辯論→報告合成→引用驗證→三閘門品質檢查。⚠️ Token 用量提醒：此流程會大量消耗額度，建議在額度充足時執行（技能支援斷點續作，但一次跑完體驗最佳）。是否開始？"
+question: "🔬 Deep Research v2 — 多階段深度研究引擎，自動調度 subagent 完成廣度掃描→深度搜索→多輪辯論→報告合成→引用驗證→三閘門品質檢查。⚠️ Token 用量提醒：此流程會大量消耗額度，建議在額度充足時執行（技能支援斷點續作，但一次跑完體驗最佳）。是否開始？"
 options:
   - label: "了解，開始研究"
     description: "進入前置需求檢查，確認搜索工具可用後開始研究流程"

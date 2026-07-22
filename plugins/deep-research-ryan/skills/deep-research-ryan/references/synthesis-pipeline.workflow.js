@@ -1,4 +1,4 @@
-// Deep Research Synthesis → Citation Verify → QG 閉環（v2.0.0）
+// Deep Research Synthesis → Citation Verify → QG 閉環（v2；精確版號以 plugin.json 為準）
 //
 // 何時用：SKILL.md「編排模式自動切換」偵測到 Ultracode 時，主對話呼叫此腳本。
 // 範圍：只跑 Synthesis → Merge → Citation Verify → QG → 補查重跑這段。Phase 1/2 / Devil's Advocate
@@ -26,7 +26,7 @@
 
 export const meta = {
   name: 'deep-research-synthesis-pipeline',
-  description: 'Deep Research v2.0.0 Synthesis → Merge → Citation Verify → QG 閉環（程式碼編排版）',
+  description: 'Deep Research v2 Synthesis → Merge → Citation Verify → QG 閉環（程式碼編排版；精確版號以 plugin.json 為準）',
   phases: [
     { title: 'Synthesis', detail: 'S-1 分析報告 / S-2 行動手冊 / S-3 前瞻分析（深度時）並行' },
     { title: 'Merge', detail: '章節片段合併為最終報告（Citation/QG 驗證對象）' },
@@ -267,7 +267,7 @@ const DEPTH_THRESHOLDS_A = {
 
 const synthPrompt = (agentId, task, refsHint) => `${ANTI_INJECTION}
 
-你是 Deep Research v2.0.0 的 Synthesis subagent ${agentId}（${task}）。
+你是 Deep Research v2 的 Synthesis subagent ${agentId}（${task}）。
 
 【任務】
 1. Read ${digestFile}（Phase 1 精華摘要，由 Gap Analysis subagent 產出）
@@ -289,7 +289,7 @@ const synthPrompt = (agentId, task, refsHint) => `${ANTI_INJECTION}
 
 const mergePrompt = () => `${ANTI_INJECTION}
 
-你是 Deep Research v2.0.0 的 Merge subagent。
+你是 Deep Research v2 的 Merge subagent。
 
 【任務】
 1. Read ${runDir}/report/*_S-*.md 所有 Synthesis 片段
@@ -306,7 +306,7 @@ const mergePrompt = () => `${ANTI_INJECTION}
 
 const citationPrompt = (round) => `${ANTI_INJECTION}
 
-你是 Deep Research v2.0.0 的 Citation Verifier subagent（第 ${round} 輪）。
+你是 Deep Research v2 的 Citation Verifier subagent（第 ${round} 輪）。
 
 【任務】
 1. Read ${finalReportFile}（合併後的最終報告）
@@ -337,7 +337,7 @@ ${round === 2 ? '【第 2 輪特別注意】上一輪 FAIL 後已派補查 subag
 
 const citationRepairPrompt = (mismatches) => `${ANTI_INJECTION}
 
-你是 Deep Research v2.0.0 的 Citation Repair subagent。
+你是 Deep Research v2 的 Citation Repair subagent。
 
 【任務】
 完整 mismatch 清單與 unreachable 記錄在 ${runDir}/citation-verify.md，請 Read 該檔處理全部 mismatch 並對 unreachable 重試抓取／找替代來源。
@@ -366,7 +366,7 @@ ${mismatches.length > 10 ? `... 還有 ${mismatches.length - 10} 個 mismatch，
 
 const qgPrompt = (round) => `${ANTI_INJECTION}
 
-你是 Deep Research v2.0.0 的 Quality Gate subagent（第 ${round} 輪）。
+你是 Deep Research v2 的 Quality Gate subagent（第 ${round} 輪）。
 
 【任務】
 讀取以下檔案執行三閘門品質檢查：
@@ -397,15 +397,7 @@ const qgPrompt = (round) => `${ANTI_INJECTION}
 - depth=deep → ≥ 0.75；standard → ≥ 0.65；quick → ≥ 0.55
 - 本次期望門檻 = ${getGateCThreshold(depth)}
 
-【data_self_consistency 7 項 canonical checklist（SSOT：quality-gate.md §0）】
-1. 跨章節同指標數字一致
-2. 單位換算（萬/億、million/billion）
-3. 幣別與匯率日期、名目/實質金額
-4. 資料期間 vs 發布日期錯位（過去數據描述為現況）
-5. 地域範圍混淆（全球/區域/國家）
-6. 百分比 vs 百分點 vs 絕對數
-7. 加總、成長率、衍生計算正確性
-每筆 warning 附：原始值、正規化值、兩個出現位置、採用的換算假設。
+【data_self_consistency】依 quality-gate.md §0 數據自洽 checklist（7 項）逐項檢查，warning 附原始值/正規化值/兩處位置/換算假設。
 
 【其餘自檢層（產生 warnings）】
 - dimension_coverage: 對照 dimensions.md 必要維度覆蓋率
@@ -426,7 +418,7 @@ ${round === 2 ? '【第 2 輪特別注意】上一輪 PASS_WITH_WARNINGS 後已�
 
 const qgRepairPrompt = (warning) => `${ANTI_INJECTION}
 
-你是 Deep Research v2.0.0 的 QG Repair subagent。
+你是 Deep Research v2 的 QG Repair subagent。
 
 【任務】補查並修正以下 warning：
 - Layer: ${warning.layer}
