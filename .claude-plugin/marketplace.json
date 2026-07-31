@@ -126,6 +126,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/pilotfish-roles",
       "category": "development"
+    },
+    {
+      "name": "codex-image",
+      "description": "用 Codex CLI 內建 image_gen 生圖 — 走 codex 帳號額度，不需額外 OpenAI / Stability API key；含跨平台 setup 偵測、反 code-drawing 驗收與 chroma-key 去背流程",
+      "version": "1.0.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/codex-image",
+      "category": "productivity"
     }
   ]
 }

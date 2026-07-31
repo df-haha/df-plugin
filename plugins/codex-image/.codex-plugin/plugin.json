@@ -1,0 +1,33 @@
+{
+  "name": "codex-image",
+  "version": "1.0.0+codex.20260731083619",
+  "description": "Generate PNG images with the Codex CLI built-in image_gen tool, billed to the codex account.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "image",
+    "image-generation",
+    "codex",
+    "png"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Image",
+    "shortDescription": "Generate images with the built-in image_gen tool",
+    "longDescription": "A cross-platform image generation workflow built on the Codex CLI image_generation feature: environment setup detection, injection-safe prompt dispatch, anti code-drawing acceptance checks, and a chroma-key transparency path.",
+    "developerName": "df-haha",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "畫一張水彩風格的梨子",
+      "生成一張橫幅圖片",
+      "設定 codex-image 環境"
+    ],
+    "brandColor": "#7C3AED"
+  }
+}

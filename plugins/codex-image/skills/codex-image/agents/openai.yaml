@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Image"
+  short_description: "Generate PNG images via Codex CLI image_generation"
+  default_prompt: "Use $codex-image to generate the requested image via Codex CLI."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Image Setup"
+  short_description: "Detect environment and configure codex-image"
+  default_prompt: "Use $codex-image-setup to detect and configure the codex-image environment."
