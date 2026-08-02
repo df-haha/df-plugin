@@ -1,0 +1,33 @@
+{
+  "name": "markitdown",
+  "version": "1.0.0+codex.20260711134047",
+  "description": "Convert office documents, PDFs, images, and media files to Markdown.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "markdown",
+    "pdf",
+    "office",
+    "conversion"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "MarkItDown",
+    "shortDescription": "Convert documents and media to Markdown",
+    "longDescription": "Uses Microsoft MarkItDown to convert supported documents, images, and media files into Markdown without loading binaries into context.",
+    "developerName": "df-haha",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "\u628a\u9019\u4efd PDF \u8f49\u6210 Markdown",
+      "\u7528 markitdown \u8f49\u63db\u9019\u500b\u6a94\u6848",
+      "\u6279\u6b21\u8f49\u63db\u9019\u4e9b Word \u6587\u4ef6"
+    ],
+    "brandColor": "#2563EB"
+  }
+}

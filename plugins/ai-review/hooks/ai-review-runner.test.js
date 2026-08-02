@@ -162,6 +162,25 @@ test("builds code review prompt that asks the reviewer to inspect git diff", () 
   assert.match(prompt, /不要修改/);
 });
 
+test("builds discuss prompt that asks Claude to inspect the current repository without editing it", () => {
+  const prompt = runner.buildPrompt({
+    mode: "discuss",
+    question: "這個模組的邊界是否合理？",
+  });
+
+  assert.match(prompt, /目前 Git repository/);
+  assert.match(prompt, /先讀取/);
+  assert.match(prompt, /不要修改/);
+  assert.match(prompt, /這個模組的邊界是否合理？/);
+});
+
+test("requires a question for discuss mode", () => {
+  assert.throws(
+    () => runner.buildPrompt({ mode: "discuss" }),
+    /discuss 模式需要/,
+  );
+});
+
 test("builds plan review prompt from a plan file", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ai-review-plan-"));
   const planPath = path.join(dir, "plan.md");

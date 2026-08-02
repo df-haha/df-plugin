@@ -43,8 +43,8 @@ test('publishes matching Claude Code and Codex manifests', () => {
 
   assert.equal(claude.name, 'decision-wiki');
   assert.equal(codex.name, 'decision-wiki');
-  assert.equal(claude.version, '1.0.1');
-  assert.equal(codex.version, claude.version);
+  assert.equal(claude.version, '1.0.2');
+  assert.equal(codex.version.split('+', 1)[0], claude.version);
   assert.deepEqual(claude.author, { name: 'df-haha' });
   assert.deepEqual(codex.author, { name: 'df-haha' });
   assert.equal(codex.skills, './skills/');
@@ -61,7 +61,7 @@ test('registers exactly one entry in each marketplace', () => {
 
   assert.equal(claudeEntries.length, 1);
   assert.equal(claudeEntries[0].source, './plugins/decision-wiki');
-  assert.equal(claudeEntries[0].version, '1.0.1');
+  assert.equal(claudeEntries[0].version, '1.0.2');
   assert.equal(claudeEntries[0].category, 'development');
 
   assert.equal(codexEntries.length, 1);
@@ -130,6 +130,15 @@ test('makes NOT_SETTLED a four-line-only terminal response', () => {
     saveDecision,
     /Do not add a preface, code fence, explanation, rationale, next step, or trailing text\./,
   );
+});
+
+test('reuses exact semantics confirmation and avoids a standalone commit gate', () => {
+  const saveDecision = read('plugins/decision-wiki/skills/save-decision/SKILL.md');
+
+  assert.match(saveDecision, /A prior human confirmation in the same session satisfies exact-draft acceptance/);
+  assert.match(saveDecision, /Do not ask for another exact-draft confirmation\./);
+  assert.match(saveDecision, /Do not interrupt the task with a standalone commit-authorization question\./);
+  assert.doesNotMatch(saveDecision, /Gate 3/);
 });
 
 test('documents both hosts and both skills', () => {

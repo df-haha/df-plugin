@@ -1,0 +1,33 @@
+{
+  "name": "devlog",
+  "version": "0.1.0+codex.20260711134047",
+  "description": "Maintain a reviewable, Git-first log of repository decisions.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "adr",
+    "decision",
+    "documentation",
+    "git"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Devlog",
+    "shortDescription": "Record and retrieve repository decisions",
+    "longDescription": "Maintains a Git-first, reviewable decision log for architecture choices, trade-offs, and resolved questions.",
+    "developerName": "df-haha",
+    "category": "Development",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "\u8a18\u9304\u9019\u500b\u6280\u8853\u6c7a\u7b56",
+      "\u67e5\u6211\u5011\u7576\u521d\u70ba\u4f55\u63a1\u7528\u9019\u500b\u67b6\u69cb",
+      "\u5728\u6b64 repo \u5efa\u7acb devlog"
+    ],
+    "brandColor": "#4F46E5"
+  }
+}

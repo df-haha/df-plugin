@@ -77,7 +77,7 @@ function buildInvocation(reviewer, model = "", options = {}) {
   const normalized = normalizeReviewer(reviewer);
 
   if (normalized === "codex") {
-    // code 模式走專用 review harness；plan/debate 走一般 exec
+    // code 模式走專用 review harness；plan/debate/discuss 走一般 exec
     const isCodeMode = (options.mode || "code") === "code";
     const args = isCodeMode
       ? ["review", "--uncommitted"]
@@ -167,8 +167,19 @@ function buildPrompt({ mode, planPath = "", question = "" }) {
         question,
       ].join("\n");
 
+    case "discuss":
+      if (!question) throw new Error("discuss 模式需要 AI_REVIEW_QUESTION 環境變數或問題文字");
+      return [
+        "你是技術討論夥伴。請在目前 Git repository 的實際脈絡中分析以下問題。",
+        "先讀取目前載入的 CLAUDE.md、repository instructions，以及與問題直接相關的本機 repository 檔案；需要時可檢查 git status、git log 或 git diff。",
+        "只做分析與討論，不要修改檔案，不要 commit，不要執行破壞性命令。",
+        "請用繁體中文回答，重要判斷附上具體檔案/行號或可驗證依據；資訊不足時明確指出。",
+        "",
+        question,
+      ].join("\n");
+
     default:
-      throw new Error(`未知模式 "${mode}"，支援: code, plan, debate`);
+      throw new Error(`未知模式 "${mode}"，支援: code, plan, debate, discuss`);
   }
 }
 

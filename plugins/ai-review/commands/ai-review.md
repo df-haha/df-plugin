@@ -1,12 +1,12 @@
 ---
-description: "AI 二次審查 — /ai-review [code|plan|debate] [--codex|--agy|--claude|--both] [--model name] [--effort level] [path|\"問題\"]"
+description: "AI 二次審查與討論 — /ai-review [code|plan|debate|discuss] [--codex|--agy|--claude|--both] [--model name] [--effort level] [path|\"問題\"]"
 ---
 
 解析 `$ARGUMENTS` 並套用 ai-review skill 規則。
 
 ## 參數解析
 
-1. 第一個詞 → mode（code/plan/debate，預設 code）
+1. 第一個詞 → mode（code/plan/debate/discuss，預設 code）
 2. `--codex` / `--agy` / `--claude` / `--both` → reviewer（預設 codex；`--gemini` 為舊名，自動映射到 agy；`--claude` 保留給 Codex 宿主反向外審情境）
 3. `--model <name>` → 提取為模型名稱；未指定時 Codex 由 `~/.codex/config.toml` 決定，Agy 使用 `3.5-flash`，Claude Code 使用 `claude-opus-4-6[1m] --effort max`
 4. `--effort <level>` → 提取為 reasoning effort（僅 codex 生效，low/medium/high/xhigh/max/ultra；未指定則吃 `~/.codex/config.toml`）
@@ -23,6 +23,7 @@ description: "AI 二次審查 — /ai-review [code|plan|debate] [--codex|--agy|-
 | `/ai-review plan path/to/file` | 審查指定 plan |
 | `/ai-review debate` | 互動詢問問題 |
 | `/ai-review debate "問題"` | 直接辯論 |
+| `/ai-review discuss --codex "問題"` | Claude Code 宿主呼叫 Codex 讀取目前 repository 後進行技術討論 |
 | `/ai-review code --both` | Codex + Antigravity 雙審 |
 | `--model gpt-5.4` | 指定 reviewer 使用的模型（agy 例：`--model 3.5-flash`） |
 | `--effort high` | 指定 Codex reasoning effort |

@@ -1,0 +1,33 @@
+{
+  "name": "df-graph",
+  "version": "0.1.0+codex.20260711134124",
+  "description": "Set up a Microsoft 365 Graph MCP server for mail, calendar, and people.",
+  "author": {
+    "name": "\u5b97\u9716"
+  },
+  "keywords": [
+    "microsoft-graph",
+    "mcp",
+    "mail",
+    "calendar"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "DF Graph",
+    "shortDescription": "Connect Codex to Microsoft 365 Graph",
+    "longDescription": "Onboards a user-scoped Microsoft Graph MCP connection for mailbox, calendar, and people data via device-code login.",
+    "developerName": "\u5b97\u9716",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "\u8a2d\u5b9a df-graph",
+      "\u5b89\u88dd Graph MCP",
+      "df-graph onboarding"
+    ],
+    "brandColor": "#0078D4"
+  }
+}

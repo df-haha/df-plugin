@@ -1,7 +1,7 @@
 {
   "name": "ai-review",
-  "version": "1.1.0",
-  "description": "AI 二次審查 - 使用 Claude Code CLI 或 Antigravity CLI 對程式碼、計畫或技術決策進行獨立審查（Codex 宿主外審用；runner 另支援 Codex reviewer 供 Claude Code 宿主）。",
+  "version": "1.2.0",
+  "description": "AI 二次審查與技術討論 - 使用 Claude Code CLI 或 Antigravity CLI 讀取目前 repository 後，對程式碼、計畫或技術決策進行獨立審查與討論（Codex 宿主外審用；runner 另支援 Codex reviewer 供 Claude Code 宿主）。",
   "author": {
     "name": "df-haha"
   },
@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "AI Review",
     "shortDescription": "Run Claude Code or Antigravity as independent reviewers.",
-    "longDescription": "AI 二次審查 workflow for code, plans, and technical decisions. It packages a shared skill and local runner that can invoke Codex CLI, Claude Code CLI, or Antigravity CLI (reviewer picked by host, so the reviewer is never the host itself). Defaults: Claude Code uses claude-opus-4-6[1m] with max effort; Antigravity uses 3.5-flash; Codex follows ~/.codex/config.toml.",
+    "longDescription": "AI 二次審查與技術討論 workflow for code, plans, and technical decisions. It packages a shared skill and local runner that can invoke Codex CLI, Claude Code CLI, or Antigravity CLI in the current repository path (reviewer picked by host, so the reviewer is never the host itself). Defaults: Claude Code uses claude-opus-4-6[1m] with max effort; Antigravity uses 3.5-flash; Codex follows ~/.codex/config.toml.",
     "developerName": "df-haha",
     "category": "Development",
     "capabilities": [
@@ -25,6 +25,7 @@
     "defaultPrompt": [
       "用 ai-review 審查目前未提交變更",
       "用 ai-review review 這份 plan",
+      "用 ai-review 找 Claude Code 讀目前 repo 後討論這個技術問題",
       "讓 Claude 和 Agy 對這個技術決策對審"
     ],
     "brandColor": "#2563EB"

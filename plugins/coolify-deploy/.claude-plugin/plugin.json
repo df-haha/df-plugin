@@ -1,6 +1,8 @@
 {
   "name": "coolify-deploy",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "description": "Coolify + Docker Compose 部署 plugin（4 個 skills）：coolify-deploy（compose / Dockerfile / SERVICE_URL / TLS / Seq / rollback）+ coolify-db（DB 角色隔離 / one-shot migration / Adminer / dbhub MCP 或 /admin/query 唯讀存取 / 跨版本搬遷）+ coolify-logs（CLI 指令 / build log / read:sensitive 紀律 / 部署失敗自動撈 log monitor）+ coolify-setup（CLI 安裝 / API scope 申請 / Claude permission 範本）。",
-  "author": { "name": "df-haha" }
+  "author": {
+    "name": "df-haha"
+  }
 }

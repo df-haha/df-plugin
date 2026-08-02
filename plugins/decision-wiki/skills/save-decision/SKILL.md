@@ -90,25 +90,31 @@ For the four relationship lists, copy every explicitly human-confirmed supported
 
 After writing the proposed draft and its confirmed relationships, run the validator named by the current repository contract against the draft/corpus. Fix every draft-caused mechanical failure, including exact inline-array syntax, and rerun until it exits `0`. Never preview an invalid draft. If validation is unavailable, remains nonzero, or exposes only out-of-scope existing failures, stop with the exact output; do not edit unrelated files or ask for acceptance.
 
-### 5. Preview verbatim and confirm sequentially
+If the validator itself is reachable but its configured launcher fails only because it cannot create IPC（行程間通訊） or equivalent runner infrastructure, inspect the configured command and retry the same validator module through the dependency's registration mode—for example, `node --import tsx <same-script>` instead of `tsx <same-script>`. This is allowed only when the validator module, arguments, working directory, and exit semantics remain unchanged. Report the alternate command; never substitute a weaker validator or ask the user to run it before this safe launcher path is exhausted.
 
-Only after pre-preview validation exits `0`, show the entire draft file verbatim（逐字） in one fenced code block（圍欄程式碼區塊）, from the opening `---` through the final body line. Never replace any content with “Body complete,” an ellipsis, a summary, or omitted sections.
+### 5. Reuse exact semantics confirmation or preview once
 
-Use separate questions and wait for a separate user turn（使用者回合） after each applicable gate:
+A prior human confirmation in the same session satisfies exact-draft acceptance without another preview or question only when every condition below is true:
 
-1. **Gate 1（關卡一） — exact draft acceptance:** ask only whether the displayed exact draft is accepted for formal landing. Make no formal change before an explicit yes.
-2. **Gate 2 — sensitive-redaction safety:** only after Gate 1 passes, and only for sensitive sources, ask separately whether the displayed redaction and retained provenance are safe. Make no formal change before an explicit yes.
+1. The confirmation immediately follows a concrete, bounded semantics（語意） block and uses affirmative language such as `confirmed`, `接受`, or `照做`.
+2. The draft is a mechanical projection of that block and adds no new background, alternative, rationale, consequence, outcome, metric, or operational requirement.
+3. Every relationship list is empty, or every persisted relationship was explicitly included in the confirmed block.
+4. No source requires sensitive redaction review.
+
+When all four conditions hold, validate the proposed draft, land it, validate the formal corpus, and continue the user's task in the same turn. Do not ask for another exact-draft confirmation.
+
+Otherwise, only after pre-preview validation exits `0`, show the entire draft file verbatim（逐字） in one fenced code block（圍欄程式碼區塊）, from the opening `---` through the final body line. Never replace any content with “Body complete,” an ellipsis, a summary, or omitted sections. Ask only whether the displayed exact draft is accepted for formal landing, then wait for a separate user turn（使用者回合）.
+
+For sensitive sources, ask separately whether the displayed redaction and retained provenance are safe after exact-draft acceptance. Make no formal change before an explicit yes.
 
 Silence, pressure to skip questions, and an earlier general request to formalize satisfy neither gate.
 
 If Gate 1 or Gate 2 is rejected, immediately remove only the proposed draft created by this run; leave the old card, `INDEX.md`, and every unrelated file byte-for-byte unchanged. Show `git status --short` proving the rejected draft and its locator are no longer present, then stop. If the user requests revision instead of acceptance, remove the rejected version first, rebuild only from the newly confirmed facts, rerun validation, and restart both applicable gates from the full preview. Never leave rejected sensitive content or provenance on disk between attempts.
 
-### 6. Land, validate, then ask about commit
+### 6. Land and validate without a standalone commit gate
 
 After all applicable gates pass, change the new card to `active`, move it out of `_draft/`, add exactly one `./<id>.md` index row, and—when superseding—change only the old card's status. Preserve the old accepted body byte-for-byte.
 
 Run the repository validator again after formal landing. On a nonzero result, stop, report the exact failure, keep all changes uncommitted, and do not ask about commit. On exit `0`, review the complete diff（差異） and prove unrelated work is excluded.
 
-Only then start **Gate 3 — commit authorization** in a new, separate question: ask whether to commit exactly the new card, the necessary old-card status change, and `docs/decisions/INDEX.md`. Never combine Gate 3 with draft acceptance or sensitive-redaction confirmation, and never treat an earlier commit demand as this post-validation authorization.
-
-If Gate 3 passes, commit only that exact scope. Never commit or push（推送） automatically, include unrelated files, or push as part of this workflow.
+Leave the landed decision changes uncommitted by default and continue the user's active task. Do not interrupt the task with a standalone commit-authorization question. If the user already authorized a commit for the encompassing completed task, include only the new card, necessary old-card status change, and exact `docs/decisions/INDEX.md` hunk after final verification. Otherwise report the uncommitted decision files in the task's normal final delivery. Never commit unrelated files or push（推送） automatically.

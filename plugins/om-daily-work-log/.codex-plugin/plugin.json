@@ -1,0 +1,33 @@
+{
+  "name": "om-daily-work-log",
+  "version": "1.3.1+codex.20260711134047",
+  "description": "Support operations daily work logs and async coaching workflows.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "operations",
+    "work-log",
+    "coaching",
+    "daily"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "OM Daily Work Log",
+    "shortDescription": "Create work logs and manage async coaching",
+    "longDescription": "A self-contained operations daily-log workflow for employee reports, supervisor coaching cards, and follow-up loops.",
+    "developerName": "df-haha",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "\u7522\u51fa\u4eca\u5929\u7684\u71df\u904b\u5de5\u4f5c\u65e5\u8a8c",
+      "\u8a2d\u5b9a work-log onboarding",
+      "\u5efa\u7acb\u4e3b\u7ba1 coaching \u554f\u984c\u5361"
+    ],
+    "brandColor": "#0891B2"
+  }
+}

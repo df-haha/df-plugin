@@ -1,0 +1,32 @@
+{
+  "name": "evaluate-business-idea",
+  "version": "1.0.0+codex.20260711134047",
+  "description": "Assess software, SaaS, and service ideas using a five-dimension framework.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "business",
+    "saas",
+    "product",
+    "evaluation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Evaluate Business Idea",
+    "shortDescription": "Score an idea before deciding to build",
+    "longDescription": "Evaluates software, SaaS, and service ideas with market, moat, stickiness, and execution evidence.",
+    "developerName": "df-haha",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
+    "defaultPrompt": [
+      "\u8a55\u4f30\u9019\u500b SaaS \u9ede\u5b50",
+      "\u9019\u500b\u7522\u54c1\u503c\u5f97\u505a\u55ce",
+      "\u6bd4\u8f03\u5169\u500b\u5546\u696d\u9ede\u5b50\u7684\u53ef\u884c\u6027"
+    ],
+    "brandColor": "#059669"
+  }
+}

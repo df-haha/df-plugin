@@ -1,6 +1,6 @@
 ---
 name: coolify-deploy
-description: Use when editing or authoring a Coolify docker-compose.yml, Dockerfile, env/secrets, SERVICE_URL/SERVICE_FQDN magic env, deploy webhooks, rollback flow, custom domains, TLS configuration, or Seq logging service (self-hosted PaaS + Docker Compose). For reading build/runtime logs or debugging WHY a deploy failed, use coolify-logs instead; for DB-related deploys (migrations, role isolation, Adminer, readonly access) use coolify-db. Triggers on phrases like "compose 寫不出來"、"Dockerfile 怎麼寫"、"SERVICE_URL"、"網域綁定"、"TLS / Let's Encrypt"、"rollback"、"webhook 設定"、"env 注入"、"加 Seq"、"NODE_ENV build 失敗"。
+description: Use when editing or authoring a Coolify docker-compose.yml, Dockerfile, env/secrets, SERVICE_URL/SERVICE_FQDN magic env, deploy webhooks, rollback flow, custom domains, TLS configuration, or Seq logging service (self-hosted PaaS + Docker Compose). For reading build/runtime logs or debugging WHY a deploy failed, use coolify-logs instead; for DB-related deploys (migrations, role isolation, Adminer, readonly access) use coolify-db. Triggers on phrases like "compose 寫不出來"、"Dockerfile 怎麼寫"、"SERVICE_URL"、"網域綁定"、"TLS / Let's Encrypt"、"rollback"、"webhook 設定"、"env 注入"、"加 Seq"、"NODE_ENV build 失敗"、"domain 不見了"、"no available server"、"全站 503"。
 ---
 
 # Coolify Deploy
@@ -65,6 +65,7 @@ Coolify(自架,於自架機器拉 git)
 12. **`NODE_ENV=production` 禁放 compose `environment:`**:Coolify 會把 compose 的 `environment:` **同時**展開成 build-time `--build-arg`,`NODE_ENV=production` 注入 builder stage 會讓 `npm ci` 跳過 devDependencies,導致 `tsc` / `vite` / `next` 等 build 工具找不到(exit 127)。`NODE_ENV=production` 應**只在 Dockerfile runtime stage 用 `ENV` 設定**(見 `references/dockerfile-frontend.md` + `references/env-management.md`)。
 13. **Multi-service compose 禁同 `mount_path` 的 bind mount**:Coolify `file_storages` 表對 `(application_id, mount_path)` 有 unique-like 限制——同 app 內若兩 service 想各自 bind mount 到同一容器路徑,**後加的會被靜默 drop**。改 **build-time `COPY` 進該 service 自家的 Dockerfile** 繞過(見 `references/compose.md` Quirk 3,DB init scripts 應用見 coolify-db skill)。
 14. **production 禁 `ports`,本機 dev 走 override**:本機若需要對 DB 開 port 給 IDE / 工具用,寫進 `docker-compose.override.yml`(與 `docker-compose.yml` 同目錄,**Coolify 預設不讀 override**——這是設計上的安全分離)。production 主檔保持 `expose` only,override.yml 只在 `docker compose up` 在本機跑時自動疊加。
+15. **compose 任何改動(含 merge / conflict 解衝突)push 前必跑 `docker compose -f <compose檔> config --services`**——必須 exit 0 且列出**全部預期 services** 才准 push。這不是 bootstrap 一次性檢查,是每次改動的硬 gate:merge 特別危險(auto-merge 常產生 YAML 重複 key,語法上單邊都合法所以 git 不報衝突)。後果見下方「Domain 清空 quirk」——parse 失敗不只 deploy 失敗,還會**永久清掉 domain 設定**。
 
 ## 兩種對外曝露機制(可並存)
 
@@ -76,6 +77,15 @@ Coolify(自架,於自架機器拉 git)
 兩者正交:需要自訂網域用 custom domain;只要自動網址用 magic env;可同時使用。
 
 > **magic env 例外 — Seq 密碼不走 magic env**:Coolify 只展開 `SERVICE_URL_*` / `SERVICE_FQDN_*` / `SERVICE_PASSWORD_*` / `COMPOSE_PROJECT_NAME`。`SEQ_FIRSTRUN_ADMINPASSWORD` 不在其列,詳見 `references/seq.md`。
+
+### Domain 清空 quirk(2026-07-19 實案,致命)
+
+Coolify 把 compose app 的 per-service domain 存在「service 名 → domain」對照表(`docker_compose_domains`),**每次部署會重新解析 compose 對帳**。若 push 上去的 compose **YAML parse 失敗**(實案:merge 產生重複 env key),Coolify 解析出 0 個 service → 認定所有 service 不存在 → **整張 domain 表被清空,且之後修好 compose 也不會自己長回來**。症狀:容器全部 Healthy/Started,但所有對外網址回 `503 no available server`(Traefik 無路由)。
+
+- **預防**:規則 15 的 push 前 config gate。
+- **偵測**:全站 503 + 容器健康 → 先查 UI Domains 面板是否空白,別急著 restart(restart 救不了,還可能因 image 已被清而觸發重 build)。
+- **復原**:domain 值通常殘留在 env 快照 `SERVICE_URL_*`(`coolify app env list <uuid> -s` 可撈)→ UI Domains 逐欄貼回 → Save → **Redeploy**(必須重部署才會重掛 Traefik label)。
+- **保險**:把 domain 對照表落檔在 repo 部署文件/rules(專案級),被清時 30 秒還原。
 
 ## When to read which reference
 

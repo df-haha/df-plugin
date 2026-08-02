@@ -1,0 +1,33 @@
+{
+  "name": "daily-work-log",
+  "version": "1.7.3+codex.20260711134047",
+  "description": "Generate daily work logs and weekly reports from local AI session history.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "work-log",
+    "weekly-report",
+    "sessions",
+    "productivity"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Daily Work Log",
+    "shortDescription": "Create daily logs and weekly reports from sessions",
+    "longDescription": "Scans local Claude Code, Codex, and Gemini session history to produce structured daily work logs and weekly reports.",
+    "developerName": "df-haha",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "\u6574\u7406\u6211\u4eca\u5929\u7684\u5de5\u4f5c\u65e5\u8a8c",
+      "\u7522\u51fa\u672c\u9031\u5de5\u4f5c\u9031\u5831",
+      "\u5f59\u6574\u6628\u5929\u5404\u5c08\u6848\u7684\u5de5\u4f5c\u9032\u5ea6"
+    ],
+    "brandColor": "#0EA5E9"
+  }
+}

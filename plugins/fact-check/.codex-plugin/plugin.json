@@ -1,0 +1,33 @@
+{
+  "name": "fact-check",
+  "version": "1.0.0+codex.20260711134047",
+  "description": "Verify document claims with structured evidence and source-quality checks.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "fact-check",
+    "verification",
+    "research",
+    "citations"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Fact Check",
+    "shortDescription": "Verify claims, data, and sources in a document",
+    "longDescription": "A rigorous document fact-checking workflow for organizations, technology, data, people, arguments, and citations.",
+    "developerName": "df-haha",
+    "category": "Research",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "\u67e5\u6838\u9019\u4efd\u5831\u544a",
+      "\u9a57\u8b49\u9019\u4e9b\u6578\u64da\u8207\u4f86\u6e90",
+      "\u78ba\u8a8d\u9019\u7bc7\u6587\u4ef6\u662f\u5426\u6b63\u78ba"
+    ],
+    "brandColor": "#DC2626"
+  }
+}

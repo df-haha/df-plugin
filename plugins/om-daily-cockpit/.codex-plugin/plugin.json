@@ -1,0 +1,33 @@
+{
+  "name": "om-daily-cockpit",
+  "version": "0.3.0+codex.20260711134047",
+  "description": "Run an operations daily cockpit for mail triage, team reports, coaching, and intelligence.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "operations",
+    "cockpit",
+    "email",
+    "coaching"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "OM Daily Cockpit",
+    "shortDescription": "Run daily operations review and team follow-up",
+    "longDescription": "A configurable operations cockpit for email triage, team daily-report tracking, async coaching, and optional intelligence scans.",
+    "developerName": "df-haha",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "\u57f7\u884c\u4eca\u65e5\u71df\u904b\u99d5\u99db\u8259",
+      "\u6574\u7406\u5718\u968a\u65e5\u5831\u7f3a\u6f0f",
+      "\u5206\u6d41\u4eca\u5929\u7684\u5de5\u4f5c\u4fe1\u4ef6"
+    ],
+    "brandColor": "#0F766E"
+  }
+}

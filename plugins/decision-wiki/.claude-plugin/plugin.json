@@ -1,6 +1,6 @@
 {
   "name": "decision-wiki",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Git-first decision Wiki toolkit for installing or upgrading a reviewable decision knowledge base and recording explicitly settled decisions.",
   "author": {
     "name": "df-haha"

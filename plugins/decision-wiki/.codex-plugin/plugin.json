@@ -1,6 +1,6 @@
 {
   "name": "decision-wiki",
-  "version": "1.0.1",
+  "version": "1.0.2+codex.20260717065553",
   "description": "Git-first decision Wiki toolkit for installing, upgrading, and recording reviewable repository decisions.",
   "author": {
     "name": "df-haha"
@@ -24,9 +24,9 @@
       "Write"
     ],
     "defaultPrompt": [
-      "用 setup-decision-wiki 在這個 repository 建立決策知識庫",
-      "用 save-decision 將已確認的技術決策建立成草稿",
-      "檢查這個 repository 的 decision Wiki 是否需要升級"
+      "\u7528 setup-decision-wiki \u5728\u9019\u500b repository \u5efa\u7acb\u6c7a\u7b56\u77e5\u8b58\u5eab",
+      "\u7528 save-decision \u5c07\u5df2\u78ba\u8a8d\u7684\u6280\u8853\u6c7a\u7b56\u5efa\u7acb\u6210\u8349\u7a3f",
+      "\u6aa2\u67e5\u9019\u500b repository \u7684 decision Wiki \u662f\u5426\u9700\u8981\u5347\u7d1a"
     ],
     "brandColor": "#4F46E5"
   }

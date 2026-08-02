@@ -1,0 +1,33 @@
+{
+  "name": "handoff",
+  "version": "1.1.0+codex.20260711134047",
+  "description": "Create structured handoff prompts for complex work across sessions.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "handoff",
+    "session",
+    "continuity",
+    "documentation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Handoff",
+    "shortDescription": "Package complex work for the next session",
+    "longDescription": "Creates a structured, reviewable handoff prompt containing current decisions, commits, risks, and next steps.",
+    "developerName": "df-haha",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "\u6e96\u5099\u9019\u500b\u4efb\u52d9\u7684 handoff",
+      "\u5e6b\u6211\u4ea4\u63a5\u5230\u4e0b\u500b session",
+      "\u6574\u7406\u76ee\u524d\u5de5\u4f5c\u4e26\u7522\u51fa\u4ea4\u63a5 prompt"
+    ],
+    "brandColor": "#0284C7"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "om-meeting-tracker",
+  "version": "0.1.0+codex.20260711134048",
+  "description": "Track department meeting progress, reminders, replies, and review drafts.",
+  "author": {
+    "name": "haha"
+  },
+  "keywords": [
+    "meeting",
+    "tracker",
+    "reminders",
+    "operations"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "OM Meeting Tracker",
+    "shortDescription": "Track meeting progress and prepare review drafts",
+    "longDescription": "A configurable department meeting-tracking workflow for reminders, reply collection, and review-ready tracking drafts.",
+    "developerName": "haha",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "\u8a2d\u5b9a\u6703\u8b70\u8ffd\u8e64",
+      "\u6574\u7406\u672c\u9031\u6703\u8b70\u8ffd\u8e64\u8349\u7a3f",
+      "\u5bc4\u51fa\u6703\u8b70\u8ffd\u8e64\u63d0\u9192"
+    ],
+    "brandColor": "#9333EA"
+  }
+}

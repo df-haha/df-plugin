@@ -1,9 +1,9 @@
 ---
 name: ai-review
-description: AI 二次審查 - 使用 Codex CLI、Antigravity CLI（agy）或 Claude Code CLI 對程式碼、計畫或技術決策進行獨立審查。
+description: AI 二次審查與技術討論 - 使用 Codex CLI、Antigravity CLI（agy）或 Claude Code CLI 讀取目前 repository，對程式碼、計畫或技術決策進行獨立審查與討論。
   支援 codex 單審、agy 單審、claude 單審、或 codex+agy 雙重對審。
   觸發詞：「codex review」「agy review」「antigravity review」「claude review」「二次審查」「AI 審查」
-  「跑 codex」「跑 agy」「對審」「交叉審查」「讓 codex/agy 看看」
+  「跑 codex」「跑 agy」「對審」「交叉審查」「讓 codex/agy 看看」「找 claude 討論」
 allowed-tools: Bash, Read, Write, Glob, Grep
 ---
 
@@ -35,13 +35,14 @@ claude --version  # Claude Code CLI（Codex 宿主時的 reviewer）
 - Antigravity: 依 Antigravity CLI 官方安裝說明；`agy models` 可列出可用模型。
 - Claude Code: `npm install -g @anthropic-ai/claude-code` 並完成登入。
 
-## 三種模式
+## 四種模式
 
 | 模式 | 說明 | 觸發詞 |
 |------|------|--------|
 | `code` | 審查未提交的程式碼變更（預設） | 「審查 code」「review 程式碼」「diff」 |
 | `plan` | 審查實作計畫 | 「審查計畫」「review plan」 |
 | `debate` | 針對技術決策進行魔鬼代言人攻防 | 「辯論」「debate」「挑戰這個決策」 |
+| `discuss` | 讀取目前 repository 的相關檔案後進行合作式技術討論 | 「討論」「discuss」「找 claude 討論」 |
 
 任何模式都可以加：
 
@@ -66,7 +67,8 @@ Claude 權限模式（僅 `REVIEWER=claude`）：
 
 - 提到「程式碼」「code」「改動」「diff」或沒指定 → `code`
 - 提到「計畫」「plan」 → `plan`
-- 提到「辯論」「debate」「決策」「挑戰」 → `debate`
+- 提到「辯論」「debate」「挑戰」 → `debate`
+- 提到「討論」「discuss」「一起分析」 → `discuss`；若同時明確提到「辯論／挑戰」，以 `debate` 為準
 
 **Reviewer 判斷**：
 
@@ -93,6 +95,12 @@ Claude 權限模式（僅 `REVIEWER=claude`）：
 
 1. 確認有問題文字。
 2. 沒有 → 請使用者提供要挑戰的技術決策或問題。
+
+**discuss 模式**：
+
+1. 確認有問題文字。
+2. 以目前所在 repository path 作為 `PROJECT_DIR`，不複製檔案、不另加目錄。
+3. 沒有問題文字 → 請使用者提供要討論的技術問題。
 
 ## Runner 路徑
 
@@ -129,6 +137,12 @@ AI_REVIEW_MODE=plan REVIEWER=codex PROJECT_DIR="$(pwd)" PLAN_PATH="path/to/plan.
 
 ```bash
 AI_REVIEW_MODE=debate REVIEWER=agy PROJECT_DIR="$(pwd)" AI_REVIEW_QUESTION="要辯論的問題" AI_REVIEW_MODEL="" node "$RUNNER"
+```
+
+**discuss 模式（Codex 宿主呼叫 Claude Code）**：
+
+```bash
+AI_REVIEW_MODE=discuss REVIEWER=claude PROJECT_DIR="$(pwd)" AI_REVIEW_QUESTION="要討論的問題" AI_REVIEW_MODEL="" node "$RUNNER"
 ```
 
 **both 模式**（runner 依序跑 codex + agy）：
@@ -242,5 +256,20 @@ AI_REVIEW_MODE=debate PROJECT_DIR="$(pwd)" REVIEWER=codex AI_REVIEW_QUESTION="<�
 - ...
 
 ### 未解分歧（需使用者決斷）
+- ...
+```
+
+**discuss 模式**：
+
+```markdown
+## AI 技術討論結果 (<Codex/Antigravity/Claude Code>)
+
+### Repository 依據
+- ...
+
+### 分析與建議
+- ...
+
+### 未確認事項
 - ...
 ```
