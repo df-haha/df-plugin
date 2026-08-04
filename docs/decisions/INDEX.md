@@ -6,6 +6,8 @@
 
 | ID | 狀態 | 日期 | 標題 | 決策卡 |
 |---|---|---|---|---|
+| `DEC-20260802T235224Z-pilotfish-luna-role-routing` | superseded | 2026-08-03 | Pilotfish scout 使用 luna medium、executor 使用 luna max | [DEC-20260802T235224Z-pilotfish-luna-role-routing](./DEC-20260802T235224Z-pilotfish-luna-role-routing.md) |
+| `DEC-20260804T003925Z-pilotfish-sol-executor-routing` | active | 2026-08-04 | Pilotfish scout 使用 luna medium、executor 使用 sol medium | [DEC-20260804T003925Z-pilotfish-sol-executor-routing](./DEC-20260804T003925Z-pilotfish-sol-executor-routing.md) |
 
 ## 使用方式
 

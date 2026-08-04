@@ -202,8 +202,8 @@ class WorkerCommandTests(ProcessTestCase):
         self.assertIn("--ephemeral", command)
         self.assertNotIn("--model", command)
         self.assertIn("workspace-write", command)
-        self.assertIn('model="gpt-5.6-terra"', command)
-        self.assertIn('model_reasoning_effort="low"', command)
+        self.assertIn('model="gpt-5.6-sol"', command)
+        self.assertIn('model_reasoning_effort="medium"', command)
         self.assertIn(
             "features.multi_agent_v2.max_concurrent_threads_per_session=1",
             command,

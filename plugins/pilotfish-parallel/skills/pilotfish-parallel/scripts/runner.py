@@ -38,8 +38,8 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 APPROVED_ROLE_EXECUTION_CONTRACTS = {
-    "scout": ("gpt-5.6-luna", "low", "read-only"),
-    "executor": ("gpt-5.6-terra", "low", "workspace-write"),
+    "scout": ("gpt-5.6-luna", "medium", "read-only"),
+    "executor": ("gpt-5.6-sol", "medium", "workspace-write"),
     "verifier": ("gpt-5.6-terra", "xhigh", "read-only"),
 }
 RESERVED_JOB_IDS = frozenset({"integration", "final-verifier"})

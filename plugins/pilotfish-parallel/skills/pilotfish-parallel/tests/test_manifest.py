@@ -161,8 +161,8 @@ class StaticContractTests(unittest.TestCase):
                 for key, value in roles.items()
             },
             {
-                "scout": ("gpt-5.6-luna", "low", "read-only"),
-                "executor": ("gpt-5.6-terra", "low", "workspace-write"),
+                "scout": ("gpt-5.6-luna", "medium", "read-only"),
+                "executor": ("gpt-5.6-sol", "medium", "workspace-write"),
                 "verifier": ("gpt-5.6-terra", "xhigh", "read-only"),
             },
         )
@@ -437,7 +437,7 @@ class CandidateValidatorTests(unittest.TestCase):
                 "payload root",
             )
 
-    def test_formal_requires_target_baselines_marker_no_agents_and_claude_digest(self) -> None:
+    def test_formal_requires_exact_codex_baselines_marker_and_no_agents(self) -> None:
         home = self.make_home()
         with patch.dict(os.environ, {"HOME": str(home)}):
             root, manifest = self.make_payload(home, "pilotfish-parallel")
@@ -450,15 +450,19 @@ class CandidateValidatorTests(unittest.TestCase):
                 "installed\n<!-- pilotfish-parallel:end -->\nafter\n",
                 encoding="utf-8",
             )
-            claude = home / ".claude"
-            claude.mkdir()
-            (claude / "settings.json").write_text("{}\n", encoding="utf-8")
             manifest["baselines"] = {
                 "config_sha256": self.validator.sha256(config),
+                "agents_sha256": self.validator.sha256(agents),
                 "installed_agents_sha256": self.validator.sha256(agents),
-                "claude_metadata_digest": self.validator.metadata_digest(claude),
             }
             self.validator.validate_formal(root, manifest)
+
+            extra_baseline = copy.deepcopy(manifest)
+            extra_baseline["baselines"]["claude_metadata_digest"] = "0" * 64
+            self.assert_validation_error(
+                lambda: self.validator.validate_formal(root, extra_baseline),
+                "baseline",
+            )
 
             before = config.read_text(encoding="utf-8")
             config.write_text("drift\n", encoding="utf-8")
@@ -482,13 +486,6 @@ class CandidateValidatorTests(unittest.TestCase):
                 "agents",
             )
             (codex / "agents").rmdir()
-
-            (claude / "settings.json").write_text('{"drift": true}\n', encoding="utf-8")
-            self.assert_validation_error(
-                lambda: self.validator.validate_formal(root, manifest),
-                "Claude metadata",
-            )
-
     def test_run_uses_sanitized_argv_environment_and_no_shell(self) -> None:
         completed = subprocess.CompletedProcess([], 0, b"", b"")
         with patch.dict(

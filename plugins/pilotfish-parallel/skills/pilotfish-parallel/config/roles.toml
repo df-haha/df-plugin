@@ -15,15 +15,15 @@ forbidden_argv_tokens = ["/var/run/docker.sock", "postgres://", "postgresql://",
 
 [roles.scout]
 model = "gpt-5.6-luna"
-effort = "low"
+effort = "medium"
 sandbox = "read-only"
 prompt = "prompts/scout.md"
 success_statuses = ["DONE"]
 terminal_statuses = ["DONE", "NEEDS_CONTEXT", "BLOCKED"]
 
 [roles.executor]
-model = "gpt-5.6-terra"
-effort = "low"
+model = "gpt-5.6-sol"
+effort = "medium"
 sandbox = "workspace-write"
 prompt = "prompts/executor.md"
 success_statuses = ["DONE"]
