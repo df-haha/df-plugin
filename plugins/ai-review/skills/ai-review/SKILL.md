@@ -19,6 +19,19 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 - 宿主是 Claude Code → 預設 `codex`，次選 `agy`；不用 `claude`（同家自審沒有獨立性）。
 - 宿主是 Codex → 預設 `claude`，次選 `agy`；不用 `codex`。
 
+## Orca ADE pane 模式（僅 REVIEWER=codex）
+
+若宿主是 Claude Code 且 `$TERM_PROGRAM == "Orca"`（或 `$ORCA_TERMINAL_HANDLE` 非空）、
+`command -v orca` 存在、且 `~/.claude/refs/orca-codex-pane.md` 存在：
+**REVIEWER=codex 的審查全程改走 Orca pane 模式**（開 pane 跑 codex TUI、輪詢讀畫面、
+多輪同 pane 追問、結束記 session id 後關 pane），細節依該 reference 檔執行，
+不呼叫 runner。結果仍整理成下方「結構化呈現」格式。
+
+限制與 fallback：
+- 僅適用 REVIEWER=codex；`agy` / `claude` reviewer 及 Codex 宿主一律走原 runner 流程。
+- 上述任一條件不成立（含 reference 檔不存在，例如其他使用者的機器）→ 走原 runner 流程，行為不變。
+- both 模式在 Orca 下：codex 走 pane，agy 照走 runner。
+
 ## 前置條件
 
 至少一個 reviewer CLI 需要安裝並登入：

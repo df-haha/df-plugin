@@ -17,6 +17,24 @@ allowed-tools: Bash, Read
 
 後續所有 `node <plugin>/lib/...` 呼叫，`<plugin>` 皆指上述解析出的 plugin root。
 
+## Orca ADE pane 模式
+
+若宿主是 Claude Code 且 `$TERM_PROGRAM == "Orca"`（或 `$ORCA_TERMINAL_HANDLE` 非空）、
+`command -v orca` 存在、且 `~/.claude/refs/orca-codex-pane.md` 存在：
+生圖改走 Orca pane 模式——`orca terminal split` 開 pane 跑 `codex "<生圖 prompt>"`（TUI），
+取代 `codex exec` 一次性執行；prompt 內容（反 code-drawing 條款、品質/尺寸參數、存檔指示）
+與驗收標準完全沿用本 skill 原規範，另加 sentinel 指示供輪詢。
+
+pane 模式的差異點：
+- **多輪修圖**：改圖需求在同一 pane `orca terminal send` 追問（codex 保有前輪 context，
+  不必重述整個場景）——這是 pane 模式的主要價值。
+- **驗收**：stdout 證據改為輪詢 `orca terminal read` 畫面中的存檔/cp 證據；
+  code-drawing 痕跡檢查照舊，命中即重跑。
+- **收工**：需求結束立即記錄 codex session id（`~/.claude/orca-codex-sessions.jsonl`）並關 pane；
+  之後同批圖的修改用 `codex resume <id>` 開新 pane 接續。
+
+條件不成立 → 走下方原 `codex exec` 流程，行為不變。
+
 ---
 
 ## 1. 兩層模型架構（Two-layer model architecture）
