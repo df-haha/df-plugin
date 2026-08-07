@@ -137,7 +137,7 @@
     },
     {
       "name": "hermes-exchange",
-      "description": "開放式 agent-to-agent 交換協定與 Hermes/Telegram 參考 adapter；雙方不必安裝同一 plugin，但完整自動化需支援相同 wire protocol 與 human gates",
+      "description": "Hermes／Telegram 輕量通知 relay；數字 sender ID 白名單、收件只進 owner inbox，可選本機 repository executor 且預設關閉",
       "version": "0.1.0",
       "author": { "name": "df-haha" },
       "source": "./plugins/hermes-exchange",

@@ -1,70 +1,49 @@
-"""Hermes Exchange user plugin registration surface."""
+"""Hermes Relay Lite user-plugin registration surface."""
 
 from __future__ import annotations
 
 from typing import Any
 
 
-_REQUIRED_HOOKS = frozenset(
-    {
-        "pre_gateway_dispatch",
-        "pre_llm_call",
-        "post_llm_call",
-        "pre_tool_call",
-        "transform_llm_output",
-    }
-)
+_REQUIRED_HOOKS = frozenset({"pre_gateway_dispatch"})
 
 
 def _assert_host_capabilities() -> None:
-    """Fail closed when the host cannot enforce the exchange policy."""
-
     from hermes_cli.plugins import VALID_HOOKS
 
-    missing_hooks = sorted(_REQUIRED_HOOKS - set(VALID_HOOKS))
-    if missing_hooks:
-        raise RuntimeError(
-            "Hermes Exchange requires host plugin hooks: "
-            + ",".join(missing_hooks)
-        )
+    missing = sorted(_REQUIRED_HOOKS - set(VALID_HOOKS))
+    if missing:
+        raise RuntimeError("Hermes Relay requires host plugin hooks: " + ",".join(missing))
 
 
-def create_runtime(ctx: Any) -> Any:
-    """Create the fail-closed runtime lazily at plugin registration."""
+def create_runtime(_ctx: Any) -> Any:
+    from .runtime import RelayRuntime
 
-    from .workflow import ExchangeRuntime
-
-    return ExchangeRuntime.from_user_scope(llm=ctx.llm)
+    return RelayRuntime.from_user_scope()
 
 
 def register(ctx: Any) -> None:
-    """Register draft/read tools and the five human-gate policy hooks."""
+    """Register notification receive/send and the optional local executor."""
 
     from . import schemas
 
     _assert_host_capabilities()
     runtime = create_runtime(ctx)
     ctx.register_tool(
-        name="exchange_prepare",
+        name="relay_notify",
         toolset="hermes-exchange",
-        schema=schemas.PREPARE,
-        handler=runtime.prepare_tool,
+        schema=schemas.RELAY_NOTIFY,
+        handler=runtime.notify_tool,
+        is_async=True,
+        description=schemas.RELAY_NOTIFY["description"],
     )
-    ctx.register_tool(
-        name="exchange_status",
-        toolset="hermes-exchange",
-        schema=schemas.STATUS,
-        handler=runtime.status_tool,
-    )
-    ctx.register_tool(
-        name="exchange_list",
-        toolset="hermes-exchange",
-        schema=schemas.LIST,
-        handler=runtime.list_tool,
-    )
-
+    if runtime.config is not None and runtime.config.execution.enabled:
+        ctx.register_tool(
+            name="relay_execute",
+            toolset="hermes-exchange",
+            schema=schemas.RELAY_EXECUTE,
+            handler=runtime.execute_tool,
+            is_async=True,
+            description=schemas.RELAY_EXECUTE["description"],
+        )
     ctx.register_hook("pre_gateway_dispatch", runtime.pre_gateway_dispatch)
-    ctx.register_hook("pre_llm_call", runtime.pre_llm_call)
-    ctx.register_hook("post_llm_call", runtime.post_llm_call)
-    ctx.register_hook("pre_tool_call", runtime.pre_tool_call)
-    ctx.register_hook("transform_llm_output", runtime.transform_llm_output)

@@ -1,31 +1,23 @@
-local_peer: haha
-
-owner:
-  telegram_chat_id: 123456789
-  allowed_user_ids:
-    - 123456789
-
-peers:
-  ryan:
-    telegram_username: "@replace_with_peer_bot"
-    expected_sender_id: 987654321
-    enabled: true
-
-policy:
-  profile: human-gated
-  ttl_seconds: 1800
-  max_hops: 2
-  min_peer_send_interval_seconds: 3
-  max_envelope_bytes: 3500
-  max_delivery_attempts: 3
-  retry_after_cap_seconds: 60
-  execution_tool_whitelist:
-    - read_file
-    - write_file
-    - patch
-    - search_files
-
-# TELEGRAM_BOT_TOKEN stays in the existing Hermes secret environment.
-# Copy this file to:
-#   get_hermes_home()/state/hermes-exchange/config.yaml
-# Enabling the plugin remains a separate, explicit user action.
+{
+  "local_peer": "haha",
+  "owner": {
+    "telegram_chat_id": 123456789
+  },
+  "peers": {
+    "ryan": {
+      "telegram_username": "@replace_with_peer_bot",
+      "expected_sender_id": 987654321,
+      "enabled": true
+    }
+  },
+  "receive": {
+    "max_message_bytes": 3500,
+    "min_peer_interval_seconds": 3
+  },
+  "execution": {
+    "enabled": false,
+    "timeout_seconds": 1800,
+    "output_limit_chars": 20000,
+    "repositories": {}
+  }
+}

@@ -50,4 +50,4 @@ codex plugin marketplace add ./
 | **decision-wiki** | Git-first 決策知識庫工具組 — **setup-decision-wiki** 安裝或升級可審查的決策 Wiki；**save-decision** 將已明確定案的 repository 決策建立為草稿。支援 Claude Code 與 Codex。 |
 | **pilotfish-parallel** | Codex-only 並行工作程序 — 將 2–3 個互不依賴、路徑不重疊的 repository 工作放進隔離 Git worktree 並行執行，以 fail-closed（失敗即整批停止）方式整合，最後由 fresh verifier（全新上下文驗證器）裁決。 |
 | **codex-image** | 用 Codex CLI 內建 `image_gen` 生圖 — 走 codex 帳號額度，不需額外 OpenAI / Stability API key。含 **codex-image-setup**（跨平台環境偵測：Windows / WSL / linux / darwin，寫 `${CODEX_HOME:-$HOME/.codex}/codex-image.local.md`）、injection-safe 的 Node `spawn` 呼叫（argv + stdin，`shell:false`）、反 code-drawing（禁止 LLM 改用 PIL/matplotlib 重繪）驗收與 chroma-key 去背透明流程。支援 Claude Code 與 Codex。 |
-| **hermes-exchange** | 開放式 agent-to-agent 交換協定 + Hermes/Telegram 參考 adapter。雙方不必裝同一 plugin；Hermes 使用者可直接安裝 bundled runtime，其他 agent/runtime 只要實作 `HERMES_EXCHANGE/1` 協定與必要安全閘門即可互通。 |
+| **hermes-exchange** | Hermes／Telegram 輕量通知 relay。Hermes 使用者可安裝 bundled runtime；其他 agent/runtime 不必用同一 plugin，只要實作 `HERMES_NOTIFY/1`、sender ID＋username 白名單與「收件只進 owner inbox」安全邊界即可互通。另有預設關閉、綁定固定 repository alias 的 Claude Code／Codex 執行層。 |

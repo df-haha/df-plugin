@@ -1,7 +1,7 @@
 {
   "name": "hermes-exchange",
   "version": "0.1.0",
-  "description": "Open, human-gated agent exchange protocol with a Telegram/Hermes reference adapter.",
+  "description": "Lightweight Telegram notification relay for allowlisted agent peers, with optional local repository execution.",
   "author": {
     "name": "df-haha"
   }

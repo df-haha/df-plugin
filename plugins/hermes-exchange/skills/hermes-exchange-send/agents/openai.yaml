@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hermes Exchange Send"
+  short_description: "Send an approved Hermes relay notification"
+  default_prompt: "Use $hermes-exchange-send to send this notification only after I explicitly authorize release."

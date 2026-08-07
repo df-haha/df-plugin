@@ -1,46 +1,168 @@
-"""Canonical text envelope codec with fail-closed validation."""
+"""Strict, framework-neutral codec for lightweight Hermes notifications."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime, timedelta
 import json
 import re
+import uuid
 from typing import Any, Mapping
 
-from .models import Envelope, MessageType, parse_timestamp
 
-
-ENVELOPE_PREFIX = "HERMES_EXCHANGE/1\n"
+ENVELOPE_PREFIX = "HERMES_NOTIFY/1\n"
 MAX_ENVELOPE_BYTES = 3_500
-DEFAULT_MAX_TTL_SECONDS = 86_400
-DEFAULT_MAX_HOPS = 2
+DEFAULT_TTL_SECONDS = 1_800
+MAX_TTL_SECONDS = 86_400
 
-_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,126}[A-Za-z0-9])?$")
+_ID_RE = re.compile(r"^hmsg-[a-f0-9]{16,64}$")
 _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$")
-_REQUIRED_KEYS = frozenset(
+_FIELDS = frozenset(
     {
-        "artifact_refs",
-        "constraints",
-        "created_at",
-        "envelope_id",
-        "exchange_id",
+        "body",
         "expires_at",
-        "hop_count",
         "kind",
-        "message_type",
-        "payload",
+        "message_id",
         "recipient_peer",
         "sender_peer",
+        "sent_at",
         "subject",
-        "summary",
         "version",
     }
 )
-_OPTIONAL_KEYS = frozenset({"auth", "execution_hint", "in_reply_to"})
 
 
 class EnvelopeValidationError(ValueError):
-    """Raised for any malformed or policy-invalid exchange envelope."""
+    """Raised when a notification fails its closed wire contract."""
+
+
+@dataclass(frozen=True, slots=True)
+class Notification:
+    message_id: str
+    sender_peer: str
+    recipient_peer: str
+    kind: str
+    subject: str
+    body: str
+    sent_at: datetime
+    expires_at: datetime
+    version: int = 1
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["sent_at"] = _format_timestamp(self.sent_at)
+        data["expires_at"] = _format_timestamp(self.expires_at)
+        return data
+
+
+def new_notification(
+    *,
+    sender_peer: str,
+    recipient_peer: str,
+    kind: str,
+    subject: str,
+    body: str,
+    now: datetime | None = None,
+    ttl_seconds: int = DEFAULT_TTL_SECONDS,
+) -> Notification:
+    sent_at = (now or datetime.now(UTC)).astimezone(UTC)
+    return Notification(
+        message_id=f"hmsg-{uuid.uuid4().hex}",
+        sender_peer=sender_peer,
+        recipient_peer=recipient_peer,
+        kind=kind,
+        subject=subject,
+        body=body,
+        sent_at=sent_at,
+        expires_at=sent_at + timedelta(seconds=ttl_seconds),
+    )
+
+
+def encode_notification(
+    notification: Notification,
+    *,
+    max_bytes: int = MAX_ENVELOPE_BYTES,
+) -> str:
+    _validate(notification)
+    encoded = ENVELOPE_PREFIX + _canonical_json(notification.to_dict())
+    if len(encoded.encode("utf-8")) > max_bytes:
+        raise EnvelopeValidationError("notification exceeds the configured byte limit")
+    return encoded
+
+
+def decode_notification(
+    raw: str,
+    *,
+    expected_recipient: str,
+    now: datetime | None = None,
+    max_bytes: int = MAX_ENVELOPE_BYTES,
+) -> Notification:
+    if not isinstance(raw, str) or not raw.startswith(ENVELOPE_PREFIX):
+        raise EnvelopeValidationError("invalid notification prefix")
+    if len(raw.encode("utf-8")) > max_bytes:
+        raise EnvelopeValidationError("notification exceeds the configured byte limit")
+    json_text = raw[len(ENVELOPE_PREFIX) :]
+    try:
+        data = json.loads(json_text, parse_constant=_reject_constant)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise EnvelopeValidationError("invalid notification JSON") from exc
+    if not isinstance(data, Mapping) or frozenset(data) != _FIELDS:
+        raise EnvelopeValidationError("notification fields do not match version 1")
+    if json_text != _canonical_json(data):
+        raise EnvelopeValidationError("notification JSON is not canonical")
+    try:
+        notification = Notification(
+            message_id=data["message_id"],
+            sender_peer=data["sender_peer"],
+            recipient_peer=data["recipient_peer"],
+            kind=data["kind"],
+            subject=data["subject"],
+            body=data["body"],
+            sent_at=_parse_timestamp(data["sent_at"]),
+            expires_at=_parse_timestamp(data["expires_at"]),
+            version=data["version"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise EnvelopeValidationError("notification fields are invalid") from exc
+    _validate(notification)
+    if notification.recipient_peer != expected_recipient:
+        raise EnvelopeValidationError("recipient does not match the local peer")
+    check_time = now or datetime.now(UTC)
+    if check_time.tzinfo is None or check_time.utcoffset() is None:
+        raise EnvelopeValidationError("validation time must include a timezone")
+    if notification.expires_at <= check_time.astimezone(UTC):
+        raise EnvelopeValidationError("notification has expired")
+    return notification
+
+
+def _validate(notification: Notification) -> None:
+    if isinstance(notification.version, bool) or notification.version != 1:
+        raise EnvelopeValidationError("version must be 1")
+    if not isinstance(notification.message_id, str) or not _ID_RE.fullmatch(
+        notification.message_id
+    ):
+        raise EnvelopeValidationError("message_id has an invalid format")
+    for field_name in ("sender_peer", "recipient_peer", "kind"):
+        value = getattr(notification, field_name)
+        if not isinstance(value, str) or not _SLUG_RE.fullmatch(value):
+            raise EnvelopeValidationError(f"{field_name} must be a lowercase slug")
+    _bounded_string(notification.subject, "subject", 200)
+    _bounded_string(notification.body, "body", 3_000)
+    if notification.sent_at.tzinfo is None or notification.sent_at.utcoffset() is None:
+        raise EnvelopeValidationError("sent_at must include a timezone")
+    if notification.expires_at.tzinfo is None or notification.expires_at.utcoffset() is None:
+        raise EnvelopeValidationError("expires_at must include a timezone")
+    ttl = (notification.expires_at - notification.sent_at).total_seconds()
+    if ttl <= 0 or ttl > MAX_TTL_SECONDS:
+        raise EnvelopeValidationError("notification TTL is invalid")
+
+
+def _bounded_string(value: object, field: str, maximum: int) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+        raise EnvelopeValidationError(
+            f"{field} must be a non-empty string up to {maximum} characters"
+        )
+    return value
 
 
 def _canonical_json(data: Mapping[str, Any]) -> str:
@@ -53,202 +175,21 @@ def _canonical_json(data: Mapping[str, Any]) -> str:
             allow_nan=False,
         )
     except (TypeError, ValueError) as exc:
-        raise EnvelopeValidationError("envelope contains non-JSON data") from exc
+        raise EnvelopeValidationError("notification contains non-JSON data") from exc
+
+
+def _format_timestamp(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _parse_timestamp(value: object) -> datetime:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        raise ValueError("timestamp must be UTC RFC3339")
+    parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("timestamp must include a timezone")
+    return parsed.astimezone(UTC)
 
 
 def _reject_constant(value: str) -> None:
     raise ValueError(f"non-finite number: {value}")
-
-
-def _string(value: object, field: str, *, maximum: int, allow_empty: bool = False) -> str:
-    if not isinstance(value, str) or (not value and not allow_empty) or len(value) > maximum:
-        qualifier = "string" if allow_empty else "non-empty string"
-        raise EnvelopeValidationError(f"{field} must be a {qualifier} up to {maximum} characters")
-    return value
-
-
-def _id(value: object, field: str) -> str:
-    parsed = _string(value, field, maximum=128)
-    if not _ID_RE.fullmatch(parsed):
-        raise EnvelopeValidationError(f"{field} has an invalid format")
-    return parsed
-
-
-def _slug(value: object, field: str) -> str:
-    parsed = _string(value, field, maximum=64)
-    if not _SLUG_RE.fullmatch(parsed):
-        raise EnvelopeValidationError(f"{field} must be a lowercase slug")
-    return parsed
-
-
-def _string_tuple(value: object, field: str, *, maximum_items: int) -> tuple[str, ...]:
-    if not isinstance(value, list) or len(value) > maximum_items:
-        raise EnvelopeValidationError(f"{field} must be a list with at most {maximum_items} items")
-    return tuple(_string(item, f"{field}[]", maximum=500) for item in value)
-
-
-def _validate_structure(
-    envelope: Envelope,
-    *,
-    expected_recipient: str | None,
-    now: datetime | None,
-    max_ttl_seconds: int,
-    max_hops: int,
-) -> None:
-    _id(envelope.envelope_id, "envelope_id")
-    _id(envelope.exchange_id, "exchange_id")
-    if isinstance(envelope.version, bool) or envelope.version != 1:
-        raise EnvelopeValidationError("version must be 1")
-    if not isinstance(envelope.message_type, MessageType):
-        raise EnvelopeValidationError("unknown message_type")
-    _slug(envelope.sender_peer, "sender_peer")
-    _slug(envelope.recipient_peer, "recipient_peer")
-    _slug(envelope.kind, "kind")
-    if expected_recipient is not None and envelope.recipient_peer != expected_recipient:
-        raise EnvelopeValidationError("recipient_peer does not match the local peer")
-    _string(envelope.subject, "subject", maximum=200)
-    _string(envelope.summary, "summary", maximum=1_000)
-    if not isinstance(envelope.payload, Mapping):
-        raise EnvelopeValidationError("payload must be an object")
-    if not isinstance(envelope.constraints, tuple) or len(envelope.constraints) > 20:
-        raise EnvelopeValidationError("constraints must contain at most 20 strings")
-    for value in envelope.constraints:
-        _string(value, "constraints[]", maximum=500)
-    if not isinstance(envelope.artifact_refs, tuple) or len(envelope.artifact_refs) > 20:
-        raise EnvelopeValidationError("artifact_refs must contain at most 20 strings")
-    for value in envelope.artifact_refs:
-        _string(value, "artifact_refs[]", maximum=500)
-    if envelope.execution_hint is not None:
-        _string(envelope.execution_hint, "execution_hint", maximum=100)
-    if envelope.auth is not None and not isinstance(envelope.auth, Mapping):
-        raise EnvelopeValidationError("auth must be an object")
-
-    if isinstance(envelope.hop_count, bool) or not isinstance(envelope.hop_count, int):
-        raise EnvelopeValidationError("hop_count must be an integer")
-    if envelope.hop_count < 0 or envelope.hop_count > max_hops:
-        raise EnvelopeValidationError("hop_count exceeds policy")
-    if max_ttl_seconds <= 0 or max_hops < 0:
-        raise EnvelopeValidationError("validator policy limits are invalid")
-    if envelope.created_at.tzinfo is None or envelope.expires_at.tzinfo is None:
-        raise EnvelopeValidationError("timestamps must include a timezone")
-    created_at = envelope.created_at.astimezone(timezone.utc)
-    expires_at = envelope.expires_at.astimezone(timezone.utc)
-    ttl_seconds = (expires_at - created_at).total_seconds()
-    if ttl_seconds <= 0 or ttl_seconds > max_ttl_seconds:
-        raise EnvelopeValidationError("envelope TTL exceeds policy")
-    if now is not None:
-        if now.tzinfo is None or now.utcoffset() is None:
-            raise EnvelopeValidationError("validator now must include a timezone")
-        if expires_at <= now.astimezone(timezone.utc):
-            raise EnvelopeValidationError("envelope has expired")
-
-    reply_types = {
-        MessageType.RESULT,
-        MessageType.REJECTION,
-        MessageType.CANCELLATION,
-    }
-    if envelope.message_type in reply_types:
-        _id(envelope.in_reply_to, "in_reply_to")
-    elif envelope.in_reply_to is not None:
-        raise EnvelopeValidationError("request envelopes cannot set in_reply_to")
-
-    # Validate nested JSON values before the encoded-size check.
-    _canonical_json(envelope.to_dict())
-
-
-def encode_envelope(
-    envelope: Envelope,
-    *,
-    max_bytes: int = MAX_ENVELOPE_BYTES,
-    max_ttl_seconds: int = DEFAULT_MAX_TTL_SECONDS,
-    max_hops: int = DEFAULT_MAX_HOPS,
-) -> str:
-    _validate_structure(
-        envelope,
-        expected_recipient=None,
-        now=None,
-        max_ttl_seconds=max_ttl_seconds,
-        max_hops=max_hops,
-    )
-    encoded = ENVELOPE_PREFIX + _canonical_json(envelope.to_dict())
-    if len(encoded.encode("utf-8")) > max_bytes:
-        raise EnvelopeValidationError(
-            "envelope exceeds the 3,500-byte limit; use stable artifact references"
-        )
-    return encoded
-
-
-def decode_envelope(
-    raw: str,
-    *,
-    expected_recipient: str | None,
-    now: datetime | None = None,
-    max_ttl_seconds: int = DEFAULT_MAX_TTL_SECONDS,
-    max_hops: int = DEFAULT_MAX_HOPS,
-    max_bytes: int = MAX_ENVELOPE_BYTES,
-) -> Envelope:
-    if not isinstance(raw, str) or not raw.startswith(ENVELOPE_PREFIX):
-        raise EnvelopeValidationError("invalid envelope prefix")
-    if len(raw.encode("utf-8")) > max_bytes:
-        raise EnvelopeValidationError("envelope exceeds the 3,500-byte limit")
-    json_text = raw[len(ENVELOPE_PREFIX) :]
-    try:
-        data = json.loads(json_text, parse_constant=_reject_constant)
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise EnvelopeValidationError("invalid envelope JSON") from exc
-    if not isinstance(data, dict):
-        raise EnvelopeValidationError("envelope JSON must be an object")
-    keys = frozenset(data)
-    if not _REQUIRED_KEYS.issubset(keys) or not keys.issubset(_REQUIRED_KEYS | _OPTIONAL_KEYS):
-        raise EnvelopeValidationError("envelope fields do not match version 1")
-    if json_text != _canonical_json(data):
-        raise EnvelopeValidationError("envelope JSON is not canonical")
-
-    try:
-        message_type = MessageType(data["message_type"])
-    except (TypeError, ValueError) as exc:
-        raise EnvelopeValidationError("unknown message_type") from exc
-    if isinstance(data["version"], bool) or not isinstance(data["version"], int):
-        raise EnvelopeValidationError("version must be an integer")
-    if isinstance(data["hop_count"], bool) or not isinstance(data["hop_count"], int):
-        raise EnvelopeValidationError("hop_count must be an integer")
-    if not isinstance(data["payload"], dict):
-        raise EnvelopeValidationError("payload must be an object")
-    constraints = _string_tuple(data["constraints"], "constraints", maximum_items=20)
-    artifact_refs = _string_tuple(data["artifact_refs"], "artifact_refs", maximum_items=20)
-    if "auth" in data and not isinstance(data["auth"], dict):
-        raise EnvelopeValidationError("auth must be an object")
-    try:
-        created_at = parse_timestamp(data["created_at"])
-        expires_at = parse_timestamp(data["expires_at"])
-    except ValueError as exc:
-        raise EnvelopeValidationError(str(exc)) from exc
-
-    envelope = Envelope(
-        envelope_id=data["envelope_id"],
-        exchange_id=data["exchange_id"],
-        version=data["version"],
-        message_type=message_type,
-        sender_peer=data["sender_peer"],
-        recipient_peer=data["recipient_peer"],
-        kind=data["kind"],
-        subject=data["subject"],
-        created_at=created_at,
-        expires_at=expires_at,
-        hop_count=data["hop_count"],
-        summary=data["summary"],
-        payload=data["payload"],
-        constraints=constraints,
-        artifact_refs=artifact_refs,
-        in_reply_to=data.get("in_reply_to"),
-        execution_hint=data.get("execution_hint"),
-        auth=data.get("auth"),
-    )
-    _validate_structure(
-        envelope,
-        expected_recipient=expected_recipient,
-        now=now or datetime.now(timezone.utc),
-        max_ttl_seconds=max_ttl_seconds,
-        max_hops=max_hops,
-    )
-    return envelope

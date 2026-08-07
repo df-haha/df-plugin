@@ -55,17 +55,32 @@ class UserScopeInstallTests(unittest.TestCase):
 
     def test_default_bundled_source_installs_without_touching_profile_config(self) -> None:
         hermes_home = self.root / "profile"
+        profile_config = hermes_home / "config.yaml"
+        relay_config = hermes_home / "state" / "hermes-exchange" / "config.yaml"
+        relay_config.parent.mkdir(parents=True)
+        profile_config.write_text("plugins:\n  enabled: [owner-plugin]\n", encoding="utf-8")
+        relay_config.write_text("owner: keep\n", encoding="utf-8")
 
         result = _run_installer("--hermes-home", str(hermes_home))
 
         target = hermes_home / "plugins" / "hermes_exchange"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((target / "plugin.yaml").is_file())
-        self.assertTrue((target / "envelope.py").is_file())
-        self.assertFalse((hermes_home / "config.yaml").exists())
-        self.assertFalse(
-            (hermes_home / "state" / "hermes-exchange" / "config.yaml").exists()
+        self.assertTrue((target / "__init__.py").is_file())
+        self.assertEqual(
+            profile_config.read_text(encoding="utf-8"),
+            "plugins:\n  enabled: [owner-plugin]\n",
         )
+        self.assertEqual(relay_config.read_text(encoding="utf-8"), "owner: keep\n")
+
+        installer_source = INSTALLER.read_text(encoding="utf-8")
+        for forbidden in (
+            "TELEGRAM_BOT_TOKEN",
+            "plugins.enabled",
+            "subprocess",
+            "gateway restart",
+        ):
+            self.assertNotIn(forbidden, installer_source)
 
     def test_existing_install_is_not_overwritten_without_replace(self) -> None:
         hermes_home = self.root / "profile"
@@ -96,11 +111,16 @@ class UserScopeInstallTests(unittest.TestCase):
             "--replace",
         )
 
-        backups = list(target.parent.glob("hermes_exchange.backup-*"))
+        backups = list(
+            (hermes_home / "backups" / "hermes-exchange").glob(
+                "hermes_exchange.backup-*"
+            )
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((target / "marker.txt").read_text(encoding="utf-8"), "new")
         self.assertEqual(len(backups), 1)
         self.assertEqual((backups[0] / "marker.txt").read_text(encoding="utf-8"), "old")
+        self.assertEqual(list(target.parent.glob("*backup*")), [])
         self.assertEqual(_staging_paths(target.parent), [])
 
     def test_missing_manifest_fails_without_partial_install(self) -> None:

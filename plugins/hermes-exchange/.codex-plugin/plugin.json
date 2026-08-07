@@ -1,7 +1,7 @@
 {
   "name": "hermes-exchange",
   "version": "0.1.0",
-  "description": "Open, human-gated agent exchange protocol with a Telegram/Hermes reference adapter.",
+  "description": "Lightweight Telegram notification relay for allowlisted agent peers, with optional local repository execution.",
   "author": {
     "name": "df-haha",
     "url": "https://github.com/df-haha"
@@ -12,14 +12,14 @@
     "agent-to-agent",
     "telegram",
     "hermes",
-    "handoff",
-    "human-in-the-loop"
+    "notification",
+    "relay"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Hermes Exchange",
-    "shortDescription": "Connect human-gated agents without requiring one runtime.",
-    "longDescription": "Installs the Hermes reference adapter or guides another agent runtime to implement the same open wire protocol. Telegram is the first transport; engineering handoff is one use case, not a hard-coded workflow.",
+    "shortDescription": "Relay approved notifications between allowlisted Telegram agents.",
+    "longDescription": "Installs and configures a lightweight Telegram notification relay. Received bot messages stop at the owner's inbox; optional execution is local, alias-bound, and disabled by default.",
     "developerName": "df-haha",
     "category": "Development",
     "capabilities": [
@@ -29,8 +29,8 @@
     ],
     "defaultPrompt": [
       "Set up Hermes Exchange for this user profile",
-      "Explain what the other agent must implement to connect",
-      "Check whether two endpoints are protocol-compatible"
+      "Add an allowlisted Telegram agent peer safely",
+      "Send this notification after I explicitly approve it"
     ],
     "brandColor": "#229ED9"
   }

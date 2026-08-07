@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import math
 from dataclasses import dataclass
 from typing import Any, Mapping
-
-import httpx
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +53,7 @@ class TelegramTransport:
             )
         try:
             response = await self._post(username=username, text=text)
-        except (TimeoutError, httpx.TimeoutException):
+        except TimeoutError:
             return DeliveryResult(
                 success=False,
                 status="retryable",
@@ -145,8 +147,12 @@ class TelegramTransport:
         }
         if self._http_client is not None:
             return await self._http_client.post(**request)
-        async with httpx.AsyncClient() as client:
-            return await client.post(**request)
+        return await asyncio.to_thread(
+            _stdlib_post,
+            request["url"],
+            request["json"],
+            request["timeout"],
+        )
 
     def _retry_after(
         self,
@@ -169,3 +175,46 @@ class TelegramTransport:
         if not math.isfinite(seconds):
             return None
         return min(max(0.0, seconds), self._max_retry_after_seconds)
+
+
+class _StdlibResponse:
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        body: bytes,
+        headers: Mapping[str, Any],
+    ) -> None:
+        self.status_code = status_code
+        self._body = body
+        self.headers = headers
+
+    def json(self) -> Any:
+        return json.loads(self._body.decode("utf-8"))
+
+
+def _stdlib_post(
+    url: str,
+    payload: Mapping[str, Any],
+    timeout: float,
+) -> _StdlibResponse:
+    encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = Request(
+        url,
+        data=encoded,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            return _StdlibResponse(
+                status_code=response.status,
+                body=response.read(),
+                headers=response.headers,
+            )
+    except HTTPError as exc:
+        return _StdlibResponse(
+            status_code=exc.code,
+            body=exc.read(),
+            headers=exc.headers,
+        )

@@ -50,9 +50,11 @@ def _path_exists(path: Path) -> bool:
     return path.exists() or path.is_symlink()
 
 
-def _reserve_backup_path(plugins_dir: Path) -> Path:
+def _reserve_backup_path(hermes_home: Path) -> Path:
+    backup_dir = hermes_home / "backups" / "hermes-exchange"
+    backup_dir.mkdir(parents=True, exist_ok=True)
     while True:
-        candidate = plugins_dir / f"{PLUGIN_DIR_NAME}.backup-{uuid.uuid4().hex}"
+        candidate = backup_dir / f"{PLUGIN_DIR_NAME}.backup-{uuid.uuid4().hex}"
         if not _path_exists(candidate):
             return candidate
 
@@ -81,7 +83,7 @@ def install(source: Path, hermes_home: Path, *, replace: bool = False) -> Path:
         _validate_source(staging)
         try:
             if target_exists:
-                backup = _reserve_backup_path(plugins_dir)
+                backup = _reserve_backup_path(hermes_home)
                 target.rename(backup)
             staging.rename(target)
         except BaseException:
