@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hermes Exchange Setup"
+  short_description: "Install or connect an agent exchange endpoint."
+  default_prompt: "Use $hermes-exchange-setup to install or connect this agent exchange endpoint."

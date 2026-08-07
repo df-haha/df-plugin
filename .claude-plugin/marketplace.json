@@ -134,6 +134,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/codex-image",
       "category": "productivity"
+    },
+    {
+      "name": "hermes-exchange",
+      "description": "開放式 agent-to-agent 交換協定與 Hermes/Telegram 參考 adapter；雙方不必安裝同一 plugin，但完整自動化需支援相同 wire protocol 與 human gates",
+      "version": "0.1.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/hermes-exchange",
+      "category": "development"
     }
   ]
 }

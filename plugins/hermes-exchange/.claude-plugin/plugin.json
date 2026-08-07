@@ -1,0 +1,8 @@
+{
+  "name": "hermes-exchange",
+  "version": "0.1.0",
+  "description": "Open, human-gated agent exchange protocol with a Telegram/Hermes reference adapter.",
+  "author": {
+    "name": "df-haha"
+  }
+}

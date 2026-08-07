@@ -1,0 +1,19 @@
+name: hermes-exchange
+version: 0.1.0
+description: "Human-gated request and result exchange with trusted protocol-compatible peers."
+author: df-haha
+kind: standalone
+platforms:
+  - linux
+provides_tools:
+  - exchange_prepare
+  - exchange_status
+  - exchange_list
+provides_hooks:
+  - pre_gateway_dispatch
+  - pre_llm_call
+  - post_llm_call
+  - pre_tool_call
+  - transform_llm_output
+requires_env:
+  - TELEGRAM_BOT_TOKEN

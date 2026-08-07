@@ -30,7 +30,7 @@ claude plugin install decision-wiki
 codex plugin marketplace add ./
 ```
 
-然後在 Codex CLI 內開 `/plugins`，從 `df-haha Plugins` 安裝任一 plugin；本 repo 的 17 個 plugins 都已提供 Codex manifest。安裝後可在 `/skills` 或以 `$<skill-name>`／自然語言觸發各 skill。`markitdown` 也已補上 Codex skill；它首次使用若未安裝 CLI，會先要求安裝授權。
+然後在 Codex CLI 內開 `/plugins`，從 `df-haha Plugins` 安裝任一 plugin；Codex marketplace 目前列出 18 個 plugins。安裝後可在 `/skills` 或以 `$<skill-name>`／自然語言觸發各 skill。`markitdown` 也已補上 Codex skill；它首次使用若未安裝 CLI，會先要求安裝授權。
 
 ## 可用 Plugins
 
@@ -50,3 +50,4 @@ codex plugin marketplace add ./
 | **decision-wiki** | Git-first 決策知識庫工具組 — **setup-decision-wiki** 安裝或升級可審查的決策 Wiki；**save-decision** 將已明確定案的 repository 決策建立為草稿。支援 Claude Code 與 Codex。 |
 | **pilotfish-parallel** | Codex-only 並行工作程序 — 將 2–3 個互不依賴、路徑不重疊的 repository 工作放進隔離 Git worktree 並行執行，以 fail-closed（失敗即整批停止）方式整合，最後由 fresh verifier（全新上下文驗證器）裁決。 |
 | **codex-image** | 用 Codex CLI 內建 `image_gen` 生圖 — 走 codex 帳號額度，不需額外 OpenAI / Stability API key。含 **codex-image-setup**（跨平台環境偵測：Windows / WSL / linux / darwin，寫 `${CODEX_HOME:-$HOME/.codex}/codex-image.local.md`）、injection-safe 的 Node `spawn` 呼叫（argv + stdin，`shell:false`）、反 code-drawing（禁止 LLM 改用 PIL/matplotlib 重繪）驗收與 chroma-key 去背透明流程。支援 Claude Code 與 Codex。 |
+| **hermes-exchange** | 開放式 agent-to-agent 交換協定 + Hermes/Telegram 參考 adapter。雙方不必裝同一 plugin；Hermes 使用者可直接安裝 bundled runtime，其他 agent/runtime 只要實作 `HERMES_EXCHANGE/1` 協定與必要安全閘門即可互通。 |

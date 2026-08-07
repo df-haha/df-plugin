@@ -291,8 +291,9 @@ test('setup skill and README describe the same schema as lib/config.mjs', () => 
 
 test('documents the plugin in the repository README', () => {
   const readme = read('README.md');
+  const pluginCount = readJson('.agents/plugins/marketplace.json').plugins.length;
   assert.match(readme, /\*\*codex-image\*\*/);
-  assert.match(readme, /本 repo 的 17 個 plugins/);
+  assert.match(readme, new RegExp(`Codex marketplace 目前列出 ${pluginCount} 個 plugins`));
 });
 
 test('plugin README discloses the known risks', () => {

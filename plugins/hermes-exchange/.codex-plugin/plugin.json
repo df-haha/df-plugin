@@ -1,0 +1,37 @@
+{
+  "name": "hermes-exchange",
+  "version": "0.1.0",
+  "description": "Open, human-gated agent exchange protocol with a Telegram/Hermes reference adapter.",
+  "author": {
+    "name": "df-haha",
+    "url": "https://github.com/df-haha"
+  },
+  "homepage": "https://github.com/df-haha/df-plugin/tree/main/plugins/hermes-exchange",
+  "repository": "https://github.com/df-haha/df-plugin",
+  "keywords": [
+    "agent-to-agent",
+    "telegram",
+    "hermes",
+    "handoff",
+    "human-in-the-loop"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Hermes Exchange",
+    "shortDescription": "Connect human-gated agents without requiring one runtime.",
+    "longDescription": "Installs the Hermes reference adapter or guides another agent runtime to implement the same open wire protocol. Telegram is the first transport; engineering handoff is one use case, not a hard-coded workflow.",
+    "developerName": "df-haha",
+    "category": "Development",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Set up Hermes Exchange for this user profile",
+      "Explain what the other agent must implement to connect",
+      "Check whether two endpoints are protocol-compatible"
+    ],
+    "brandColor": "#229ED9"
+  }
+}
