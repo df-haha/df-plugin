@@ -25,9 +25,9 @@ allowed-tools: Bash, Read
 取代 `codex exec` 一次性執行；prompt 內容（反 code-drawing 條款、品質/尺寸參數、存檔指示）
 與驗收標準完全沿用本 skill 原規範，另加 sentinel 指示供輪詢。
 
-**硬性閘門（hard gate）**：命中即禁止 `codex exec`；**不得** `orca terminal create`
-開新 tab 當終端機（正解＝`terminal split` 同 tab 分割起 TUI）；開 pane 後 10–15 秒必
-read 驗證 prompt 已送出（進 Working），卡在輸入欄就補送空 Enter。
+**硬性閘門（hard gate）**：命中即禁止 `codex exec`；開 pane 走 2×2 佈局規則
+（同 tab 最多 4 pane：未滿用 `terminal split` 起 TUI、滿 4 才 `terminal create` 開新 tab）；
+開 pane 後 10–15 秒必 read 驗證 prompt 已送出（進 Working），卡在輸入欄就補送空 Enter。
 
 pane 模式的差異點：
 - **多輪修圖**：改圖需求在同一 pane `orca terminal send` 追問（codex 保有前輪 context，

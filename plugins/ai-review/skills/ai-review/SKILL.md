@@ -27,10 +27,10 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 多輪同 pane 追問、結束記 session id 後關 pane），細節依該 reference 檔執行，
 不呼叫 runner。結果仍整理成下方「結構化呈現」格式。
 
-**硬性閘門（hard gate）**：命中即禁止 runner／`codex exec`；開 pane 唯一正解是
-`orca terminal split`（同 tab 分割）＋ `--command 'codex "<prompt>"'` 起 TUI——
-**不得** `terminal create` 開新 tab 當終端機；開 pane 後 10–15 秒必 read 驗證 prompt
-已送出（進 Working），卡在輸入欄就補送空 Enter。三種違規 2026-08-10 都實測踩過。
+**硬性閘門（hard gate）**：命中即禁止 runner／`codex exec`；開 pane 走 2×2 佈局規則
+（同 tab 最多 4 pane：未滿用 `terminal split`＋`--command 'codex "<prompt>"'` 起 TUI、
+滿 4 才 `terminal create` 開新 tab）；開 pane 後 10–15 秒必 read 驗證 prompt
+已送出（進 Working），卡在輸入欄就補送空 Enter。違規會被 orca-pane-guard hook 機械攔截。
 
 限制與 fallback：
 - 僅適用 REVIEWER=codex；`agy` / `claude` reviewer 及 Codex 宿主一律走原 runner 流程。
