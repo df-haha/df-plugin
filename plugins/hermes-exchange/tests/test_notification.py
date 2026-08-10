@@ -29,7 +29,7 @@ from hermes_exchange.envelope import (  # noqa: E402
 from hermes_exchange.runtime import RelayRuntime  # noqa: E402
 
 
-NOW = datetime(2026, 8, 8, 1, 0, tzinfo=UTC)
+NOW = datetime.now(UTC)
 
 
 def _notification(**updates: object) -> Notification:
