@@ -8,10 +8,11 @@ allowed-tools: Bash, Read
 
 透過 Codex CLI 的 `image_generation` feature flag（穩定功能旗標）呼叫內建 `image_gen` tool 生成 PNG。不需要額外 API key——計入 Codex 帳號一般額度。
 
-> **Orca ADE 使用者注意（opt-in，預設不影響任何流程）**：codex 呼叫**預設一律走 shell
-> headless**，在 Orca 內也一樣。只有使用者**本輪明確要求**「開 pane」跑、且本機存在
-> `~/.claude/refs/orca-codex-pane.md` 時，才依該檔改走 pane 模式（多輪改圖同 pane 累積
-> context）。沒有該檔＝一律走下方原流程。
+> **Orca ADE 使用者注意（opt-in 選擇性啟用，預設不影響任何流程）**：codex 呼叫**預設
+> 一律走 shell headless（無介面一次性執行）**，在 Orca 內也一樣。只有使用者**本輪明確
+> 要求**「開 pane」跑、且本機存在 `~/.claude/refs/orca-codex-pane.md`（標準參照檔）時，
+> 才依該檔改走 pane 模式（多輪改圖同 pane 累積 context 上下文）。沒有該檔＝一律走下方
+> 原流程。政策標準措辭見 `docs/orca/README.md` §4。
 
 ## Plugin root（插件根目錄）解析
 
