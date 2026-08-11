@@ -11,6 +11,13 @@ allowed-tools: Bash, Read, Write, Glob, Grep
 
 使用外部 AI CLI 對當前工作進行獨立二次審查。這個 skill 可同時被 Claude Code 與 Codex 使用：
 
+> **Orca ADE 使用者注意（opt-in 選擇性啟用，預設不影響任何流程）**：reviewer 呼叫
+> **預設一律走 shell headless（runner／CLI 無介面一次性執行）**，在 Orca 內也一樣。
+> 只有當使用者**本輪明確要求**「開 pane」「pane 模式」跑 reviewer、且本機存在
+> `~/.claude/refs/orca-codex-pane.md`（pane 工作流的 canonical reference 標準參照檔，
+> 含腳本與收工紀律）時，才依該檔改走 pane 模式。沒有該檔＝本機未配置 pane 工作流，
+> 一律走下方原流程。政策標準措辭見 `docs/orca/README.md` §4。
+
 - Claude Code：可用 `/ai-review ...` slash command，或自然語言觸發本 skill。
 - Codex：用 `$ai-review`、`/skills` 選取本 skill，或用自然語言觸發；Codex 不會把 `commands/ai-review.md` 當成 `/ai-review`。
 
