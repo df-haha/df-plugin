@@ -49,18 +49,18 @@ orca skills update --all         # Orca 升版後更新（⚠️ 不帶 --all/--
 
 ## 3. 官方語意易錯點（實測驗證過，照抄可省一輪踩坑）
 
-- **`check --wait` 是 drain/ack 迴圈，不是一次呼叫**：每次回一個 bounded Delivery，
-  要「處理整批 → 依事件 id 去重 → `check --ack <delivery_id>` → 續等」直到所有 Dispatch
-  settled；timeout／count:0 是 checkpoint 不是失敗（長任務 15–60 分鐘正常）。
-- **`worker_done` 的「產生」不保證，但「送達後」有持久化契約**：Run 是 durable inbox
+- **`check --wait` 是 drain/ack（清空／確認收件）迴圈，不是一次呼叫**：每次回一個 bounded Delivery（有界交付批次），
+  要「處理整批 → 依事件 id 去重 → `check --ack <delivery_id>` → 續等」直到所有 Dispatch（派工）
+  settled（已結案）；timeout／count:0 是 checkpoint（檢查點）不是失敗（長任務 15–60 分鐘正常）。
+- **`worker_done` 的「產生」不保證，但「送達後」有持久化契約**：Run（執行批次）是 durable inbox
   （持久信箱），Delivery 在 ack 前會重播——真正沒有事件的情況是 worker 在成功送出
   `worker_done` **之前**就崩潰。所以備援偵測（terminal／Dispatch 狀態檢查）的定位是
   「事件未產生時的存活性檢查」，不是懷疑已接受的事件會消失；也別因此重複派工。
 - **`send --to dispatch:<id>` 是結構化信箱**，worker 要主動 `orchestration check` 才看到，
-  **不是**打進 TUI 輸入框。追問分兩種：**進行中**的 Dispatch 補充指示 → 就用
+  **不是**打進 TUI（終端互動介面）輸入框。追問分兩種：**進行中**的 Dispatch 補充指示 → 就用
   `send --to dispatch:<id>`；**已 settled** 且要同一 terminal 立即續作 → 建下一個 Task
-  再 `worker-start --task <next> --terminal <handle>` 移交（進行中就建下一個 Task 會撞
-  ownership 拒絕）。
+  再 `worker-start --task <next> --terminal <handle>` 移交（進行中就建下一個 Task（任務）會撞
+  ownership（所有權）拒絕）。
 - **`worker-read` 會降級**：Orca 證明不了 worker session 時回**有長度上限**的 terminal
   output（附 `fallbackReason`），不是完整 transcript；**永遠不要自己猜 provider session id**。
 - **`worker-list` 只列 supervised worker**：盤點全部殘留 terminal 要聯集
@@ -70,13 +70,13 @@ orca skills update --all         # Orca 升版後更新（⚠️ 不帶 --all/--
 - 收工紀律：`worker-release` 成功失敗都要跑（要留著 debug 用 `worker-retain`）；
   不要因 timeout／idle／heartbeat 就 release 或 kill。
 
-## 4. Pane 模式（per-machine opt-in，非團隊預設）
+## 4. Pane（分割窗格）模式（per-machine opt-in 每機各自選擇啟用，非團隊預設）
 
 > 本節是 pane 政策的 **canonical wording（標準措辭）**；ai-review／codex-image 兩份
 > SKILL.md 內的註記是它的精簡版，語意以本節為準。
 
-reviewer／codex 呼叫**預設走 shell headless（無介面一次性執行）**。「在自己 tab 開
-split pane 盯著 agent 跑」是 per-machine 的個人工作流：需要本機自建腳本（啟動驗證、
+reviewer／codex 呼叫**預設走 shell headless（無介面一次性執行）**。「在自己 tab（分頁）開
+split pane（分割窗格）盯著 agent 跑」是 per-machine 的個人工作流：需要本機自建腳本（啟動驗證、
 送出驗證、收工紀律），且官方 orchestration 沒有「split 在當前 tab」的形態。
 進入 pane 模式需**同時**滿足：使用者本輪明確要求開 pane、且本機存在
 `~/.claude/refs/orca-codex-pane.md`（canonical reference，標準參照檔）——
