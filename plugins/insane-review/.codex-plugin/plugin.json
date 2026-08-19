@@ -1,0 +1,37 @@
+{
+  "name": "insane-review",
+  "version": "0.7.0",
+  "description": "Use a logged-in subscription ChatGPT web session for GPT Pro reviews and asynchronous Deep Research runs.",
+  "author": {
+    "name": "fivetaku",
+    "url": "https://github.com/fivetaku"
+  },
+  "homepage": "https://github.com/hahayo/insane-review",
+  "repository": "https://github.com/hahayo/insane-review",
+  "license": "MIT",
+  "keywords": [
+    "chatgpt",
+    "gpt-pro",
+    "deep-research",
+    "browser-automation",
+    "subscription"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Insane Review & Research",
+    "shortDescription": "Use subscription ChatGPT for reviews and Deep Research",
+    "longDescription": "Preserves the original GPT Pro review workflow and adds persistent start, status, and fetch commands for subscription ChatGPT Deep Research.",
+    "developerName": "fivetaku / hahayo fork",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/hahayo/insane-review",
+    "defaultPrompt": [
+      "Start subscription ChatGPT Deep Research for this topic.",
+      "Check my Deep Research run and fetch it when complete.",
+      "Have subscription GPT Pro review this code."
+    ]
+  }
+}

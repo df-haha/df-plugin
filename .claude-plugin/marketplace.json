@@ -32,6 +32,14 @@
       "category": "research"
     },
     {
+      "name": "insane-review",
+      "description": "使用 ChatGPT 訂閱版網頁服務執行 GPT Pro 程式審查與 Deep Research；保留原始 review 流程，新增可恢復的 start/status/fetch 報告擷取",
+      "version": "0.7.0",
+      "author": { "name": "fivetaku / hahayo fork" },
+      "source": "./plugins/insane-review",
+      "category": "research"
+    },
+    {
       "name": "fact-check",
       "description": "文檔事實查核系統 — 5 層查證架構，支援實體、技術、數據、人物、論述的交叉驗證；來源評級採 L1-L6（與 deep-research-ryan 共用 verification-core）",
       "version": "1.1.0",

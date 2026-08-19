@@ -77,6 +77,18 @@
       "category": "Research"
     },
     {
+      "name": "insane-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/insane-review"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Research"
+    },
+    {
       "name": "codex-image",
       "source": {
         "source": "local",

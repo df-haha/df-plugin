@@ -30,7 +30,23 @@ claude plugin install decision-wiki
 codex plugin marketplace add ./
 ```
 
-然後在 Codex CLI 內開 `/plugins`，從 `df-haha Plugins` 安裝任一 plugin；Codex marketplace 目前列出 18 個 plugins。安裝後可在 `/skills` 或以 `$<skill-name>`／自然語言觸發各 skill。`markitdown` 也已補上 Codex skill；它首次使用若未安裝 CLI，會先要求安裝授權。
+然後在 Codex CLI 內開 `/plugins`，從 `df-haha Plugins` 安裝任一 plugin；Codex marketplace 目前列出 19 個 plugins。安裝後可在 `/skills` 或以 `$<skill-name>`／自然語言觸發各 skill。`markitdown` 也已補上 Codex skill；它首次使用若未安裝 CLI，會先要求安裝授權。
+
+## Insane Review 與 Deep Research
+
+Claude Code 安裝後可使用 `/insane-review` 與 `/insane-research`：
+
+```bash
+claude plugin install insane-review@df-haha-plugins
+```
+
+Codex 安裝後可使用 `$insane-review` 與 `$insane-research`，也可用自然語言觸發：
+
+```bash
+codex plugin add insane-review@df-haha-plugins
+```
+
+Deep Research 會使用已登入的 ChatGPT 訂閱網頁，不使用 OpenAI API 額度。每次即時瀏覽器操作仍需當次明確授權。
 
 ## 可用 Plugins
 
@@ -39,6 +55,7 @@ codex plugin marketplace add ./
 | **first-principles** | 第一性原理思考框架 — 基於 Elon Musk 的第一性原理方法論，自動拆解問題到最基本的事實與假設 |
 | **markitdown** | 使用 Microsoft MarkItDown 將 PDF、PPT、Word、Excel 等檔案轉換為 Markdown |
 | **deep-research-ryan** | 多階段深度研究引擎 v2.0.0 — 廣度掃描→深度搜索→多輪辯論+Judge→報告合成（Merge）→引用驗證→三閘門品質檢查（QG），8 種研究類型；Workflow 編排自動調度 subagents；跨平台（Windows/macOS/Linux）（by [Ryan](https://github.com/anthropics/claude-code/tree/main/.claude/skills/deep-research)） |
+| **insane-review** | 使用已登入的 ChatGPT 訂閱網頁執行 GPT Pro 程式審查與 Deep Research。Claude Code 提供 `/insane-review`、`/insane-research`；Codex 提供 `$insane-review`、`$insane-research`，並可將完成報告與來源擷取回本機。 |
 | **fact-check** | 文檔事實查核系統 — 5 層查證架構，支援實體、技術、數據、人物、論述的交叉驗證（by [Ryan](https://github.com/anthropics/claude-code/tree/main/.claude/skills/deep-research)） |
 | **daily-work-log** | 跨專案工作日誌產生器 — 掃描 Claude Code / Codex / Gemini session，首次使用引導設定，產出 markdown 日誌並透過 **df-graph**（雲端 Graph，OS 無關）建草稿寄出 |
 | **ai-review** | AI 二次審查與技術討論 — 使用 Codex / Antigravity（agy）/ Claude Code CLI 讀取目前 repository 後，對程式碼/計畫/技術決策進行獨立審查或合作式討論，支援單審或 Codex+Agy 雙重對審；reviewer 依宿主選擇（Claude Code 宿主預設 Codex，可 `--model`/`--effort`，未指定吃 `~/.codex/config.toml`；Codex 宿主預設 Claude `claude-opus-4-6[1m]` + max effort）、Agy 預設 `3.5-flash`；Claude Code 可用 `/ai-review`，Codex 用 `$ai-review` / `/skills` 觸發 |
