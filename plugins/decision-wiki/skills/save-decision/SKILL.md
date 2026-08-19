@@ -41,7 +41,7 @@ Proceed only with actual human selection evidence: an affirmative statement from
 1. Locate the Git root, inspect its dirty state（未提交狀態）, and preserve unrelated work.
 2. On every invocation, re-read repository instructions, `docs/decisions/README.md`, and `docs/decisions/INDEX.md`. They are the runtime SSOT（執行期單一真相來源） for fields, lifecycle, sources, index shape, and validation. Never infer those from this skill.
 3. If either decision contract file is missing, stop and invoke `setup-decision-wiki`; never create a partial Wiki（知識庫）.
-4. If `NOT_SETTLED` did not fire, verify direct human evidence explicitly selects one high-value outcome. Split multiple settled decisions into separate runs.
+4. If `NOT_SETTLED` did not fire, verify direct human evidence explicitly selects every high-value outcome. Keep one decision per card, but process multiple settled decisions in one batch when they share one bounded confirmation and can be reviewed together.
 
 ### 2. Build a fact ledger before drafting
 
@@ -66,6 +66,8 @@ outcomes:
 
 Populate slots only from exact user text, read-only repository evidence, or the actual system clock（系統時鐘） for time. Domain knowledge（領域知識）, likely benefits, and plausible implications are not evidence. Missing narrative slots—background, alternatives and rejection reasons, rationale, consequences, or outcomes—must render as literal `Not recorded` or a repository-mandated equivalent.
 
+A generic assent such as `接受`, `都照你建議`, or `approved` must not be the sole source for a detailed decision. Pair it with the concrete bounded semantics block that the human accepted, using separate source records when the block and assent have different clients. When no stored excerpt or durable repository source makes the selected outcome independently understandable, emit `SOURCE_EVIDENCE_WEAK`, keep the draft proposed, and report the missing evidence in the normal task update. Do not manufacture a stronger quote or interrupt a batch with repetitive per-card questions.
+
 Render narrative as a mechanical projection（機械投影）, never as prose completion:
 
 - Background = `background`, verbatim; empty = `Not recorded`.
@@ -78,37 +80,42 @@ A relationship target, locator, old-card title, or selected outcome does not sup
 
 For the four relationship lists, copy every explicitly human-confirmed supported edge into its named list. Keep the same target in multiple lists when multiple relation types were confirmed; never infer, merge, or deduplicate across relation types. Semantic similarity（語意相似度） populates no field.
 
-### 3. Render one exact proposed draft
+### 3. Render exact proposed drafts
 
 1. Use the actual clock for the UTC（世界協調時間） ID and `capture_time`. Use an explicit human decision time when supplied; otherwise use the actual current time. Never invent or round timestamps.
 2. Copy the current README's exact frontmatter（檔頭） shape. Render all four ledger relationship lists in its required inline-array（行內陣列） syntax—for example, `supersedes: [DEC-...]` and `related_to: [DEC-...]`, never block lists.
 3. If the user labels a span as source, excerpt, or quote, `source_excerpt_bytes` equals only those bytes. Its visible blockquote contains only those bytes with the minimum sensitive substring replaced by `[REDACTED]`; never prepend or append a decision summary, approval statement, locator, or explanation. Keep `locator` only in source metadata（中繼資料） and SHA-256（安全雜湊演算法） hash exactly the visible redacted text under the repository normalization rule.
 4. Render body sections from the mechanical projection above, then source metadata plus `source_excerpt_bytes`. Never retain a full transcript（逐字紀錄） or invent provenance（溯源資訊）. Create only `docs/decisions/_draft/<id>.md` with `status: proposed`.
 5. A reversal creates a new proposed card. Never revise the old decision body; after acceptance, change only its lifecycle status to `superseded`.
+6. For multiple settled decisions in one batch, repeat the ledger and rendering independently for each card. Do not merge distinct decisions merely to reduce the number of files.
 
 ### 4. Validate before preview
 
-After writing the proposed draft and its confirmed relationships, run the validator named by the current repository contract against the draft/corpus. Fix every draft-caused mechanical failure, including exact inline-array syntax, and rerun until it exits `0`. Never preview an invalid draft. If validation is unavailable, remains nonzero, or exposes only out-of-scope existing failures, stop with the exact output; do not edit unrelated files or ask for acceptance.
+After writing the proposed draft or batch and its confirmed relationships, run the validator named by the current repository contract against the draft/corpus. Fix every draft-caused mechanical failure, including exact inline-array syntax, and rerun until it exits `0`. Never preview an invalid draft. If validation is unavailable, remains nonzero, or exposes only out-of-scope existing failures, stop with the exact output; do not edit unrelated files or ask for acceptance.
 
-### 5. Preview verbatim and confirm sequentially
+### 5. Apply adaptive confirmation
 
-Only after pre-preview validation exits `0`, show the entire draft file verbatim（逐字） in one fenced code block（圍欄程式碼區塊）, from the opening `---` through the final body line. Never replace any content with “Body complete,” an ellipsis, a summary, or omitted sections.
+A prior same-session confirmation satisfies exact-draft acceptance without another preview or question only when every condition below is true:
 
-Use separate questions and wait for a separate user turn（使用者回合） after each applicable gate:
+1. The confirmation immediately follows a concrete, bounded semantics（語意） block and explicitly accepts it.
+2. Each draft is a mechanical projection of that block and adds no new background, alternative, rationale, consequence, outcome, metric, relationship, or operational requirement.
+3. The persisted sources pair the concrete bounded semantics block with the human assent; generic assent is not the only durable evidence.
+4. No source requires sensitive-redaction safety review.
 
-1. **Gate 1（關卡一） — exact draft acceptance:** ask only whether the displayed exact draft is accepted for formal landing. Make no formal change before an explicit yes.
-2. **Gate 2 — sensitive-redaction safety:** only after Gate 1 passes, and only for sensitive sources, ask separately whether the displayed redaction and retained provenance are safe. Make no formal change before an explicit yes.
+When all four conditions hold, validate the proposed draft or batch, land it, validate the formal corpus, and continue the user's active task in the same turn. Do not ask for another exact-draft confirmation.
 
-Silence, pressure to skip questions, and an earlier general request to formalize satisfy neither gate.
+Otherwise, only after pre-preview validation exits `0`, show every complete draft verbatim（逐字） in one or more fenced code blocks（圍欄程式碼區塊）, from the opening `---` through the final body line. Never replace content with an ellipsis or summary. When multiple drafts form one batch, clearly label each card; one acceptance may accept the entire batch or an explicit subset.
 
-If Gate 1 or Gate 2 is rejected, immediately remove only the proposed draft created by this run; leave the old card, `INDEX.md`, and every unrelated file byte-for-byte unchanged. Show `git status --short` proving the rejected draft and its locator are no longer present, then stop. If the user requests revision instead of acceptance, remove the rejected version first, rebuild only from the newly confirmed facts, rerun validation, and restart both applicable gates from the full preview. Never leave rejected sensitive content or provenance on disk between attempts.
+For sensitive sources, ask separately whether the displayed redaction and retained provenance are safe after exact-draft acceptance. Make no formal change before that sensitive-redaction safety confirmation.
 
-### 6. Land, validate, then ask about commit
+Silence, pressure to skip questions, and a general request that does not accept concrete bounded semantics satisfy no confirmation requirement.
+
+If a draft is rejected, immediately remove only that rejected proposed draft; leave accepted batch members, old cards, `INDEX.md`, and unrelated files byte-for-byte unchanged. Show `git status --short` proving the rejected draft and its locator are gone. If the user requests revision, remove the rejected version first, rebuild only from newly confirmed facts, rerun validation, and repeat the applicable review. Never leave rejected sensitive content or provenance on disk between attempts.
+
+### 6. Land and validate without a standalone commit gate
 
 After all applicable gates pass, change the new card to `active`, move it out of `_draft/`, add exactly one `./<id>.md` index row, and—when superseding—change only the old card's status. Preserve the old accepted body byte-for-byte.
 
 Run the repository validator again after formal landing. On a nonzero result, stop, report the exact failure, keep all changes uncommitted, and do not ask about commit. On exit `0`, review the complete diff（差異） and prove unrelated work is excluded.
 
-Only then start **Gate 3 — commit authorization** in a new, separate question: ask whether to commit exactly the new card, the necessary old-card status change, and `docs/decisions/INDEX.md`. Never combine Gate 3 with draft acceptance or sensitive-redaction confirmation, and never treat an earlier commit demand as this post-validation authorization.
-
-If Gate 3 passes, commit only that exact scope. Never commit or push（推送） automatically, include unrelated files, or push as part of this workflow.
+Leave the landed decision changes uncommitted by default and continue the user's active task. Do not interrupt that task with a standalone commit-authorization question. If the user already authorized a commit for the encompassing completed task, include only the new cards, necessary old-card status changes, and exact `docs/decisions/INDEX.md` hunks after final verification. Otherwise report the uncommitted decision files in the task's normal final delivery. Never commit unrelated files or push（推送） automatically.

@@ -43,7 +43,7 @@ test('publishes matching Claude Code and Codex manifests', () => {
 
   assert.equal(claude.name, 'decision-wiki');
   assert.equal(codex.name, 'decision-wiki');
-  assert.equal(claude.version, '1.0.1');
+  assert.equal(claude.version, '1.0.2');
   assert.equal(codex.version, claude.version);
   assert.deepEqual(claude.author, { name: 'df-haha' });
   assert.deepEqual(codex.author, { name: 'df-haha' });
@@ -61,7 +61,7 @@ test('registers exactly one entry in each marketplace', () => {
 
   assert.equal(claudeEntries.length, 1);
   assert.equal(claudeEntries[0].source, './plugins/decision-wiki');
-  assert.equal(claudeEntries[0].version, '1.0.1');
+  assert.equal(claudeEntries[0].version, '1.0.2');
   assert.equal(claudeEntries[0].category, 'development');
 
   assert.equal(codexEntries.length, 1);
@@ -130,6 +130,27 @@ test('makes NOT_SETTLED a four-line-only terminal response', () => {
     saveDecision,
     /Do not add a preface, code fence, explanation, rationale, next step, or trailing text\./,
   );
+});
+
+test('supports adaptive confirmation and batch landing without a standalone commit gate', () => {
+  const saveDecision = read('plugins/decision-wiki/skills/save-decision/SKILL.md');
+
+  assert.match(saveDecision, /same-session confirmation/);
+  assert.match(saveDecision, /multiple settled decisions.*one batch/s);
+  assert.match(saveDecision, /one decision per card/);
+  assert.match(saveDecision, /one acceptance.*entire batch/s);
+  assert.match(saveDecision, /Leave the landed decision changes uncommitted by default/);
+  assert.match(saveDecision, /Do not interrupt.*standalone commit-authorization question/s);
+  assert.doesNotMatch(saveDecision, /Gate 3/);
+});
+
+test('keeps high-risk review and warns when provenance is too weak', () => {
+  const saveDecision = read('plugins/decision-wiki/skills/save-decision/SKILL.md');
+
+  assert.match(saveDecision, /sensitive-redaction safety/);
+  assert.match(saveDecision, /SOURCE_EVIDENCE_WEAK/);
+  assert.match(saveDecision, /generic assent.*must not be the sole source/s);
+  assert.match(saveDecision, /pair it with the concrete bounded semantics block/is);
 });
 
 test('documents both hosts and both skills', () => {
