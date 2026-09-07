@@ -388,7 +388,8 @@ def _read_lines(path: Path) -> list:
         with zipfile.ZipFile(path) as z:
             xml = z.read("word/document.xml").decode("utf-8", "ignore")
         return [unescape("".join(W_T_RE.findall(p))) for p in W_P_RE.findall(xml)]
-    return path.read_text(encoding="utf-8").splitlines()
+    # 非 UTF-8（如 Big5 抓取頁）以 replace 解碼：不中斷、亂碼也不會誤配中文關鍵字
+    return path.read_text(encoding="utf-8", errors="replace").splitlines()
 
 
 def _hint(line: str, term: str, pos: int) -> str:
@@ -472,11 +473,13 @@ def resurrect_scan(repo_root: Path, extra_targets: list) -> list:
             if t:
                 terms.append((row.id, t))
     hits = []
+    if not terms:
+        return hits  # 沒有打掉項就沒有掃描標的，不必讀檔
     for f in _scan_targets(repo_root, extra_targets):
         file_display = _display_path(f, repo_root)
         try:
             lines = _read_lines(f)
-        except (UnicodeDecodeError, zipfile.BadZipFile, KeyError, OSError) as e:
+        except (zipfile.BadZipFile, KeyError, OSError) as e:
             # 讀不了的檔以命中形式回報（term 標「讀取失敗」），不讓整次掃描中斷
             hits.append(Hit("-", "讀取失敗", file_display, 0, f"{type(e).__name__}: {e}", "疑似"))
             continue

@@ -549,8 +549,18 @@ class ScanHardeningTests(unittest.TestCase):
             (repo / "草稿" / "壞簡報.pptx").write_bytes(b"not a zip")
             hits = lc.resurrect_scan(repo, [Path("草稿")])
             failed = sorted(h.file for h in hits if h.term == "讀取失敗")
-            self.assertEqual(failed, sorted(["草稿/壞簡報.pptx", "草稿/壞檔.md"]))
+            self.assertEqual(failed, ["草稿/壞簡報.pptx"])  # 非 UTF-8 文字檔改以 replace 解碼，不再報失敗
+            self.assertFalse(any(h.file == "草稿/壞檔.md" for h in hits))
             self.assertTrue(any(h.term == "年約" for h in hits))
+
+    def test_no_rejected_rulings_skips_reading(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            shutil.copytree(FX / "resurrect", repo)
+            index = repo / "docs" / "裁決帳本.md"
+            index.write_text(index.read_text(encoding="utf-8").replace("| 打掉 |", "| 採用 |"), encoding="utf-8")
+            (repo / "草稿" / "壞簡報.pptx").write_bytes(b"not a zip")
+            self.assertEqual(lc.resurrect_scan(repo, [Path("草稿")]), [])
 
 
 class DirectoryWhitelistTests(unittest.TestCase):
