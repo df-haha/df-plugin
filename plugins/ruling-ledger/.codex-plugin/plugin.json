@@ -1,0 +1,33 @@
+{
+  "name": "ruling-ledger",
+  "version": "1.0.0",
+  "description": "Ruling ledger: per-repo record of adopted/rejected/pending stances, with a resurrection scan over md/pptx/docx so rejected ideas do not come back in later sessions.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "ruling",
+    "ledger",
+    "decision",
+    "resurrection"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Ruling Ledger",
+    "shortDescription": "Record stance rulings and scan for resurrected rejected ideas",
+    "longDescription": "Ruling ledger: per-repo record of adopted/rejected/pending stances, with a resurrection scan over md/pptx/docx so rejected ideas do not come back in later sessions.",
+    "developerName": "df-haha",
+    "category": "Development",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "/ledger init --dry-run",
+      "/ledger check",
+      "把這條記為打掉"
+    ],
+    "brandColor": "#B45309"
+  }
+}
