@@ -1,6 +1,6 @@
 {
   "name": "ruling-ledger",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Ruling ledger: per-repo record of adopted/rejected/pending stances, with a resurrection scan over md/pptx/docx so rejected ideas do not come back in later sessions.",
   "author": {
     "name": "df-haha"
