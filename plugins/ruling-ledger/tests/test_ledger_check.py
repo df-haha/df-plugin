@@ -549,8 +549,50 @@ class ScanHardeningTests(unittest.TestCase):
             (repo / "草稿" / "壞簡報.pptx").write_bytes(b"not a zip")
             hits = lc.resurrect_scan(repo, [Path("草稿")])
             failed = sorted(h.file for h in hits if h.term == "讀取失敗")
-            self.assertEqual(failed, sorted(["草稿/壞簡報.pptx", "草稿/壞檔.md"]))
+            self.assertEqual(failed, ["草稿/壞簡報.pptx"])  # 非 UTF-8 文字檔改以 replace 解碼，不再報失敗
+            self.assertFalse(any(h.file == "草稿/壞檔.md" for h in hits))
             self.assertTrue(any(h.term == "年約" for h in hits))
+
+    def test_no_rejected_rulings_skips_reading(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            shutil.copytree(FX / "resurrect", repo)
+            index = repo / "docs" / "裁決帳本.md"
+            index.write_text(index.read_text(encoding="utf-8").replace("| 打掉 |", "| 採用 |"), encoding="utf-8")
+            (repo / "草稿" / "壞簡報.pptx").write_bytes(b"not a zip")
+            self.assertEqual(lc.resurrect_scan(repo, [Path("草稿")]), [])
+
+
+class DirectoryWhitelistTests(unittest.TestCase):
+    """白名單列可填目錄或 `.`；遞迴掃描並略過 SKIP_DIRS。"""
+
+    def _repo(self, tmp: Path, whitelist_path: str) -> Path:
+        repo = tmp / "repo"
+        shutil.copytree(FX / "resurrect", repo)
+        index = repo / "docs" / "裁決帳本.md"
+        index.write_text(index.read_text(encoding="utf-8").replace("草稿/報告.md", whitelist_path), encoding="utf-8")
+        (repo / "草稿" / "子目錄").mkdir()
+        (repo / "草稿" / "子目錄" / "深層.md").write_text("深層也談年約\n", encoding="utf-8")
+        (repo / "node_modules").mkdir()
+        (repo / "node_modules" / "套件.md").write_text("套件裡的年約不該被掃\n", encoding="utf-8")
+        return repo
+
+    def test_directory_row_scans_recursively(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._repo(Path(tmp), "草稿")
+            files = {h.file for h in lc.resurrect_scan(repo, [])}
+            self.assertIn("草稿/報告.md", files)
+            self.assertIn("草稿/子目錄/深層.md", files)
+            self.assertEqual(lc.check_paths(repo), [])
+
+    def test_dot_row_scans_whole_repo_and_skips_generated_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._repo(Path(tmp), ".")
+            files = {h.file for h in lc.resurrect_scan(repo, [])}
+            self.assertIn("草稿/子目錄/深層.md", files)
+            self.assertFalse(any(f.startswith("node_modules") for f in files))
+            self.assertFalse(any(f.startswith("docs/裁決") for f in files))
+            self.assertEqual(lc.check_paths(repo), [])
 
 
 if __name__ == "__main__":

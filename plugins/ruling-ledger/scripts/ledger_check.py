@@ -30,6 +30,8 @@ REF_ID_RE = re.compile(r"R-\d{4}")
 REF_WORD_RE = re.compile(r"(打掉|否決|翻案|已)")
 NEG_WINDOW = 12
 SCAN_EXTS = {".md", ".txt", ".html", ".pptx", ".docx"}
+# 目錄型白名單／--scan 遞迴時略過的目錄名（產生物、相依套件、版控）
+SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "htmlcov", "dist", "build", ".next", ".claude"}
 SLIDE_RE = re.compile(r"^ppt/slides/slide(\d+)\.xml$")
 A_T_RE = re.compile(r"<a:t[^>]*>(.*?)</a:t>", re.S)
 W_P_RE = re.compile(r"<w:p(?:\s[^>]*)?/>|<w:p[ >].*?</w:p>", re.S)
@@ -386,7 +388,8 @@ def _read_lines(path: Path) -> list:
         with zipfile.ZipFile(path) as z:
             xml = z.read("word/document.xml").decode("utf-8", "ignore")
         return [unescape("".join(W_T_RE.findall(p))) for p in W_P_RE.findall(xml)]
-    return path.read_text(encoding="utf-8").splitlines()
+    # 非 UTF-8（如 Big5 抓取頁）以 replace 解碼：不中斷、亂碼也不會誤配中文關鍵字
+    return path.read_text(encoding="utf-8", errors="replace").splitlines()
 
 
 def _hint(line: str, term: str, pos: int) -> str:
@@ -399,8 +402,22 @@ def _hint(line: str, term: str, pos: int) -> str:
     return "疑似"
 
 
+def _expand(p: Path) -> list:
+    """檔案原樣回傳；目錄遞迴展開成 SCAN_EXTS 檔案，略過 SKIP_DIRS。"""
+    if not p.is_dir():
+        return [p]
+    out = []
+    for q in sorted(p.rglob("*")):
+        if any(part in SKIP_DIRS for part in q.relative_to(p).parts):
+            continue
+        if q.is_file() and q.suffix.lower() in SCAN_EXTS:
+            out.append(q)
+    return out
+
+
 def _scan_targets(repo_root: Path, extra: list) -> list:
-    """白名單路徑套用與 check_paths 相同的越界守門：解析後不在 repo 內的一律不掃。"""
+    """白名單路徑套用與 check_paths 相同的越界守門：解析後不在 repo 內的一律不掃。
+    白名單列與 --scan 都可以是目錄（含 `.` 代表整個 repo）。"""
     repo_root = Path(repo_root).resolve()
     idx = parse_index(repo_root)
     targets = []
@@ -409,17 +426,14 @@ def _scan_targets(repo_root: Path, extra: list) -> list:
             continue
         target, inside = _resolved_inside(repo_root, w.path)
         if inside:
-            targets.append(target)
+            targets.extend(_expand(target))
     claude_md = repo_root / "CLAUDE.md"
     if claude_md.exists():
         targets.append(claude_md)
     for p in extra:
         p = Path(p)
         p = p if p.is_absolute() else repo_root / p
-        if p.is_dir():
-            targets.extend(q for q in p.rglob("*") if q.suffix.lower() in SCAN_EXTS)
-        else:
-            targets.append(p)
+        targets.extend(_expand(p))
     index_abs = (repo_root / INDEX_REL).resolve()
     detail_abs = (repo_root / DETAIL_DIR_REL).resolve()
     out, seen = [], set()
@@ -459,11 +473,13 @@ def resurrect_scan(repo_root: Path, extra_targets: list) -> list:
             if t:
                 terms.append((row.id, t))
     hits = []
+    if not terms:
+        return hits  # 沒有打掉項就沒有掃描標的，不必讀檔
     for f in _scan_targets(repo_root, extra_targets):
         file_display = _display_path(f, repo_root)
         try:
             lines = _read_lines(f)
-        except (UnicodeDecodeError, zipfile.BadZipFile, KeyError, OSError) as e:
+        except (zipfile.BadZipFile, KeyError, OSError) as e:
             # 讀不了的檔以命中形式回報（term 標「讀取失敗」），不讓整次掃描中斷
             hits.append(Hit("-", "讀取失敗", file_display, 0, f"{type(e).__name__}: {e}", "疑似"))
             continue
