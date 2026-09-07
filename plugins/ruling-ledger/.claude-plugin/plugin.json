@@ -1,0 +1,8 @@
+{
+  "name": "ruling-ledger",
+  "version": "1.0.0",
+  "description": "裁決帳本 — 每個 repo 一本帳本記錄立場裁決（採用／打掉／待裁），索引永遠載入、詳情按關鍵字載入，並掃描 md/pptx/docx 抓「被打掉的概念復活」",
+  "author": {
+    "name": "df-haha"
+  }
+}
