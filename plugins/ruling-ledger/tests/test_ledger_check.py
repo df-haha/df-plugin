@@ -520,5 +520,38 @@ class ExitCodeTests(unittest.TestCase):
         self.assertEqual(lc.main([str(FX / "ok")]), 0)
 
 
+class ScanHardeningTests(unittest.TestCase):
+    """review 2026-09-07 追加：白名單越界不掃、壞檔不中斷。"""
+
+    def _repo_with_whitelist(self, tmp: Path, whitelist_path: str) -> Path:
+        repo = tmp / "repo"
+        shutil.copytree(FX / "resurrect", repo)
+        index = repo / "docs" / "裁決帳本.md"
+        text = index.read_text(encoding="utf-8").replace("草稿/報告.md", whitelist_path)
+        index.write_text(text, encoding="utf-8")
+        return repo
+
+    def test_whitelist_traversal_is_not_scanned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            outside = tmp / "outside.md"
+            outside.write_text("這裡在講年約框架合約\n", encoding="utf-8")
+            repo = self._repo_with_whitelist(tmp, "../outside.md")
+            hits = lc.resurrect_scan(repo, [])
+            self.assertEqual(hits, [])
+
+    def test_unreadable_file_reported_not_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            repo = tmp / "repo"
+            shutil.copytree(FX / "resurrect", repo)
+            (repo / "草稿" / "壞檔.md").write_bytes(b"\xff\xfe\x00bad")
+            (repo / "草稿" / "壞簡報.pptx").write_bytes(b"not a zip")
+            hits = lc.resurrect_scan(repo, [Path("草稿")])
+            failed = sorted(h.file for h in hits if h.term == "讀取失敗")
+            self.assertEqual(failed, sorted(["草稿/壞簡報.pptx", "草稿/壞檔.md"]))
+            self.assertTrue(any(h.term == "年約" for h in hits))
+
+
 if __name__ == "__main__":
     unittest.main()

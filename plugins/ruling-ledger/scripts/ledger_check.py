@@ -400,8 +400,16 @@ def _hint(line: str, term: str, pos: int) -> str:
 
 
 def _scan_targets(repo_root: Path, extra: list) -> list:
+    """白名單路徑套用與 check_paths 相同的越界守門：解析後不在 repo 內的一律不掃。"""
+    repo_root = Path(repo_root).resolve()
     idx = parse_index(repo_root)
-    targets = [repo_root / w.path for w in idx.whitelist]
+    targets = []
+    for w in idx.whitelist:
+        if ".." in Path(w.path).parts:
+            continue
+        target, inside = _resolved_inside(repo_root, w.path)
+        if inside:
+            targets.append(target)
     claude_md = repo_root / "CLAUDE.md"
     if claude_md.exists():
         targets.append(claude_md)
@@ -453,7 +461,13 @@ def resurrect_scan(repo_root: Path, extra_targets: list) -> list:
     hits = []
     for f in _scan_targets(repo_root, extra_targets):
         file_display = _display_path(f, repo_root)
-        for line_no, line in enumerate(_read_lines(f), 1):
+        try:
+            lines = _read_lines(f)
+        except (UnicodeDecodeError, zipfile.BadZipFile, KeyError, OSError) as e:
+            # 讀不了的檔以命中形式回報（term 標「讀取失敗」），不讓整次掃描中斷
+            hits.append(Hit("-", "讀取失敗", file_display, 0, f"{type(e).__name__}: {e}", "疑似"))
+            continue
+        for line_no, line in enumerate(lines, 1):
             for rid, term in terms:
                 start = 0
                 while True:

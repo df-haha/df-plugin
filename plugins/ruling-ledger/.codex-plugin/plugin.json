@@ -24,8 +24,8 @@
       "Write"
     ],
     "defaultPrompt": [
-      "/ledger init --dry-run",
-      "/ledger check",
+      "用 ruling-ledger 在這個 repository 建立裁決帳本（先 dry-run）",
+      "跑裁決帳本檢查，找出被打掉概念的復活",
       "把這條記為打掉"
     ],
     "brandColor": "#B45309"
