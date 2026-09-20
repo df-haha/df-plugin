@@ -1,0 +1,19 @@
+representative_id: exchange-a
+owner:
+  telegram_chat_id: 123456789
+  owner_ids:
+    - "123456789"
+peers:
+  exchange-b:
+    telegram_username: "@peer_bot"
+    numeric_bot_id: 1234567890
+    revision: 1
+    active: true
+executor_registrations:
+  exec:local: 1
+authorized_repositories: []
+intake_agents: []
+transport:
+  max_message_bytes: 3500
+  ttl_seconds: 1800
+  min_send_interval_seconds: 3

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dafeng.example/schemas/hermes/standing-analysis-policy.schema.json",
+  "title": "Standing Analysis Policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["policy_id", "owner_id", "revision", "status", "intake_agent_id", "repository_id", "repository_visibility", "executor_registration_ref", "capability", "approved_at"],
+  "properties": {
+    "policy_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "owner_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["active", "disabled", "revoked"]},
+    "intake_agent_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "repository_id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "repository_visibility": {"const": "private"},
+    "executor_registration_ref": {"type": "string", "minLength": 1, "maxLength": 128},
+    "capability": {"const": "initial_issue_analysis_non_mutating"},
+    "approved_at": {"type": "string", "format": "date-time"},
+    "disabled_at": {"type": ["string", "null"], "format": "date-time"},
+    "revoked_at": {"type": ["string", "null"], "format": "date-time"}
+  }
+}

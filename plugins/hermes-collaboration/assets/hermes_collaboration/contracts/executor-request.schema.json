@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dafeng.example/schemas/hermes/executor-request.schema.json",
+  "title": "Executor Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["job_id", "case_id", "capability", "executor", "executor_registration_ref", "repository", "authority_ref", "scope", "acceptance_conditions", "prohibited_actions", "issued_at"],
+  "properties": {
+    "job_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "case_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "capability": {"enum": ["issue_analysis", "reanalysis", "implementation", "correction", "pr_review"]},
+    "executor": {"enum": ["claude_code", "codex"]},
+    "repository": {"type": "object", "additionalProperties": false, "required": ["provider", "repository_id", "visibility"], "properties": {"provider": {"const": "github"}, "repository_id": {"type": "string", "minLength": 1, "maxLength": 200}, "visibility": {"const": "private"}}},
+    "authority_ref": {"type": "string", "minLength": 1, "maxLength": 128},
+    "source_trace_id": {"type": ["string", "null"], "maxLength": 128},
+    "executor_registration_ref": {"type": "string", "minLength": 1, "maxLength": 128},
+    "producing_job_ref": {"type": ["string", "null"], "maxLength": 128},
+    "proposal_ref": {"type": ["string", "null"], "maxLength": 128},
+    "base_revision": {"type": ["string", "null"], "maxLength": 128},
+    "candidate_revision": {"type": ["string", "null"], "maxLength": 128},
+    "scope": {"type": "array", "minItems": 1, "maxItems": 30, "items": {"type": "string", "minLength": 1, "maxLength": 500}},
+    "acceptance_conditions": {"type": "array", "minItems": 1, "maxItems": 30, "items": {"type": "string", "minLength": 1, "maxLength": 500}},
+    "prohibited_actions": {"type": "array", "minItems": 1, "maxItems": 30, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 200}},
+    "context_artifact_refs": {"type": "array", "maxItems": 30, "uniqueItems": true, "items": {"type": "string", "maxLength": 500}},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": ["string", "null"], "format": "date-time"}
+  }
+}

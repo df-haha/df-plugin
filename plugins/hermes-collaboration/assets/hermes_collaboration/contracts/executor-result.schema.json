@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dafeng.example/schemas/hermes/executor-result.schema.json",
+  "title": "Executor Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["result_id", "job_id", "case_id", "status", "authority_ref", "summary", "observed_facts", "assumptions", "risks", "questions", "material_deviations", "rollback_notes", "findings", "mutations", "verification", "artifacts", "completed_at"],
+  "properties": {
+    "result_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "job_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "case_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "status": {"enum": ["blocked", "uncertain", "failed", "review_ready", "completed", "cancelled"]},
+    "authority_ref": {"type": "string", "minLength": 1, "maxLength": 128},
+    "base_revision": {"type": ["string", "null"], "maxLength": 128},
+    "candidate_revision": {"type": ["string", "null"], "maxLength": 128},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "observed_facts": {"$ref": "#/$defs/boundedStrings"},
+    "assumptions": {"$ref": "#/$defs/boundedStrings"},
+    "risks": {"$ref": "#/$defs/boundedStrings"},
+    "questions": {"$ref": "#/$defs/boundedStrings"},
+    "material_deviations": {"$ref": "#/$defs/boundedStrings"},
+    "rollback_notes": {"$ref": "#/$defs/boundedStrings"},
+    "findings": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["finding_id", "severity", "summary", "evidence_refs", "affected_scope", "recommendation"],
+        "properties": {
+          "finding_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "severity": {"enum": ["critical", "important", "minor"]},
+          "summary": {"type": "string", "minLength": 1, "maxLength": 1000},
+          "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string", "maxLength": 500}},
+          "affected_scope": {"type": "array", "minItems": 1, "maxItems": 30, "items": {"type": "string", "maxLength": 500}},
+          "recommendation": {"type": "string", "minLength": 1, "maxLength": 1000}
+        }
+      }
+    },
+    "mutations": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "target", "outcome"],
+        "properties": {
+          "kind": {"enum": ["file", "branch", "commit", "issue", "comment", "draft_pr", "merge"]},
+          "target": {"type": "string", "maxLength": 500},
+          "outcome": {"enum": ["none", "confirmed", "uncertain", "rejected"]}
+        }
+      }
+    },
+    "verification": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "exit_code", "summary"],
+        "properties": {
+          "command": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "items": {"type": "string", "maxLength": 500}
+          },
+          "exit_code": {"type": "integer"},
+          "summary": {"type": "string", "maxLength": 1000}
+        }
+      }
+    },
+    "artifacts": {"type": "array", "maxItems": 50, "items": {"type": "string", "maxLength": 500}},
+    "completed_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "boundedStrings": {"type": "array", "maxItems": 50, "items": {"type": "string", "maxLength": 1000}}
+  }
+}

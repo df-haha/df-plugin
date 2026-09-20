@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dafeng.example/schemas/hermes/peer-delivery.schema.json",
+  "title": "Automatic Case Peer Delivery",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["delivery_id", "delivery_type", "sender_representative_id", "recipient_representative_id", "case_id", "created_at", "expires_at", "content_hash", "payload"],
+  "properties": {
+    "delivery_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "delivery_type": {"enum": ["case_event", "content_fragment", "receipt"]},
+    "sender_representative_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "recipient_representative_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "case_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "created_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "payload": {"type": "object", "maxProperties": 20},
+    "fragment": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["manifest_id", "index", "count", "manifest_hash", "encoded_content"],
+      "properties": {
+        "manifest_id": {"type": "string", "minLength": 8, "maxLength": 128},
+        "index": {"type": "integer", "minimum": 0, "maximum": 99},
+        "count": {"type": "integer", "minimum": 1, "maximum": 100},
+        "manifest_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "encoded_content": {"type": "string", "maxLength": 2600}
+      }
+    }
+  }
+}

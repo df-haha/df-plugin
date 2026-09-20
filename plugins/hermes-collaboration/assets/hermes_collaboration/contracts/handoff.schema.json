@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dafeng.example/schemas/hermes/handoff.schema.json",
+  "title": "Structured Handoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["handoff_id", "sender_representative_id", "recipient_representative_id", "source_executor_registration_ref", "provenance", "facts", "approved_decisions", "assumptions", "open_questions", "requested_action", "scope_limits", "evidence_refs", "expected_outcome", "expires_at"],
+  "properties": {
+    "handoff_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "sender_representative_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "recipient_representative_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "source_executor_registration_ref": {"type": "string", "minLength": 1, "maxLength": 128},
+    "provenance": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "facts": {"$ref": "#/$defs/list"},
+    "approved_decisions": {"$ref": "#/$defs/list"},
+    "assumptions": {"$ref": "#/$defs/list"},
+    "open_questions": {"$ref": "#/$defs/list"},
+    "requested_action": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "scope_limits": {"$ref": "#/$defs/list"},
+    "evidence_refs": {"type": "array", "maxItems": 30, "items": {"type": "string", "maxLength": 500}},
+    "expected_outcome": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "repository_hint": {"type": ["string", "null"], "maxLength": 200},
+    "expires_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {"list": {"type": "array", "maxItems": 30, "items": {"type": "string", "maxLength": 1000}}}
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hermes Collaboration Setup"
+  short_description: "Install and configure owner-gated Hermes collaboration"
+  default_prompt: "Set up or upgrade Hermes Collaboration safely for this Hermes profile."

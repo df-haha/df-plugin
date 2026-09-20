@@ -158,6 +158,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/ruling-ledger",
       "category": "development"
+    },
+    {
+      "name": "hermes-collaboration",
+      "description": "Hermes 雙 Representative 持久協作：Owner 授權閘門、GitHub issue/PR 生命週期、Claude Code／Codex 有界執行與可恢復案件狀態",
+      "version": "0.1.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/hermes-collaboration",
+      "category": "development"
     }
   ]
 }

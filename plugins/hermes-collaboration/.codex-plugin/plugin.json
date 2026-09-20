@@ -1,0 +1,37 @@
+{
+  "name": "hermes-collaboration",
+  "version": "0.1.0",
+  "description": "Durable, authority-gated collaboration between two Hermes Representatives with GitHub and Claude Code or Codex execution.",
+  "author": {
+    "name": "df-haha",
+    "url": "https://github.com/df-haha"
+  },
+  "homepage": "https://github.com/df-haha/df-plugin/tree/main/plugins/hermes-collaboration",
+  "repository": "https://github.com/df-haha/df-plugin",
+  "keywords": [
+    "hermes",
+    "collaboration",
+    "agent-to-agent",
+    "github",
+    "human-in-the-loop"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Hermes Collaboration",
+    "shortDescription": "Run durable, owner-gated engineering cases across two Hermes agents.",
+    "longDescription": "Installs and operates the Hermes Collaboration runtime: two equal Representatives exchange durable cases, request explicit Owner decisions, route bounded work to Claude Code or Codex, and track GitHub issue, review, correction, and merge stages.",
+    "developerName": "df-haha",
+    "category": "Development",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Set up Hermes Collaboration for this user profile",
+      "Explain the current case and the decision it needs",
+      "Diagnose why this collaboration case is blocked"
+    ],
+    "brandColor": "#5B5BD6"
+  }
+}

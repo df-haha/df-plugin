@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dafeng.example/schemas/hermes/case-event.schema.json",
+  "title": "Immutable Case Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "case_id", "event_type", "origin", "actor_category", "authority_ref", "occurred_at", "predecessor_event_ids", "payload", "content_hash"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "event_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"},
+    "case_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"},
+    "event_type": {
+      "enum": ["case_admitted", "handoff_recorded", "duplicate_assessment_recorded", "issue_linked", "predecessor_attached", "owner_decision_recorded", "policy_recorded", "policy_revoked", "analysis_queued", "analysis_started", "analysis_terminal", "question_recorded", "answer_recorded", "proposal_recorded", "grant_recorded", "job_state_changed", "artifact_recorded", "review_recorded", "discussion_started", "discussion_turn_recorded", "discussion_paused", "discussion_stopped", "merge_recorded", "attention_raised", "case_closed"]
+    },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["representative_id", "sequence"],
+      "properties": {
+        "representative_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "sequence": {"type": "integer", "minimum": 1}
+      }
+    },
+    "actor_category": {"enum": ["owner", "representative", "peer", "executor", "intake_agent", "github", "system"]},
+    "authority_ref": {"type": "string", "minLength": 1, "maxLength": 128},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "source_trace_id": {"type": ["string", "null"], "maxLength": 128},
+    "predecessor_event_ids": {"type": "array", "maxItems": 20, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}},
+    "payload": {"type": "object", "maxProperties": 40},
+    "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

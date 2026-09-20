@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dafeng.example/schemas/hermes/case-view.schema.json",
+  "title": "Authorized Case View",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["case_id", "view_kind", "state", "responsible_party", "next_action", "decisions", "artifacts", "attention", "entries", "updated_at"],
+  "properties": {
+    "case_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "view_kind": {"enum": ["summary", "original_peer", "transcript"]},
+    "state": {"enum": ["received", "awaiting_owner", "analyzing", "awaiting_decision", "queued", "running", "blocked", "uncertain", "review_ready", "under_review", "awaiting_correction", "awaiting_merge", "completed", "rejected", "cancelled", "expired", "closed"]},
+    "responsible_party": {"type": "string", "minLength": 1, "maxLength": 128},
+    "blocker": {"type": ["string", "null"], "maxLength": 1000},
+    "next_action": {"type": ["string", "null"], "maxLength": 1000},
+    "decisions": {"type": "array", "maxItems": 100, "items": {"type": "object", "required": ["decision_id", "type", "summary"], "properties": {"decision_id": {"type": "string"}, "type": {"type": "string"}, "summary": {"type": "string", "maxLength": 1000}}, "additionalProperties": false}},
+    "artifacts": {"type": "array", "maxItems": 100, "items": {"type": "object", "required": ["artifact_id", "type", "reference"], "properties": {"artifact_id": {"type": "string"}, "type": {"enum": ["issue", "branch", "commit", "draft_pr", "review", "evidence"]}, "reference": {"type": "string", "maxLength": 500}}, "additionalProperties": false}},
+    "attention": {"type": "array", "maxItems": 100, "items": {"type": "object", "required": ["reason", "severity"], "properties": {"reason": {"type": "string", "maxLength": 500}, "severity": {"enum": ["info", "warning", "critical"]}}, "additionalProperties": false}},
+    "entries": {"type": "array", "maxItems": 100, "items": {"type": "object", "additionalProperties": false, "required": ["entry_id", "provenance", "content_kind", "content", "occurred_at"], "properties": {"entry_id": {"type": "string", "maxLength": 128}, "provenance": {"enum": ["owner", "peer", "representative", "executor", "intake_agent", "github", "generated_summary", "system"]}, "content_kind": {"enum": ["verbatim", "decision", "question", "answer", "evidence", "discussion_turn", "summary"]}, "content": {"type": "string", "maxLength": 4000}, "occurred_at": {"type": "string", "format": "date-time"}}}},
+    "next_cursor": {"type": ["string", "null"], "maxLength": 256},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}

@@ -30,7 +30,7 @@ claude plugin install decision-wiki
 codex plugin marketplace add ./
 ```
 
-然後在 Codex CLI 內開 `/plugins`，從 `df-haha Plugins` 安裝任一 plugin；Codex marketplace 目前列出 19 個 plugins。安裝後可在 `/skills` 或以 `$<skill-name>`／自然語言觸發各 skill。`markitdown` 也已補上 Codex skill；它首次使用若未安裝 CLI，會先要求安裝授權。
+然後在 Codex CLI 內開 `/plugins`，從 `df-haha Plugins` 安裝任一 plugin；Codex marketplace 目前列出 20 個 plugins。安裝後可在 `/skills` 或以 `$<skill-name>`／自然語言觸發各 skill。`markitdown` 也已補上 Codex skill；它首次使用若未安裝 CLI，會先要求安裝授權。
 
 ## Insane Review 與 Deep Research
 
@@ -69,3 +69,4 @@ Deep Research 會使用已登入的 ChatGPT 訂閱網頁，不使用 OpenAI API 
 | **pilotfish-parallel** | Codex-only 並行工作程序 — 將 2–3 個互不依賴、路徑不重疊的 repository 工作放進隔離 Git worktree 並行執行，以 fail-closed（失敗即整批停止）方式整合，最後由 fresh verifier（全新上下文驗證器）裁決。 |
 | **codex-image** | 用 Codex CLI 內建 `image_gen` 生圖 — 走 codex 帳號額度，不需額外 OpenAI / Stability API key。含 **codex-image-setup**（跨平台環境偵測：Windows / WSL / linux / darwin，寫 `${CODEX_HOME:-$HOME/.codex}/codex-image.local.md`）、injection-safe 的 Node `spawn` 呼叫（argv + stdin，`shell:false`）、反 code-drawing（禁止 LLM 改用 PIL/matplotlib 重繪）驗收與 chroma-key 去背透明流程。支援 Claude Code 與 Codex。 |
 | **hermes-exchange** | Hermes／Telegram 輕量通知 relay。Hermes 使用者可安裝 bundled runtime；其他 agent/runtime 不必用同一 plugin，只要實作 `HERMES_NOTIFY/1`、sender ID＋username 白名單與「收件只進 owner inbox」安全邊界即可互通。另有預設關閉、綁定固定 repository alias 的 Claude Code／Codex 執行層。 |
+| **hermes-collaboration** | Hermes 雙 Representative 持久協作。以 `HERMES_CASE_V1` 追蹤 handoff、釐清、Owner 決策、issue analysis、implementation、PR review、correction 與 merge；repository mutation 與 merge 各自需要明確授權。內含 reviewed runtime、11 份 schema，以及 setup／operations skills。 |

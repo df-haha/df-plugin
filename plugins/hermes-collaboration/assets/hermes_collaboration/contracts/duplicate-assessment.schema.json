@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dafeng.example/schemas/hermes/duplicate-assessment.schema.json",
+  "title": "Duplicate Assessment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["assessment_id", "source_trace_id", "source_feedback_hash", "repository_id", "assessed_at", "candidates", "recommendation"],
+  "properties": {
+    "assessment_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "source_trace_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "source_feedback_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "repository_id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "assessed_at": {"type": "string", "format": "date-time"},
+    "candidates": {"type": "array", "maxItems": 20, "items": {"type": "object", "additionalProperties": false, "required": ["candidate_ref", "supporting_evidence", "opposing_evidence", "confidence", "recommendation"], "properties": {"candidate_ref": {"type": "string", "maxLength": 500}, "supporting_evidence": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 500}}, "opposing_evidence": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 500}}, "confidence": {"type": "number", "minimum": 0, "maximum": 1}, "recommendation": {"enum": ["possibly_related", "likely_distinct", "owner_review"]}}}},
+    "recommendation": {"enum": ["create_new_issue", "create_and_flag_relation", "request_owner_relationship_decision"]}
+  }
+}

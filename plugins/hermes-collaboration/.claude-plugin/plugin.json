@@ -1,0 +1,8 @@
+{
+  "name": "hermes-collaboration",
+  "version": "0.1.0",
+  "description": "Durable, authority-gated collaboration between two Hermes Representatives with GitHub and Claude Code or Codex execution.",
+  "author": {
+    "name": "df-haha"
+  }
+}

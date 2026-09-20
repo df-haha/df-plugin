@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hermes Collaboration Operations"
+  short_description: "Operate and diagnose durable collaboration cases"
+  default_prompt: "Inspect this Hermes Collaboration case and explain its next authorized action."

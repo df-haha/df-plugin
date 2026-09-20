@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dafeng.example/schemas/hermes/owner-decision.schema.json",
+  "title": "Owner Decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision_id", "case_id", "owner_id", "decision_type", "decision", "target_ref", "target_revision", "terms", "accepted_finding_refs", "issued_at"],
+  "properties": {
+    "decision_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "case_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "owner_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "decision_type": {"enum": ["analysis", "reanalysis", "implementation", "correction", "discussion", "policy", "merge", "pause", "stop", "close"]},
+    "decision": {"enum": ["approve", "reject", "defer", "narrow", "clarify", "pause", "stop", "close", "merge"]},
+    "target_ref": {"type": "string", "minLength": 1, "maxLength": 128},
+    "target_revision": {"type": "integer", "minimum": 1},
+    "terms": {"type": "array", "maxItems": 30, "items": {"type": "string", "maxLength": 500}},
+    "executor_registration_ref": {"type": ["string", "null"], "maxLength": 128},
+    "accepted_finding_refs": {"type": "array", "maxItems": 100, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}},
+    "candidate_revision": {"type": ["string", "null"], "maxLength": 128},
+    "expires_at": {"type": ["string", "null"], "format": "date-time"},
+    "issued_at": {"type": "string", "format": "date-time"}
+  }
+}

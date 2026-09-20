@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dafeng.example/schemas/hermes/discussion-mandate.schema.json",
+  "title": "Discussion Mandate",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mandate_id", "case_id", "owner_id", "objective", "participants", "permitted_actions", "prohibited_commitments", "turn_limit", "time_limit_seconds", "cost_limit", "expires_at", "stop_conditions"],
+  "properties": {
+    "mandate_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "case_id": {"type": "string", "minLength": 8, "maxLength": 128},
+    "owner_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "objective": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "participants": {"type": "array", "minItems": 2, "maxItems": 10, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}},
+    "permitted_actions": {"type": "array", "minItems": 1, "maxItems": 30, "items": {"type": "string", "maxLength": 500}},
+    "prohibited_commitments": {"type": "array", "minItems": 1, "maxItems": 30, "items": {"type": "string", "maxLength": 500}},
+    "turn_limit": {"type": "integer", "minimum": 1, "maximum": 100},
+    "time_limit_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+    "cost_limit": {"type": "number", "exclusiveMinimum": 0},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "stop_conditions": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string", "maxLength": 500}}
+  }
+}

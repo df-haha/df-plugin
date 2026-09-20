@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dafeng.example/schemas/hermes/case-command.schema.json",
+  "title": "Case Command",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command_id", "command_type", "case_id", "actor", "authority", "issued_at", "payload"],
+  "properties": {
+    "command_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"},
+    "command_type": {
+      "enum": ["admit_handoff", "admit_external_feedback", "admit_issue", "attach_predecessor", "record_owner_decision", "record_policy", "revoke_policy", "start_discussion", "record_discussion_turn", "stop_discussion", "submit_executor_result", "close_case"]
+    },
+    "case_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"},
+    "source_trace_id": {"type": ["string", "null"], "maxLength": 128},
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "actor_ref", "representative_id"],
+      "properties": {
+        "category": {"enum": ["owner", "representative", "peer", "executor", "intake_agent", "github"]},
+        "actor_ref": {"type": "string", "minLength": 1, "maxLength": 128},
+        "representative_id": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority_type", "authority_ref", "revision"],
+      "properties": {
+        "authority_type": {"enum": ["peer_trust", "executor_registration", "owner_decision", "standing_analysis_policy", "discussion_mandate", "execution_grant", "merge_decision", "system_admission"]},
+        "authority_ref": {"type": "string", "minLength": 1, "maxLength": 128},
+        "revision": {"type": "integer", "minimum": 1}
+      }
+    },
+    "issued_at": {"type": "string", "format": "date-time"},
+    "idempotency_key": {"type": ["string", "null"], "maxLength": 200},
+    "payload": {"type": "object", "maxProperties": 40}
+  }
+}

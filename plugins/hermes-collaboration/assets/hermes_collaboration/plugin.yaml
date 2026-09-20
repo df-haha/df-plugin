@@ -1,0 +1,23 @@
+name: hermes-collaboration
+version: 0.1.0
+description: "Durable two-Representative Case collaboration with explicit authority gates."
+author: df-haha
+kind: standalone
+platforms:
+  - linux
+provides_tools:
+  - case_submit
+  - case_view
+  - case_list
+  - case_github_event
+  - case_run_work
+provides_hooks:
+  - pre_gateway_dispatch
+  - pre_tool_call
+  - post_tool_call
+requires_env:
+  - TELEGRAM_BOT_TOKEN
+pip_dependencies:
+  - httpx>=0.27
+  - jsonschema>=4.18
+  - PyYAML>=6.0
