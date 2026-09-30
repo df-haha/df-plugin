@@ -40,7 +40,8 @@ RESTORE_VALUE_FLAGS = {
 # Every `codex resume` option that takes a value, so `codex resume [OPTIONS] [SESSION_ID]` can be
 # split without mistaking an option value for the session ID.
 CODEX_RESUME_VALUE_FLAGS = RESTORE_VALUE_FLAGS["codex"] | {
-    "-C", "--cd", "-i", "--image", "--remote", "--remote-auth-token-env"}
+    "-C", "--cd", "--remote", "--remote-auth-token-env"}
+CODEX_RESUME_VARIADIC_FLAGS = {"-i", "--image"}  # `--image <FILE>...` takes every following non-flag token
 # Value flags that accept several values (`--add-dir /a /b`); every following non-flag token is kept.
 RESTORE_VARIADIC_FLAGS = {"claude": {"--add-dir", "--mcp-config"}, "codex": set()}
 # Flags that pick or name a session; restore supplies its own session ID, so these are dropped silently.
@@ -77,14 +78,25 @@ def normalize_path(path: str) -> str:
 
 
 def split_codex_resume(rest: list[str]) -> tuple[str | None, list[str]]:
-    """For argv after `codex resume`, return (positional session ID or None, the remaining args)."""
+    """For argv after `codex resume`, return (positional session ID or None, the remaining args).
+
+    With `--last` the session is picked by recency and a positional is the initial prompt, not an ID.
+    """
+    if "--last" in rest:
+        return None, rest
     i = 0
     while i < len(rest):
         arg = rest[i]
         if not arg.startswith("-"):
             return arg, rest[:i] + rest[i + 1:]
-        takes_value = arg in CODEX_RESUME_VALUE_FLAGS and "=" not in arg
-        i += 2 if takes_value else 1
+        i += 1
+        if "=" in arg:
+            continue
+        if arg in CODEX_RESUME_VARIADIC_FLAGS:
+            while i < len(rest) and not rest[i].startswith("-"):
+                i += 1
+        elif arg in CODEX_RESUME_VALUE_FLAGS:
+            i += 1
     return None, rest
 
 

@@ -32,7 +32,7 @@ class RestoreFlagsTests(unittest.TestCase):
     def test_codex_resume_subcommand_and_flags(self):
         kept, dropped = inv.restore_flags(
             "codex", ["/x/vendor/codex", "resume", "019a-id", "--dangerously-bypass-approvals-and-sandbox",
-                      "-m", "gpt-5", "--last"])
+                      "-m", "gpt-5"])
         self.assertEqual(kept, ["--dangerously-bypass-approvals-and-sandbox", "-m", "gpt-5"])
         self.assertEqual(dropped, [])
 
@@ -108,6 +108,22 @@ class CodexReviewRound2Tests(unittest.TestCase):
             inv.save_snapshot([], out)
             self.assertEqual(stat.S_IMODE(Path(d).stat().st_mode), 0o755)
             self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o600)
+
+
+class CodexReviewRound3Tests(unittest.TestCase):
+    def test_codex_resume_last_with_prompt_has_no_id(self):
+        args = ["/v/vendor/codex", "resume", "--last", "continue fixing tests"]
+        self.assertIsNone(inv.argv_resume_sid(args))
+        kept, dropped = inv.restore_flags("codex", args)
+        self.assertEqual(kept, [])
+        self.assertEqual(dropped, ["continue fixing tests"])
+
+    def test_codex_resume_variadic_image(self):
+        args = ["/v/vendor/codex", "resume", "--image", "a.png", "b.png", "--model", "gpt-5", "019a"]
+        self.assertEqual(inv.argv_resume_sid(args), "019a")
+        kept, dropped = inv.restore_flags("codex", args)
+        self.assertEqual(kept, ["--model", "gpt-5"])
+        self.assertEqual(dropped, ["--image", "a.png", "b.png"])
 
 
 class PlanTests(unittest.TestCase):
