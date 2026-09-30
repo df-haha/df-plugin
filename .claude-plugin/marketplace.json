@@ -161,8 +161,8 @@
     },
     {
       "name": "session-resume-inventory",
-      "description": "重開機／交接前盤點開著的 Claude Code、Codex、tmux、Orca session，對應 repo／分支並產出精確 resume 指令（唯讀）",
-      "version": "1.0.0",
+      "description": "重開機／交接前盤點開著的 Claude Code、Codex、tmux、Orca session，對應 repo／分支並產出精確 resume 指令；可存快照，開機後把沒在跑的 session 開回 Orca",
+      "version": "1.1.0",
       "author": { "name": "df-haha" },
       "source": "./plugins/session-resume-inventory",
       "category": "productivity"

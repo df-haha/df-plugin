@@ -1,11 +1,12 @@
 ---
 name: session-resume-inventory
-description: 盤點目前開著的 Claude Code、Codex、tmux 與 Orca 工作階段（session），對應到 repo／worktree 與分支，說明即時狀態並產出精確的續接（resume）指令。觸發時機：使用者說「盤點 session」「開著哪些 session」「重開機前清單」「session inventory」「resume 指令」「有哪些 claude/codex 在跑」。不用於掃歷史待辦。
+description: 盤點目前開著的 Claude Code、Codex、tmux 與 Orca 工作階段（session），對應到 repo／worktree 與分支，說明即時狀態並產出精確的續接（resume）指令。觸發時機：使用者說「盤點 session」「開著哪些 session」「重開機前清單」「session inventory」「resume 指令」「有哪些 claude/codex 在跑」；關機前「存 session」「記錄 session」、開機後「復原 session」「把 session 開回來」「restore session」也觸發。不用於掃歷史待辦。
 ---
 
 # Session Resume Inventory（Claude Code 版）
 
-產出一份唯讀、重開機安全的盤點。檢查過程中不得關閉、續接、改名或以任何方式變動任何 session。
+產出一份唯讀、重開機安全的盤點；關機前可另存快照，開機後依快照把沒在跑的 session 開回 Orca。
+盤點過程中不得關閉、續接、改名或以任何方式變動任何 session；只有「復原」流程在使用者確認後會開新分頁。
 
 ## 一鍵執行
 
@@ -22,12 +23,37 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/inventory.py"
 1. **補 work 摘要**：腳本的 work 欄只是「起頭／最新」使用者訊息原文，不夠判斷時再讀該 transcript 尾段，改寫成一兩句「目標＋目前階段」。
 2. **把完整報告放在最終回覆正文**（不要只留在 shell 輸出）。
 
+## 關機前：存快照
+
+使用者說「存 session」「關機前記錄」時：
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/inventory.py" --save
+```
+
+會照常印出盤點報告，並把每個 session 的 ID、cwd、名稱、狀態、原啟動參數、是否在 Orca 存到 `~/.claude/session-snapshots/<時間>.json`。回覆時轉述報告尾端的「已存快照」行，以及重開機警告（busy／shell 的 session 會中斷當前那一輪）。
+
+## 開機後：復原到 Orca
+
+使用者說「復原 session」時，照順序做，**不可跳過第 3 步的確認**：
+
+1. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/restore.py"`（預設只預覽，取最新快照；指定用 `--snapshot <path>`）。
+2. 若輸出「Orca 沒在跑或連不上」：跑 `restore.py --open-orca` 啟動 Orca（失敗就請使用者手動打開 Orca），再回第 1 步。
+3. 把預覽計畫完整貼在回覆正文，問使用者是否開啟「要在 Orca 開回的 session」那一區。
+4. 使用者確認後才跑 `restore.py --apply`，回報每個分頁的 ✅／❌ 與 terminal handle。
+
+復原規則（腳本已實作）：
+- **已在跑的 session 一律略過**：同時比對 session 狀態檔與程序啟動參數裡的 `--resume <id>`，停在信任確認畫面的分頁也算已在跑，不會開第二份。
+- **照原啟動參數復原**：`--dangerously-skip-permissions`、`--model` 等白名單旗標會帶回 resume 指令；白名單外的參數列為「未保留參數」讓使用者自己判斷。
+- **只開回原本就在 Orca、且路徑已登記在 Orca 的 session**（以 worktree `id:` 指定位置）。路徑沒登記的只列出指令，**不自動 `orca repo add`**；原本不在 Orca 的（terminal／tmux）目前只列出指令，由使用者手動開。
+- 沒帶 `--dangerously-skip-permissions` 的 session 開在未信任的資料夾時，Claude 會先停在信任確認畫面，提醒使用者到該分頁按確認。
+
 ## 邊界
 
 - 優先用官方 CLI 與本機狀態，不用 computer-use／GUI 控制，除非使用者本輪授權。
 - 「OS process 活著」「有持久化 transcript」「Orca terminal 存在」是三件不同的事，要交叉核對，不能混成一個狀態。
 - 計算頂層 session 時排除 helper process：MCP server、browser host、`osc52-tap` 這類 wrapper、`claude --output-format stream-json`／`-p` 的無頭呼叫、`codex-code-mode-host`、`codex app-server/exec`、guardian 與 subagent thread。
-- resume 指令不得帶 `--dangerously-skip-permissions`、`--yolo` 等旗標，除非使用者明確要求。
+- 盤點報告裡的 resume 指令不得帶 `--dangerously-skip-permissions`、`--yolo` 等旗標，除非使用者明確要求；復原流程依快照記錄的原啟動參數帶回（見上方「復原規則」）。
 - 有精確 session ID 時不用 `--last`。
 - 本 session 自己會以 `busy` 出現在清單中，屬正常。
 

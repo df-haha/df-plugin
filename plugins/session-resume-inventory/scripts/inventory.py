@@ -5,6 +5,7 @@ Never mutates any session. Emits the grouped plain-text report defined in SKILL.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -20,6 +21,27 @@ CODEX_SESSIONS = HOME / ".codex" / "sessions"
 CODEX_INDEX = HOME / ".codex" / "session_index.jsonl"
 CODEX_SKIP_SUBCMDS = {"app-server", "mcp-server", "exec", "login", "logout"}
 HINT_LEN = 110
+SNAPSHOT_DIR = HOME / ".claude" / "session-snapshots"
+
+# Launch flags carried over when restoring (1A: restore as originally launched). Anything
+# outside these lists is reported as dropped instead of being guessed at.
+RESTORE_BOOL_FLAGS = {
+    "claude": {"--dangerously-skip-permissions", "--allow-dangerously-skip-permissions",
+               "--chrome", "--no-chrome", "--ide", "--brief", "--bare", "--disable-slash-commands"},
+    "codex": {"--dangerously-bypass-approvals-and-sandbox", "--yolo", "--full-auto", "--search",
+              "--oss", "--no-alt-screen", "--approve-for-me"},
+}
+RESTORE_VALUE_FLAGS = {
+    "claude": {"--model", "--effort", "--permission-mode", "--add-dir", "--agent", "--settings",
+               "--mcp-config", "--plugin-dir", "--fallback-model", "--append-system-prompt"},
+    "codex": {"-m", "--model", "-s", "--sandbox", "-a", "--ask-for-approval", "-p", "--profile",
+              "-c", "--config", "--add-dir", "--enable", "--disable", "--local-provider"},
+}
+# Flags that pick or name a session; restore supplies its own session ID, so these are dropped silently.
+SESSION_FLAGS = {
+    "claude": ({"-c", "--continue", "--fork-session"}, {"-r", "--resume", "--session-id", "-n", "--name"}),
+    "codex": ({"--last", "--all"}, set()),
+}
 
 
 def run(cmd: list[str], timeout: int = 20) -> str:
@@ -54,6 +76,44 @@ def proc_cwd(pid: int) -> str:
 
 def live_pids() -> list[int]:
     return [int(p.name) for p in Path("/proc").iterdir() if p.name.isdigit()]
+
+
+def restore_flags(runtime: str, args: list[str]) -> tuple[list[str], list[str]]:
+    """Split a live argv into (flags to carry into the resume command, args that were dropped)."""
+    rest = list(args[1:])
+    if runtime == "codex" and rest[:1] == ["resume"]:
+        rest = rest[1:]
+        if rest and not rest[0].startswith("-"):
+            rest = rest[1:]  # the session id being resumed
+    bools, values = RESTORE_BOOL_FLAGS[runtime], RESTORE_VALUE_FLAGS[runtime]
+    skip_bools, skip_values = SESSION_FLAGS[runtime]
+    kept: list[str] = []
+    dropped: list[str] = []
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        name = arg.split("=", 1)[0]
+        has_inline = "=" in arg and arg.startswith("--")
+        if name in skip_bools:
+            i += 1
+        elif name in skip_values:
+            # `--resume` may be given without a value (interactive picker); never swallow a following flag.
+            value_follows = not has_inline and i + 1 < len(rest) and not rest[i + 1].startswith("-")
+            i += 2 if value_follows else 1
+        elif name in bools:
+            kept.append(arg)
+            i += 1
+        elif name in values:
+            if has_inline or i + 1 >= len(rest):
+                kept.append(arg)
+                i += 1
+            else:
+                kept += [arg, rest[i + 1]]
+                i += 2
+        else:
+            dropped.append(arg)
+            i += 1
+    return kept, dropped
 
 
 def is_claude_main(args: list[str]) -> bool:
@@ -128,7 +188,7 @@ def collect_claude(pids: list[int]) -> dict[str, dict]:
         key = sid or f"pid:{pid}"
         entry = sessions.setdefault(key, {
             "sid": sid, "name": state.get("name"), "status": state.get("status", "尚未驗證"),
-            "cwd": state.get("cwd") or proc_cwd(pid), "pids": [], "orca": set(),
+            "cwd": state.get("cwd") or proc_cwd(pid), "pids": [], "orca": set(), "args": args,
         })
         entry["pids"].append(pid)
         if "--dangerously-skip-permissions" in args:
@@ -213,7 +273,7 @@ def collect_codex(pids: list[int]) -> dict[str, dict]:
             sid = meta.get("id")
             entry = sessions.setdefault(sid, {
                 "sid": sid, "name": names.get(sid), "cwd": meta.get("cwd") or proc_cwd(pid),
-                "pids": [], "orca": env.get("ORCA_TERMINAL_HANDLE"), "rollout": rollout,
+                "pids": [], "orca": env.get("ORCA_TERMINAL_HANDLE"), "rollout": rollout, "args": args,
             })
             entry["first"], entry["hint"] = codex_user_msgs(rollout)
             entry["pids"].append(pid)
@@ -258,7 +318,41 @@ def sort_named(items: list[dict]) -> list[dict]:
     return sorted(items, key=lambda e: (e.get("name") is None, e.get("name") or "", e.get("sid") or ""))
 
 
+def snapshot_entries(claude: dict[str, dict], codex: dict[str, dict]) -> list[dict]:
+    """Flatten live sessions into the JSON records restore.py consumes."""
+    alive = set(live_pids())
+    records: list[dict] = []
+    for runtime, sessions in (("claude", claude), ("codex", codex)):
+        for e in sessions.values():
+            if not any(p in alive for p in e["pids"]):
+                continue
+            flags, dropped = restore_flags(runtime, e.get("args") or [runtime])
+            record_file = e.get("transcript") if runtime == "claude" else e.get("rollout")
+            records.append({
+                "runtime": runtime, "sid": e.get("sid"), "name": e.get("name"), "cwd": e["cwd"],
+                "status": e.get("status", "open" if e.get("sid") else "empty"),
+                "flags": flags, "dropped": dropped,
+                "in_orca": bool(e.get("orca")),
+                "resumable": bool(e.get("sid") and record_file and Path(record_file).exists()),
+                "hint": e.get("hint", ""),
+            })
+    return records
+
+
+def save_snapshot(records: list[dict], out: Path | None) -> Path:
+    stamp = datetime.now().astimezone()
+    path = out or SNAPSHOT_DIR / f"{stamp:%Y%m%d-%H%M%S}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"saved_at": stamp.isoformat(timespec="seconds"), "sessions": records}
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="唯讀盤點開著的 Claude Code／Codex／tmux／Orca session")
+    parser.add_argument("--save", nargs="?", const="", metavar="PATH",
+                        help="另存快照 JSON 供 restore.py 使用（預設 ~/.claude/session-snapshots/<時間>.json）")
+    opts = parser.parse_args()
     pids = live_pids()
     claude = collect_claude(pids)
     codex = collect_codex(pids)
@@ -350,6 +444,11 @@ def main() -> None:
     risky = [f"{e.get('name') or e['sid']}（{e['status']}）" for e in claude.values() if e["status"] in ("busy", "shell")]
     footer = ["重開機警告：" + ("、".join(risky) + " 正在執行中，重開會中斷當前 turn／shell 指令，重開後要檢查結果或重跑。" if risky
                               else "目前沒有 busy／shell 的 Claude session；idle 不代表任務已完成。")]
+    if opts.save is not None:
+        records = snapshot_entries(claude, codex)
+        saved = save_snapshot(records, Path(opts.save).expanduser() if opts.save else None)
+        footer.append(f"已存快照：{saved}（{len(records)} 個 session，其中可復原 "
+                      f"{sum(r['resumable'] for r in records)} 個）")
     print("\n".join(header + lines + footer))
 
 

@@ -1,6 +1,6 @@
 {
   "name": "session-resume-inventory",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "盤點目前開著的 Claude Code、Codex、tmux 與 Orca 工作階段，對應 repo／worktree 與分支，說明即時狀態並產出精確的 resume 指令（重開機前清單）",
   "author": {
     "name": "df-haha"
