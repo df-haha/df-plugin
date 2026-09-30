@@ -9,24 +9,15 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from inventory import (SNAPSHOT_DIR, collect_claude, collect_codex, is_claude_main,  # noqa: E402
-                       is_codex_main, live_pids, proc_args)
+from inventory import (SNAPSHOT_DIR, argv_resume_sid, collect_claude, collect_codex,  # noqa: E402
+                       is_claude_main, is_codex_main, live_pids, normalize_path, orca_exe, proc_args,
+                       run_full)
 
 TITLE_LEN = 40
-
-
-def normalize_path(path: str) -> str:
-    """Map Orca's `\\\\wsl.localhost\\<distro>\\...` form back to a POSIX path."""
-    if path.startswith("\\\\wsl"):
-        parts = path.lstrip("\\").split("\\")
-        path = "/" + "/".join(parts[2:])
-    return path.rstrip("/") or "/"
 
 
 def resume_command(session: dict) -> str:
@@ -57,19 +48,15 @@ def build_plan(sessions: list[dict], live_sids: set[str], worktrees: dict[str, s
     return plan
 
 
-def orca_exe() -> str | None:
-    return shutil.which("orca-ide") or shutil.which("orca")
-
-
 def orca_json(args: list[str], timeout: int = 30) -> dict:
     exe = orca_exe()
     if not exe:
-        return {"ok": False, "error": {"message": "Orca CLI 不在 PATH"}}
+        return {"ok": False, "error": {"message": "Orca CLI（orca-ide）不在 PATH"}}
+    out, err = run_full([exe, *args, "--json"], timeout)
     try:
-        out = subprocess.run([exe, *args, "--json"], capture_output=True, text=True, timeout=timeout).stdout
         return json.loads(out)
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
-        return {"ok": False, "error": {"message": f"{type(exc).__name__}: {exc}"}}
+    except json.JSONDecodeError:
+        return {"ok": False, "error": {"message": (f"{out} {err}".strip() or "無輸出")[:500]}}
 
 
 def orca_reachable() -> bool:
@@ -82,21 +69,6 @@ def orca_worktrees() -> dict[str, str]:
     if not res.get("ok"):
         return {}
     return {normalize_path(w["path"]): f"id:{w['id']}" for w in res["result"].get("worktrees", []) if w.get("path")}
-
-
-def argv_resume_sid(args: list[str]) -> str | None:
-    """Session ID a process was launched to resume, read straight from its argv."""
-    rest = args[1:]
-    if Path(args[0]).name == "codex":
-        if rest[:1] == ["resume"] and len(rest) > 1 and not rest[1].startswith("-"):
-            return rest[1]
-        return None
-    for i, arg in enumerate(rest):
-        if arg.startswith("--resume="):
-            return arg.split("=", 1)[1]
-        if arg in ("--resume", "-r") and i + 1 < len(rest) and not rest[i + 1].startswith("-"):
-            return rest[i + 1]
-    return None
 
 
 def live_session_ids() -> set[str]:

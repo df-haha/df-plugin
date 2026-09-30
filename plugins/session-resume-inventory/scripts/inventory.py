@@ -37,6 +37,8 @@ RESTORE_VALUE_FLAGS = {
     "codex": {"-m", "--model", "-s", "--sandbox", "-a", "--ask-for-approval", "-p", "--profile",
               "-c", "--config", "--add-dir", "--enable", "--disable", "--local-provider"},
 }
+# Value flags that accept several values (`--add-dir /a /b`); every following non-flag token is kept.
+RESTORE_VARIADIC_FLAGS = {"claude": {"--add-dir", "--mcp-config"}, "codex": set()}
 # Flags that pick or name a session; restore supplies its own session ID, so these are dropped silently.
 SESSION_FLAGS = {
     "claude": ({"-c", "--continue", "--fork-session"}, {"-r", "--resume", "--session-id", "-n", "--name"}),
@@ -44,11 +46,45 @@ SESSION_FLAGS = {
 }
 
 
-def run(cmd: list[str], timeout: int = 20) -> str:
+def run_full(cmd: list[str], timeout: int = 20) -> tuple[str, str]:
+    """Return (stdout, stderr); failures to launch or time out are reported in stderr."""
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return res.stdout, res.stderr
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return "", f"{type(exc).__name__}: {exc}"
+
+
+def run(cmd: list[str], timeout: int = 20) -> str:
+    return run_full(cmd, timeout)[0]
+
+
+def orca_exe() -> str | None:
+    """Only the Orca ADE CLI. Bare `orca` is not trusted: on Linux it is often GNOME's screen reader."""
+    return shutil.which("orca-ide")
+
+
+def normalize_path(path: str) -> str:
+    """Map Orca's `\\\\wsl.localhost\\<distro>\\...` form back to a POSIX path."""
+    if path.startswith("\\\\wsl"):
+        parts = path.lstrip("\\").split("\\")
+        path = "/" + "/".join(parts[2:])
+    return path.rstrip("/") or "/"
+
+
+def argv_resume_sid(args: list[str]) -> str | None:
+    """Session ID a process was launched to resume, read straight from its argv."""
+    rest = args[1:]
+    if Path(args[0]).name == "codex":
+        if rest[:1] == ["resume"] and len(rest) > 1 and not rest[1].startswith("-"):
+            return rest[1]
+        return None
+    for i, arg in enumerate(rest):
+        if arg.startswith("--resume="):
+            return arg.split("=", 1)[1]
+        if arg in ("--resume", "-r") and i + 1 < len(rest) and not rest[i + 1].startswith("-"):
+            return rest[i + 1]
+    return None
 
 
 def proc_args(pid: int) -> list[str]:
@@ -103,6 +139,12 @@ def restore_flags(runtime: str, args: list[str]) -> tuple[list[str], list[str]]:
         elif name in bools:
             kept.append(arg)
             i += 1
+        elif name in RESTORE_VARIADIC_FLAGS[runtime] and not has_inline:
+            kept.append(arg)
+            i += 1
+            while i < len(rest) and not rest[i].startswith("-"):
+                kept.append(rest[i])
+                i += 1
         elif name in values:
             if has_inline or i + 1 >= len(rest):
                 kept.append(arg)
@@ -266,9 +308,14 @@ def collect_codex(pids: list[int]) -> dict[str, dict]:
             if meta.get("thread_source", "user") == "user" and not meta.get("parent_thread_id"):
                 top.append((rollout, meta))
         if not top:
-            sessions[f"pid:{pid}"] = {"sid": None, "cwd": proc_cwd(pid), "pids": [pid],
-                                      "orca": env.get("ORCA_TERMINAL_HANDLE"), "hint": ""}
-            continue
+            # `codex resume <id>` may not have opened its rollout yet; the ID is still in argv.
+            sid = argv_resume_sid(args)
+            rollout = next(CODEX_SESSIONS.rglob(f"*{sid}.jsonl"), None) if sid else None
+            if not sid or not rollout:
+                sessions[f"pid:{pid}"] = {"sid": None, "cwd": proc_cwd(pid), "pids": [pid],
+                                          "orca": env.get("ORCA_TERMINAL_HANDLE"), "hint": ""}
+                continue
+            top = [(rollout, {**codex_rollout_meta(rollout), "id": sid})]
         for rollout, meta in top:
             sid = meta.get("id")
             entry = sessions.setdefault(sid, {
@@ -291,19 +338,21 @@ def collect_tmux() -> dict[str, list[str]]:
 
 
 def collect_orca(agent_handles: set[str]) -> tuple[dict[str, list[dict]], str]:
-    exe = shutil.which("orca-ide") or shutil.which("orca")
+    exe = orca_exe()
     if not exe:
-        return {}, "Orca CLI 不在 PATH（尚未驗證）"
-    out = run([exe, "terminal", "list", "--json"], timeout=30)
+        return {}, "Orca CLI（orca-ide）不在 PATH（尚未驗證）"
+    out, err = run_full([exe, "terminal", "list", "--json"], timeout=30)
     try:
         terms = json.loads(out)["result"]["terminals"]
     except (json.JSONDecodeError, KeyError, TypeError):
+        out = f"{out} {err}".strip()
         return {}, f"Orca CLI 失敗：{truncate(out) or '無輸出'}"
     groups: dict[str, list[dict]] = defaultdict(list)
     for term in terms:
         if term.get("handle") in agent_handles:
             continue
-        groups[term.get("worktreePath") or "(無 worktree)"].append(term)
+        path = term.get("worktreePath")
+        groups[normalize_path(path) if path else "(無 worktree)"].append(term)
     return groups, f"Orca CLI OK（{len(terms)} 個 terminal，其中非 Claude/Codex 的列在 Orca 區）"
 
 
@@ -342,9 +391,14 @@ def snapshot_entries(claude: dict[str, dict], codex: dict[str, dict]) -> list[di
 def save_snapshot(records: list[dict], out: Path | None) -> Path:
     stamp = datetime.now().astimezone()
     path = out or SNAPSHOT_DIR / f"{stamp:%Y%m%d-%H%M%S}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.parent.chmod(0o700)
     payload = {"saved_at": stamp.isoformat(timespec="seconds"), "sessions": records}
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Launch arguments can carry private values, so the snapshot is owner-only from creation.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(payload, ensure_ascii=False, indent=2))
+    path.chmod(0o600)
     return path
 
 
@@ -442,8 +496,11 @@ def main() -> None:
         "",
     ]
     risky = [f"{e.get('name') or e['sid']}（{e['status']}）" for e in claude.values() if e["status"] in ("busy", "shell")]
+    # Codex exposes no busy/idle state, so every live Codex session is flagged conservatively.
+    risky += [f"Codex {e.get('name') or e['sid']}（狀態無法判斷）" for e in codex.values()
+              if e.get("sid") and any(p in set(live_pids()) for p in e["pids"])]
     footer = ["重開機警告：" + ("、".join(risky) + " 正在執行中，重開會中斷當前 turn／shell 指令，重開後要檢查結果或重跑。" if risky
-                              else "目前沒有 busy／shell 的 Claude session；idle 不代表任務已完成。")]
+                              else "目前沒有 busy／shell 的 Claude session，也沒有開著的 Codex session；idle 不代表任務已完成。")]
     if opts.save is not None:
         records = snapshot_entries(claude, codex)
         saved = save_snapshot(records, Path(opts.save).expanduser() if opts.save else None)

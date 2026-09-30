@@ -32,6 +32,7 @@ python3 plugins/session-resume-inventory/scripts/restore.py --open-orca  # Orca 
 ```
 
 - 已在跑的 session 不會重複開。
+- 快照只有本人可讀（檔案 600、資料夾 700），因為會記錄啟動參數。
 - 依原啟動參數復原（白名單旗標，如 `--dangerously-skip-permissions`、`--model`）；其他參數列出不帶。
 - 只開回原本在 Orca、且路徑已登記在 Orca 的 session；其餘只列出指令。Windows Terminal 復原尚未支援。
 
@@ -45,7 +46,7 @@ cd plugins/session-resume-inventory && python3 -m unittest discover -s tests
 
 - Linux 或 WSL（讀 `/proc`；原生 Windows／macOS 不支援）
 - Python 3.9+
-- tmux、Orca（`orca-ide`／`orca`）為選配，沒裝時該區自動略過
+- tmux、Orca（`orca-ide`）為選配，沒裝時該區自動略過
 
 ## 資料來源
 

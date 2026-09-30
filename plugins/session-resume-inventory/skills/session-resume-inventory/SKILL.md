@@ -68,7 +68,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/inventory.py" --save
    - 沒有 rollout 的 TUI 列為 `empty / not resumable`，不捏造 resume 指令。
    - 需要查 `~/.codex/state_5.sqlite` 而沒有 `sqlite3` 時，用 Python `sqlite3` 模組以 `file:...?mode=ro` 唯讀開啟，不為盤點安裝套件。
 5. 每個 cwd：確認路徑存在；Git repo 用 `git branch --show-current` 取分支，比對 `--absolute-git-dir` 與 `--git-common-dir` 區分 linked worktree 與主 checkout。
-6. Orca：執行檔是 `orca-ide` 或 `orca`（腳本兩個都找）。先 `orca-ide status` 與 `orca-ide terminal list --help` 確認語法再用；指令失敗就記下錯誤、停止呼叫 Orca，改用 process 環境變數＋Git 佐證，並標「Orca CLI 驗證不可用」。
+6. Orca：只用 `orca-ide`（不信任裸 `orca`，Linux 上常是 GNOME 螢幕閱讀器）。先 `orca-ide status` 與 `orca-ide terminal list --help` 確認語法再用；指令失敗就記下錯誤、停止呼叫 Orca，改用 process 環境變數＋Git 佐證，並標「Orca CLI 驗證不可用」。
 7. 報告前對所有 PID、transcript、rollout、路徑、分支再做一次存在檢查，數字一律以這次快照為準。
 
 ## 狀態說明（放在表之前）

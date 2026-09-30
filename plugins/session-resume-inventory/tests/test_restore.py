@@ -56,6 +56,35 @@ class ArgvResumeTests(unittest.TestCase):
         self.assertIsNone(rs.argv_resume_sid(["/v/vendor/codex", "resume", "--last"]))
 
 
+class CodexReviewFixTests(unittest.TestCase):
+    def test_variadic_claude_flags_keep_all_values(self):
+        kept, dropped = inv.restore_flags(
+            "claude", ["claude", "--add-dir", "/a", "/b", "--mcp-config", "x.json", "y.json", "--chrome"])
+        self.assertEqual(kept, ["--add-dir", "/a", "/b", "--mcp-config", "x.json", "y.json", "--chrome"])
+        self.assertEqual(dropped, [])
+
+    def test_shared_helpers_live_in_inventory(self):
+        self.assertEqual(inv.normalize_path("\\\\wsl.localhost\\Ubuntu\\home\\a"), "/home/a")
+        self.assertEqual(inv.argv_resume_sid(["/v/vendor/codex", "resume", "019a"]), "019a")
+
+    def test_orca_exe_never_falls_back_to_bare_orca(self):
+        import shutil
+        orig = shutil.which
+        shutil.which = lambda name: "/usr/bin/orca" if name == "orca" else None
+        try:
+            self.assertIsNone(inv.orca_exe())
+        finally:
+            shutil.which = orig
+
+    def test_snapshot_is_owner_only(self):
+        import tempfile, stat
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "sub" / "snap.json"
+            inv.save_snapshot([], out)
+            self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(out.parent.stat().st_mode), 0o700)
+
+
 class PlanTests(unittest.TestCase):
     def snap(self, **kw):
         base = {"runtime": "claude", "sid": "s1", "name": "n", "cwd": "/repo", "status": "idle",
