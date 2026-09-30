@@ -79,10 +79,35 @@ class CodexReviewFixTests(unittest.TestCase):
     def test_snapshot_is_owner_only(self):
         import tempfile, stat
         with tempfile.TemporaryDirectory() as d:
-            out = Path(d) / "sub" / "snap.json"
-            inv.save_snapshot([], out)
+            orig = inv.SNAPSHOT_DIR
+            inv.SNAPSHOT_DIR = Path(d) / "snaps"
+            try:
+                out = inv.save_snapshot([], None)
+            finally:
+                inv.SNAPSHOT_DIR = orig
             self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o600)
             self.assertEqual(stat.S_IMODE(out.parent.stat().st_mode), 0o700)
+
+
+class CodexReviewRound2Tests(unittest.TestCase):
+    def test_codex_resume_options_before_id(self):
+        args = ["/v/vendor/codex", "resume", "--model", "gpt-5", "--yolo", "019a"]
+        self.assertEqual(inv.argv_resume_sid(args), "019a")
+        kept, dropped = inv.restore_flags("codex", args)
+        self.assertEqual(kept, ["--model", "gpt-5", "--yolo"])
+        self.assertEqual(dropped, [])
+
+    def test_codex_resume_last_has_no_id(self):
+        self.assertIsNone(inv.argv_resume_sid(["/v/vendor/codex", "resume", "-m", "x", "--last"]))
+
+    def test_custom_save_path_leaves_parent_permissions_alone(self):
+        import tempfile, stat
+        with tempfile.TemporaryDirectory() as d:
+            Path(d).chmod(0o755)
+            out = Path(d) / "snap.json"
+            inv.save_snapshot([], out)
+            self.assertEqual(stat.S_IMODE(Path(d).stat().st_mode), 0o755)
+            self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o600)
 
 
 class PlanTests(unittest.TestCase):

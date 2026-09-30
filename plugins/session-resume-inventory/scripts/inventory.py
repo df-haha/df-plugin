@@ -37,6 +37,10 @@ RESTORE_VALUE_FLAGS = {
     "codex": {"-m", "--model", "-s", "--sandbox", "-a", "--ask-for-approval", "-p", "--profile",
               "-c", "--config", "--add-dir", "--enable", "--disable", "--local-provider"},
 }
+# Every `codex resume` option that takes a value, so `codex resume [OPTIONS] [SESSION_ID]` can be
+# split without mistaking an option value for the session ID.
+CODEX_RESUME_VALUE_FLAGS = RESTORE_VALUE_FLAGS["codex"] | {
+    "-C", "--cd", "-i", "--image", "--remote", "--remote-auth-token-env"}
 # Value flags that accept several values (`--add-dir /a /b`); every following non-flag token is kept.
 RESTORE_VARIADIC_FLAGS = {"claude": {"--add-dir", "--mcp-config"}, "codex": set()}
 # Flags that pick or name a session; restore supplies its own session ID, so these are dropped silently.
@@ -72,13 +76,23 @@ def normalize_path(path: str) -> str:
     return path.rstrip("/") or "/"
 
 
+def split_codex_resume(rest: list[str]) -> tuple[str | None, list[str]]:
+    """For argv after `codex resume`, return (positional session ID or None, the remaining args)."""
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        if not arg.startswith("-"):
+            return arg, rest[:i] + rest[i + 1:]
+        takes_value = arg in CODEX_RESUME_VALUE_FLAGS and "=" not in arg
+        i += 2 if takes_value else 1
+    return None, rest
+
+
 def argv_resume_sid(args: list[str]) -> str | None:
     """Session ID a process was launched to resume, read straight from its argv."""
     rest = args[1:]
     if Path(args[0]).name == "codex":
-        if rest[:1] == ["resume"] and len(rest) > 1 and not rest[1].startswith("-"):
-            return rest[1]
-        return None
+        return split_codex_resume(rest[1:])[0] if rest[:1] == ["resume"] else None
     for i, arg in enumerate(rest):
         if arg.startswith("--resume="):
             return arg.split("=", 1)[1]
@@ -118,9 +132,7 @@ def restore_flags(runtime: str, args: list[str]) -> tuple[list[str], list[str]]:
     """Split a live argv into (flags to carry into the resume command, args that were dropped)."""
     rest = list(args[1:])
     if runtime == "codex" and rest[:1] == ["resume"]:
-        rest = rest[1:]
-        if rest and not rest[0].startswith("-"):
-            rest = rest[1:]  # the session id being resumed
+        rest = split_codex_resume(rest[1:])[1]  # drop the session id being resumed
     bools, values = RESTORE_BOOL_FLAGS[runtime], RESTORE_VALUE_FLAGS[runtime]
     skip_bools, skip_values = SESSION_FLAGS[runtime]
     kept: list[str] = []
@@ -391,8 +403,12 @@ def snapshot_entries(claude: dict[str, dict], codex: dict[str, dict]) -> list[di
 def save_snapshot(records: list[dict], out: Path | None) -> Path:
     stamp = datetime.now().astimezone()
     path = out or SNAPSHOT_DIR / f"{stamp:%Y%m%d-%H%M%S}.json"
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.parent.chmod(0o700)
+    if out is None:
+        # Only the dedicated default directory is locked down; a user-chosen parent is left as is.
+        SNAPSHOT_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        SNAPSHOT_DIR.chmod(0o700)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"saved_at": stamp.isoformat(timespec="seconds"), "sessions": records}
     # Launch arguments can carry private values, so the snapshot is owner-only from creation.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
