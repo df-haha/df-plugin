@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<title>每日彙整 {{ v.date }}</title>
+<style>
+body { font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif; max-width: 800px; margin: 2em auto; padding: 0 1em; color: #222; background: #fff; line-height: 1.6; }
+h1 { font-size: 1.4em; border-bottom: 2px solid #333; padding-bottom: 0.3em; }
+h2 { font-size: 1.1em; margin-top: 1.5em; color: #444; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 1em; }
+.meta dt { font-weight: bold; display: inline; }
+.meta dd { display: inline; margin: 0 1em 0 0; }
+.source-ok { color: #2a7; }
+.source-failed { color: #c33; }
+.source-skipped { color: #888; }
+.notice { background: #fff3cd; border-left: 4px solid #ffc107; padding: 0.5em 1em; margin: 0.5em 0; }
+.new-chat { background: #e7f3fe; border-left: 4px solid #2196f3; padding: 0.5em 1em; margin: 0.5em 0; }
+table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+th, td { border: 1px solid #ddd; padding: 0.4em 0.6em; text-align: left; vertical-align: top; }
+th { background: #f5f5f5; }
+.priority-P0 { color: #c00; font-weight: bold; }
+.priority-P1 { color: #e60; }
+.priority-P2 { color: #666; }
+details { margin: 0.5em 0; }
+summary { cursor: pointer; font-weight: bold; color: #555; }
+.src-label { font-size: 0.85em; color: #666; }
+a { color: #1a73e8; text-decoration: none; }
+a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<h1>每日彙整 {{ v.date }}</h1>
+
+<div class="meta">
+<dl>
+<dt>報表代碼</dt><dd>{{ v.report_code }}</dd>
+<dt>產生時間</dt><dd>{{ v.generated_at }}</dd>
+</dl>
+</div>
+
+{# --- Sources --- #}
+<h2>來源狀態</h2>
+<ul>
+{% for s in v.sources %}
+<li class="source-{{ s.status }}">
+{{ s.name }}：{{ s.message }}
+{% if s.coverage %}<span class="src-label">（{{ s.coverage }}）</span>{% endif %}
+</li>
+{% endfor %}
+</ul>
+
+{% if v.coverage.batched %}
+<p class="notice">本次資料分 {{ v.coverage.batches }} 批處理。</p>
+{% endif %}
+
+{# --- Notices --- #}
+{% for n in v.notices %}
+<p class="notice">{{ n }}</p>
+{% endfor %}
+
+{# --- New chats --- #}
+{% if v.new_chats %}
+<div class="new-chat">
+<strong>本次新增的 LINE 對話：</strong>
+{% for name in v.new_chats %}{{ name }}{% if not loop.last %}、{% endif %}{% endfor %}
+</div>
+{% endif %}
+
+{# --- Today --- #}
+<h2>今天要處理</h2>
+{% if v.today %}
+<table>
+<thead><tr><th>#</th><th>優先</th><th>待辦</th><th>期限</th><th>延續</th><th>來源</th></tr></thead>
+<tbody>
+{% for item in v.today %}
+<tr>
+<td>{{ item.no }}</td>
+<td class="priority-{{ item.priority }}">{{ item.priority }}</td>
+<td>{{ item.title }} <span class="src-label">({{ item.todo_id }})</span></td>
+<td>{{ item.due if item.due else "—" }}</td>
+<td>{% if item.carry_days > 0 %}{{ item.carry_days }} 天{% else %}新{% endif %}</td>
+<td>{% for s in item.sources %}<span class="src-label">{% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}{{ s.label }}{% endif %}</span>{% if not loop.last %}、{% endif %}{% endfor %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<p>目前沒有待辦事項。</p>
+{% endif %}
+
+{# --- Maybe done --- #}
+{% if v.maybe_done %}
+<h2>可能已完成</h2>
+<table>
+<thead><tr><th>#</th><th>待辦</th><th>判斷理由</th><th>來源</th></tr></thead>
+<tbody>
+{% for item in v.maybe_done %}
+<tr>
+<td>{{ item.no }}</td>
+<td>{{ item.title }} <span class="src-label">({{ item.todo_id }})</span></td>
+<td>{{ item.reason }}</td>
+<td>{% for s in item.sources %}<span class="src-label">{% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}{{ s.label }}{% endif %}</span>{% if not loop.last %}、{% endif %}{% endfor %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+<p class="src-label">確認完成請說「{{ v.report_code }} 的 N 做完了」或「T-xxxx 做完了」。7 天未確認將自動摺疊。</p>
+{% endif %}
+
+{# --- Collapsed --- #}
+{% if v.collapsed %}
+<details>
+<summary>已摺疊的「可能已完成」（{{ v.collapsed | length }} 項，超過 7 天未確認）</summary>
+<table>
+<thead><tr><th>#</th><th>待辦</th><th>判斷理由</th></tr></thead>
+<tbody>
+{% for item in v.collapsed %}
+<tr>
+<td>{{ item.no }}</td>
+<td>{{ item.title }} <span class="src-label">({{ item.todo_id }})</span></td>
+<td>{{ item.reason }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+<p class="src-label">要恢復請說「恢復 T-xxxx」。</p>
+</details>
+{% endif %}
+
+{# --- Events --- #}
+{% if v.events %}
+<h2>行程（今天＋未來 3 天）</h2>
+<table>
+<thead><tr><th>時間</th><th>主旨</th><th>地點</th></tr></thead>
+<tbody>
+{% for ev in v.events %}
+<tr>
+<td>{{ ev.start }} – {{ ev.end }}</td>
+<td>{% if ev.href %}<a href="{{ ev.href }}">{{ ev.subject }}</a>{% else %}{{ ev.subject }}{% endif %}</td>
+<td>{{ ev.location }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+
+{# --- Skipped --- #}
+{% if v.skipped %}
+<details>
+<summary>已略過（依準則）（{{ v.skipped | length }} 項）</summary>
+<ul>
+{% for sk in v.skipped %}
+<li>{{ sk.summary }}{% for s in sk.sources %} <span class="src-label">{% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}{{ s.label }}{% endif %}</span>{% endfor %}</li>
+{% endfor %}
+</ul>
+</details>
+{% endif %}
+
+</body>
+</html>
