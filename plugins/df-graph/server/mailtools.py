@@ -54,7 +54,7 @@ def _strip_html(html_str):
     return re.sub(r"\n{3,}", "\n\n", txt).strip()
 
 
-def _render_messages(summary, msgs, truncated=False):
+def _render_messages(summary, msgs, truncated=False, include_internet_id=False):
     items = [{
         "id": m.get("id"),
         "subject": m.get("subject"),
@@ -63,6 +63,9 @@ def _render_messages(summary, msgs, truncated=False):
         "is_read": m.get("isRead"),
         "preview": (m.get("bodyPreview") or "")[:200],
     } for m in msgs]
+    if include_internet_id:
+        for item, m in zip(items, msgs):
+            item["internet_message_id"] = m.get("internetMessageId")
     if truncated:
         summary += f" ⚠️ WARNING: 超過 {_PAGE_CEILING} 封安全上限，清單可能不完整。"
     # 清單裡的 subject/from/preview 均為寄件者可控 → 標記為不可信（單行，維持 summary\n+JSON 結構）
@@ -71,35 +74,39 @@ def _render_messages(summary, msgs, truncated=False):
 
 
 # ========== 信箱（讀）==========
-def mail_list_recent(days: int = 7, folder: str = "inbox") -> str:
+def mail_list_recent(days: int = 7, folder: str = "inbox", immutable_ids: bool = False) -> str:
     since = _utc_iso_days_ago(days)
+    sel = _SEL + ",internetMessageId" if immutable_ids else _SEL
     params = {
         "$filter": f"receivedDateTime ge {since}",
         "$orderby": "receivedDateTime desc",
         "$top": "50",
-        "$select": _SEL,
+        "$select": sel,
     }
     url = f"{GRAPH}/me/mailFolders/{_enc(folder)}/messages?" + _q(params)
-    msgs, trunc = _fetch_paged(url)
+    extra_headers = {"Prefer": 'IdType="ImmutableId"'} if immutable_ids else None
+    msgs, trunc = _fetch_paged(url, extra_headers=extra_headers)
     summary = (f"Found {len(msgs)} emails in {folder} from last {days} days "
                f"(newest first; use mail_get(message_id) to read a message by its id).")
-    return _render_messages(summary, msgs, trunc)
+    return _render_messages(summary, msgs, trunc, include_internet_id=immutable_ids)
 
 
 def mail_search(subject_prefix: str = "", body_query: str = "",
-                days: int = 7, folder: str = "inbox") -> str:
+                days: int = 7, folder: str = "inbox", immutable_ids: bool = False) -> str:
     """以主旨前綴（startswith）或內文關鍵字（$search）搜信。兩者擇一或都給。"""
     subject_prefix = (subject_prefix or "").strip()
     body_query = (body_query or "").strip()
     if not subject_prefix and not body_query:
         return "ERROR: 請給 subject_prefix 或 body_query 其中之一。"
+    sel = _SEL + ",internetMessageId" if immutable_ids else _SEL
+    extra_headers = {"Prefer": 'IdType="ImmutableId"'} if immutable_ids else None
     if body_query:
         # KQL $search 不可與 $orderby/$filter 並用 → folder 以 URL 限定、days 於 client 端過濾。
         # 去掉雙引號避免 KQL 語法破壞/運算子注入（值維持單一引號片語）。
         safe_q = body_query.replace('"', "")
         url = f"{GRAPH}/me/mailFolders/{_enc(folder)}/messages?" + _q({
-            "$search": f'"{safe_q}"', "$top": "50", "$select": _SEL})
-        msgs, trunc = _fetch_paged(url)
+            "$search": f'"{safe_q}"', "$top": "50", "$select": sel})
+        msgs, trunc = _fetch_paged(url, extra_headers=extra_headers)
         # days 視窗：$search 不能配 $filter，故抓回後依 receivedDateTime 於 client 端過濾。
         since = _utc_iso_days_ago(days)
         msgs = [m for m in msgs if (m.get("receivedDateTime") or "") >= since]
@@ -112,20 +119,22 @@ def mail_search(subject_prefix: str = "", body_query: str = "",
         since = _utc_iso_days_ago(days)
         url = f"{GRAPH}/me/mailFolders/{_enc(folder)}/messages?" + _q({
             "$filter": f"startswith(subject,'{esc}') and receivedDateTime ge {since}",
-            "$top": "50", "$select": _SEL})
-        msgs, trunc = _fetch_paged(url)
+            "$top": "50", "$select": sel})
+        msgs, trunc = _fetch_paged(url, extra_headers=extra_headers)
     # 先抓到底再排序（避免截斷後才排，砍掉最新）
     msgs.sort(key=lambda m: m.get("receivedDateTime") or "", reverse=True)
     label = body_query or f"subject^={subject_prefix}"
     summary = f'Found {len(msgs)} emails matching {label} (newest first; use mail_get(message_id)).'
-    return _render_messages(summary, msgs, trunc)
+    return _render_messages(summary, msgs, trunc, include_internet_id=immutable_ids)
 
 
-def _attachment_meta(message_id):
-    """回傳該信附件的高訊號 metadata（不含 contentBytes，省 token）。"""
+def _attachment_meta(message_id, extra_headers=None):
+    """回傳該信附件的高訊號 metadata（不含 contentBytes，省 token）。
+    extra_headers：immutable_ids 模式下需帶同樣的 Prefer: IdType="ImmutableId"，
+    否則該 id 可能無法被 Graph 正確解析。"""
     url = (f"{GRAPH}/me/messages/{_enc(message_id)}/attachments"
            "?$select=id,name,contentType,size,isInline&$top=50")
-    items, _ = _fetch_paged(url)
+    items, _ = _fetch_paged(url, extra_headers=extra_headers)
     return [{
         "id": a.get("id"),
         "name": a.get("name"),
@@ -135,19 +144,27 @@ def _attachment_meta(message_id):
     } for a in items]
 
 
-def mail_get(message_id: str, mode: str = "concise") -> str:
+def mail_get(message_id: str, mode: str = "concise", immutable_ids: bool = False) -> str:
     """以 id 讀整封信。
     mode="concise"（預設）：回純文字（Exchange 伺服器端去 HTML），省 token、適合閱讀。
     mode="full"：回原始 HTML，零淨化（保留 <!-- 註解 -->），適合需要原文/程式化解析。
-    有附件時附上附件清單（id/name/type/size）；用 mail_download_attachment 下載內容。"""
+    有附件時附上附件清單（id/name/type/size）；用 mail_download_attachment 下載內容。
+    immutable_ids=True：傳入/回傳的 id 視為 immutable id（搬資料夾後 id 不變），
+    回傳同時附上 Internet-Message-Id 一行。"""
     m = (mode or "concise").strip().lower()
     if m not in ("concise", "full"):
         return "ERROR: mode 須為 'concise'（純文字）或 'full'（原始 HTML）。"
     content_type = "text" if m == "concise" else "html"
-    url = (f"{GRAPH}/me/messages/{_enc(message_id)}"
-           "?$select=id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments")
+    sel = ("id,subject,from,toRecipients,ccRecipients,receivedDateTime,body,hasAttachments")
+    if immutable_ids:
+        sel += ",internetMessageId"
+    url = f"{GRAPH}/me/messages/{_enc(message_id)}?$select={sel}"
+    prefer = f'outlook.body-content-type="{content_type}"'
+    if immutable_ids:
+        prefer += ', IdType="ImmutableId"'
+    extra_headers = {"Prefer": prefer}
     try:
-        d = _req("GET", url, extra_headers={"Prefer": f'outlook.body-content-type="{content_type}"'})
+        d = _req("GET", url, extra_headers=extra_headers)
     except GraphHTTPError as ex:
         if _is_bad_id(ex):
             return "ERROR: 找不到該郵件（id 不存在或已被移動/刪除）。"
@@ -165,10 +182,14 @@ def mail_get(message_id: str, mode: str = "concise") -> str:
     head = f"Subject: {subject}\nFrom: {frm}\nTo: {to}\n"
     if cc:
         head += f"Cc: {cc}\n"
+    head += f"Date: {date}\n"
+    if immutable_ids:
+        head += f"Internet-Message-Id: {d.get('internetMessageId', '')}\n"
     # body 由寄件者控制 → 包進不可信界線，避免被當成指令（prompt-injection 緩解）
-    out = head + f"Date: {date}\nBody:\n{_wrap_untrusted(body, kind='EMAIL BODY')}\n"
+    out = head + f"Body:\n{_wrap_untrusted(body, kind='EMAIL BODY')}\n"
     if d.get("hasAttachments"):
-        atts = _attachment_meta(message_id)
+        att_headers = {"Prefer": 'IdType="ImmutableId"'} if immutable_ids else None
+        atts = _attachment_meta(message_id, extra_headers=att_headers)
         if atts:
             out += ("\nAttachments (use mail_download_attachment(message_id, attachment_id)):\n"
                     + json.dumps(atts, ensure_ascii=False, indent=2) + "\n")

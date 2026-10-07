@@ -20,25 +20,29 @@ mcp = FastMCP("df-graph")
 
 # ---- 信箱：讀 ----
 @mcp.tool()
-def mail_list_recent(days: int = 7, folder: str = "inbox") -> str:
+def mail_list_recent(days: int = 7, folder: str = "inbox", immutable_ids: bool = False) -> str:
     """List recent emails in a mail folder from the last N days, newest first.
-    Returns JSON with each message's id; read a message with mail_get(message_id)."""
-    return tools.mail_list_recent(days, folder)
+    Returns JSON with each message's id; read a message with mail_get(message_id).
+    immutable_ids=True: ids stay stable across folder moves; adds internet_message_id to each item."""
+    return tools.mail_list_recent(days, folder, immutable_ids)
 
 
 @mcp.tool()
 def mail_search(subject_prefix: str = "", body_query: str = "",
-                days: int = 7, folder: str = "inbox") -> str:
-    """Search emails by subject prefix (startswith) and/or body keyword. Returns JSON with ids."""
-    return tools.mail_search(subject_prefix, body_query, days, folder)
+                days: int = 7, folder: str = "inbox", immutable_ids: bool = False) -> str:
+    """Search emails by subject prefix (startswith) and/or body keyword. Returns JSON with ids.
+    immutable_ids=True: ids stay stable across folder moves; adds internet_message_id to each item."""
+    return tools.mail_search(subject_prefix, body_query, days, folder, immutable_ids)
 
 
 @mcp.tool()
-def mail_get(message_id: str, mode: str = "concise") -> str:
+def mail_get(message_id: str, mode: str = "concise", immutable_ids: bool = False) -> str:
     """Read an email by id. mode="concise" (default) returns plain text (token-cheap);
     mode="full" returns the original HTML body. The body is wrapped in an untrusted-content
-    fence (prompt-injection mitigation). Lists attachments if any."""
-    return tools.mail_get(message_id, mode)
+    fence (prompt-injection mitigation). Lists attachments if any.
+    immutable_ids=True: message_id is treated as an immutable id (stable across folder moves);
+    adds an Internet-Message-Id line to the output."""
+    return tools.mail_get(message_id, mode, immutable_ids)
 
 
 @mcp.tool()
@@ -138,10 +142,12 @@ def calendar_get(event_id: str, tz: str = "") -> str:
 @mcp.tool()
 def calendar_create(subject: str, start_iso: str, end_iso: str,
                     body: str = "", location: str = "", attendees: str = "",
-                    online_meeting: bool = False) -> str:
+                    online_meeting: bool = False, transaction_id: str = "") -> str:
     """Create a calendar event. start_iso/end_iso UTC ISO-8601 like 2026-06-04T09:00:00.
-    attendees comma-separated addresses. online_meeting=True adds a Teams link (returns join_url)."""
-    return tools.calendar_create(subject, start_iso, end_iso, body, location, attendees, online_meeting)
+    attendees comma-separated addresses. online_meeting=True adds a Teams link (returns join_url).
+    transaction_id: optional client-generated id for retry de-duplication (Graph's transactionId)."""
+    return tools.calendar_create(subject, start_iso, end_iso, body, location, attendees,
+                                 online_meeting, transaction_id)
 
 
 @mcp.tool()
