@@ -166,6 +166,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/session-resume-inventory",
       "category": "productivity"
+    },
+    {
+      "name": "gpu-cloud-finetune",
+      "description": "租雲端 GPU（Colab CLI／gputw.ai／RunPod）測模型、QLoRA 微調、量化的實戰流程與停機保險，附 API 腳本範本與踩坑表",
+      "version": "1.0.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/gpu-cloud-finetune",
+      "category": "development"
     }
   ]
 }

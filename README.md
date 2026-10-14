@@ -30,7 +30,7 @@ claude plugin install decision-wiki
 codex plugin marketplace add ./
 ```
 
-然後在 Codex CLI 內開 `/plugins`，從 `df-haha Plugins` 安裝任一 plugin；Codex marketplace 目前列出 19 個 plugins。安裝後可在 `/skills` 或以 `$<skill-name>`／自然語言觸發各 skill。`markitdown` 也已補上 Codex skill；它首次使用若未安裝 CLI，會先要求安裝授權。
+然後在 Codex CLI 內開 `/plugins`，從 `df-haha Plugins` 安裝任一 plugin；Codex marketplace 目前列出 20 個 plugins。安裝後可在 `/skills` 或以 `$<skill-name>`／自然語言觸發各 skill。`markitdown` 也已補上 Codex skill；它首次使用若未安裝 CLI，會先要求安裝授權。
 
 ## Insane Review 與 Deep Research
 
@@ -70,3 +70,4 @@ Deep Research 會使用已登入的 ChatGPT 訂閱網頁，不使用 OpenAI API 
 | **codex-image** | 用 Codex CLI 內建 `image_gen` 生圖 — 走 codex 帳號額度，不需額外 OpenAI / Stability API key。含 **codex-image-setup**（跨平台環境偵測：Windows / WSL / linux / darwin，寫 `${CODEX_HOME:-$HOME/.codex}/codex-image.local.md`）、injection-safe 的 Node `spawn` 呼叫（argv + stdin，`shell:false`）、反 code-drawing（禁止 LLM 改用 PIL/matplotlib 重繪）驗收與 chroma-key 去背透明流程。支援 Claude Code 與 Codex。 |
 | **hermes-exchange** | Hermes／Telegram 輕量通知 relay。Hermes 使用者可安裝 bundled runtime；其他 agent/runtime 不必用同一 plugin，只要實作 `HERMES_NOTIFY/1`、sender ID＋username 白名單與「收件只進 owner inbox」安全邊界即可互通。另有預設關閉、綁定固定 repository alias 的 Claude Code／Codex 執行層。 |
 | **session-resume-inventory** | 重開機／交接前的 session 盤點 — 列出開著的 Claude Code、Codex、tmux 與 Orca 工作階段，依 repo／worktree 與分支分組、說明即時狀態（idle／busy／shell／open），並產出精確的 `claude --resume <id>`／`codex resume <id>` 指令（盤點唯讀）。另可關機前存快照、開機後把沒在跑的 session 開回 Orca（預覽確認後才開、已在跑的不重開）。需 Linux／WSL。 |
+| **gpu-cloud-finetune** | 租雲端 GPU 的實戰手冊 — Colab CLI／gputw.ai／RunPod 三平台的開機、傳檔、停機與踩坑表；Hugging Face 釘版下載、vLLM 公平測模型、Unsloth QLoRA 微調、FP8／4-bit／GGUF 量化；三條互相獨立的停機保險（dead-man），避免機器空轉扣錢、結果丟失。附 API 腳本範本（金鑰只讀環境變數）。支援 Claude Code 與 Codex。 |
