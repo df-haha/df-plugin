@@ -7,6 +7,13 @@
 # 預設是 gputw。換平台只要改下面「平台相關」的 api_stop／instance_status 兩個函式。
 # 開跑時任何前提不對（沒設 id、時數不是整數、API 找不到這台機器），立刻報錯結束，
 # 不要等到該停機那一刻才發現停不了。
+#
+# SSH 主機指紋：預設用 accept-new（TOFU，首次信任）＋每輪專屬 known_hosts。
+# 同一輪保險期間內，若遠端主機指紋改變（可能是中間人），ssh 會拒絕連線（rc 255），
+# 走既有的 ssh_fail 計數 → 失聯收工停機。這是安全方向。
+# ⚠️ TOFU 限制：第一次連線時若已有中間人，該輪會信任到結束。
+#    gputw 不提供主機憑證或公鑰指紋，無法做更強的驗證。
+# 設 SSH_INSECURE_HOSTKEY=1 恢復舊行為（完全不驗），僅限除錯用。
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"            # 背景執行時工作目錄不一定對，一律用絕對路徑
@@ -29,6 +36,15 @@ done
 [ -x "$API" ] || { echo "FATAL: 找不到可執行的 API 腳本 $API" >&2; exit 1; }
 mkdir -p "$LOCAL_DIR" || { echo "FATAL: 建不了 $LOCAL_DIR" >&2; exit 1; }
 
+# ===== SSH 主機指紋策略 =====
+KNOWN_HOSTS="$LOCAL_DIR/known_hosts.${INSTANCE_ID}.$$"
+if [ "${SSH_INSECURE_HOSTKEY:-0}" = "1" ]; then
+  _HK_OPTS=(-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no)
+else
+  _HK_OPTS=(-o UserKnownHostsFile="$KNOWN_HOSTS" -o GlobalKnownHostsFile=/dev/null
+            -o StrictHostKeyChecking=accept-new)
+fi
+
 # ===== 平台相關：照你的平台改 =====
 api_stop() { timeout 60 "$API" POST /instances/stop "{\"instanceId\":\"$INSTANCE_ID\"}" >/dev/null 2>&1 || true; }
 instance_status() {   # 印這台機器的狀態（大寫）；API 查不到這台印 GONE；API 本身失敗印空字串
@@ -41,9 +57,9 @@ except Exception: print('')"; }
 # ===================================
 
 SSH_OPTS=(-p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=20
-          -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR)
+          "${_HK_OPTS[@]}" -o LogLevel=ERROR)
 SCP_OPTS=(-P "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=20
-          -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o LogLevel=ERROR)
+          "${_HK_OPTS[@]}" -o LogLevel=ERROR)
 rsh()  { timeout 120 ssh -n "${SSH_OPTS[@]}" "$SSH_DEST" "$@"; }        # 連線失敗回 255（timeout 到期回 124）
 pull() { timeout 300 scp -q "${SCP_OPTS[@]}" "$SSH_DEST:$1" "$LOCAL_DIR/" 2>/dev/null || true; }
 log()  { echo "[$(date '+%F %T')] $*"; }
@@ -85,6 +101,11 @@ finish() {
 }
 
 start=$(date +%s); seen_once=0; idle_since=""; ssh_fail=0; seen_running=0; gone_n=0
+if [ "${SSH_INSECURE_HOSTKEY:-0}" = "1" ]; then
+  log "⚠ SSH 主機指紋檢查已關閉（SSH_INSECURE_HOSTKEY=1），中間人攻擊不會被偵測"
+else
+  log "SSH 主機指紋：accept-new（TOFU），known_hosts=$KNOWN_HOSTS"
+fi
 log "停機保險啟動：instance=$INSTANCE_ID 狀態=$st0 poll=${POLL_SEC}s grace=${STARTUP_GRACE_MIN}m idle=${IDLE_STOP_MIN}m hard=${HARD_TIMEOUT_H}h"
 while true; do
   now=$(date +%s)

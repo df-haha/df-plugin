@@ -23,12 +23,24 @@ urlenc() { python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv
 LISTFAIL="$TMP/.list_failed"
 list_rec() {  # 印出「大小<TAB>相對路徑」；任何一層列目錄失敗都留下 $LISTFAIL
   local p="$1" out
-  out=$(curl -sS -H "@$HDR" "$BASE/vault/list?path=$(urlenc "$p")" | python3 -c '
-import json,sys
-d=json.load(sys.stdin)
-if not d.get("success"): sys.exit("list 失敗: "+str(d.get("error")))
+  out=$(curl -sS -H "@$HDR" "$BASE/vault/list?path=$(urlenc "$p")" | python3 -I -c '
+import json, sys, os
+d = json.load(sys.stdin)
+if not d.get("success"):
+    sys.exit("list 失敗: " + str(d.get("error")))
 for f in d["data"]["files"]:
-    print(("D" if f["type"]=="directory" else "F")+"\t"+str(f.get("size") or 0)+"\t"+f["name"])') \
+    name = f["name"]
+    # 路徑穿越防線：拒絕空、.、..、含 / 或 \ 或 NUL 或換行或 tab 的名字
+    if not isinstance(name, str) or not name or name in (".", ".."):
+        sys.exit("FATAL: 不合法的檔名: " + repr(name))
+    for bad in ("/", "\\", "\x00", "\n", "\t"):
+        if bad in name:
+            sys.exit("FATAL: 檔名含不允許的字元: " + repr(name))
+    ftype = f.get("type", "")
+    sz = f.get("size") or 0
+    if ftype != "directory" and (not isinstance(sz, int) or sz < 0):
+        sys.exit("FATAL: 不合法的 size: " + repr(sz))
+    print(("D" if ftype == "directory" else "F") + "\t" + str(sz) + "\t" + name)') \
     || { echo "列目錄失敗：$p" >&2; touch "$LISTFAIL"; return 1; }
   while IFS=$'\t' read -r t sz name; do
     [ -n "$t" ] || continue
@@ -45,9 +57,19 @@ N=$(wc -l < "$MANIFEST"); TOTAL=$(awk -F'\t' '{s+=$1} END{print s+0}' "$MANIFEST
 log "共 $N 檔 $((TOTAL/1048576)) MB"
 [ "$N" -gt 0 ] || { log "FATAL: 0 檔"; exit 1; }
 
+REAL_TMP="$(cd "$TMP" && pwd -P)"
 FAIL=0
 while IFS=$'\t' read -r sz rel; do
-  out="$TMP/$rel"; mkdir -p "$(dirname "$out")"
+  out="$TMP/$rel"
+  # 路徑穿越防線（第二道）：在任何檔案系統操作之前，確認解析後的路徑落在 TMP 內
+  python3 -I -c "
+import os, sys
+real = os.path.realpath(sys.argv[1])
+base = sys.argv[2]
+if not (real == base or real.startswith(base + os.sep)):
+    sys.exit('FATAL: 路徑穿越: ' + real + ' 不在 ' + base + ' 內')" \
+    "$out" "$REAL_TMP" >/dev/null || { log "FATAL: 路徑穿越偵測到 rel=$rel"; exit 1; }
+  mkdir -p "$(dirname "$out")"
   ok=0
   for try in 1 2 3; do
     rm -f "$out"
@@ -64,6 +86,40 @@ done < "$MANIFEST"
 
 if [ $FAIL -ne 0 ]; then log "FATAL: $FAIL 檔失敗，暫存留在 $TMP"; exit 2; fi
 if [ -f "$TMP/required_artifacts.sha256" ]; then
+  # 驗證 sha256 檔內的路徑不會讀到 TMP 之外（防路徑穿越）
+  python3 -I -c "
+import sys, os
+manifest_paths = set()
+with open(sys.argv[2]) as mf:
+    for line in mf:
+        parts = line.strip().split('\t', 1)
+        if len(parts) == 2:
+            manifest_paths.add(parts[1])
+base = os.path.realpath(sys.argv[3])
+with open(sys.argv[1]) as f:
+    for lineno, line in enumerate(f, 1):
+        line = line.rstrip('\n')
+        if not line:
+            continue
+        if line.startswith('\\\\'):
+            sys.exit('FATAL: sha256 檔第 %d 行用了跳脫模式' % lineno)
+        # sha256sum 格式：hash  path 或 hash *path
+        for sep in ('  ', ' *'):
+            idx = line.find(sep)
+            if idx > 0:
+                p = line[idx+len(sep):]
+                break
+        else:
+            sys.exit('FATAL: sha256 檔第 %d 行格式不對' % lineno)
+        if os.path.isabs(p) or '..' in p.split('/'):
+            sys.exit('FATAL: sha256 檔第 %d 行路徑穿越: %s' % (lineno, p))
+        if os.path.normpath(p) not in manifest_paths:
+            sys.exit('FATAL: sha256 檔第 %d 行指向未下載的檔案: %s' % (lineno, p))
+        real = os.path.realpath(os.path.join(base, p))
+        if not (real == base or real.startswith(base + os.sep)):
+            sys.exit('FATAL: sha256 檔第 %d 行路徑落在 TMP 外: %s' % (lineno, p))
+" "$TMP/required_artifacts.sha256" "$MANIFEST" "$REAL_TMP" \
+    || { log "FATAL: sha256 檔路徑驗證失敗，暫存留在 $TMP"; exit 3; }
   if (cd "$TMP" && sha256sum -c required_artifacts.sha256 --quiet); then log "sha256 驗證 PASS"
   else log "FATAL: sha256 驗證失敗，暫存留在 $TMP"; exit 3; fi
 else
