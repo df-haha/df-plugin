@@ -1,0 +1,35 @@
+{
+  "name": "gpu-cloud-finetune",
+  "version": "1.0.0",
+  "description": "Rent cloud GPUs (Colab CLI, gputw.ai, RunPod) to evaluate models, run QLoRA fine-tunes and quantization, with dead-man auto-stop safeguards.",
+  "author": {
+    "name": "df-haha"
+  },
+  "keywords": [
+    "gpu",
+    "fine-tune",
+    "qlora",
+    "colab",
+    "runpod",
+    "quantization"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "GPU Cloud Fine-tune",
+    "shortDescription": "Rent cloud GPUs safely for eval, fine-tune and quantization",
+    "longDescription": "Field-tested workflow for Colab CLI, gputw.ai and RunPod: platform choice, launch, preflight, pinned model download, QLoRA fine-tune, FP8/4-bit/GGUF quantization, harvesting results, and three independent auto-stop safeguards so machines never idle on your bill.",
+    "developerName": "df-haha",
+    "category": "Development",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "幫我開一台 Colab A100 測這個模型",
+      "用 gputw 跑 QLoRA 微調，記得掛停機保險",
+      "把這個模型量化成 FP8 並和 16-bit 比對"
+    ],
+    "brandColor": "#2563EB"
+  }
+}
