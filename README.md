@@ -74,4 +74,4 @@ Deep Research 會使用已登入的 ChatGPT 訂閱網頁，不使用 OpenAI API 
 
 ## 授權
 
-本 repo 中 df-haha 撰寫的內容採 [MIT License](LICENSE)。自帶授權檔、或註明作者為他人／改編自上游的 plugin，依原作者的授權，詳見 `LICENSE` 的適用範圍說明。
+本 repo 中 df-haha 撰寫的內容採 [MIT License](LICENSE)。自帶授權檔、或註明作者為他人／改編自上游的 plugin，依原作者的授權，詳見 [`NOTICE`](NOTICE)。

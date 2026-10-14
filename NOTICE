@@ -1,0 +1,12 @@
+Scope / 適用範圍
+
+This license covers the work authored by df-haha in this repository.
+
+- Plugins or files that ship their own license file keep that license
+  (for example plugins/insane-review/LICENSE, plugins/pilotfish-roles/LICENSE.pilotfish,
+  plugins/codex-image/vendor/LICENSE-imagegen.txt).
+- Plugins credited to other authors or adapted from upstream projects in the
+  README (for example deep-research-ryan, fact-check, df-graph, ruling-ledger)
+  remain under their original authors' terms; this license does not relicense them.
+
+本授權適用於 df-haha 在本 repo 撰寫的內容。自帶授權檔的 plugin 依其原授權；README 註明作者為他人或改編自上游的 plugin，著作權歸原作者，不在本授權範圍內。
