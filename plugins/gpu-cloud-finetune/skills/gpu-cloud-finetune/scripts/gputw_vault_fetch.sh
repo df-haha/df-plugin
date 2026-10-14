@@ -60,15 +60,16 @@ log "共 $N 檔 $((TOTAL/1048576)) MB"
 REAL_TMP="$(cd "$TMP" && pwd -P)"
 FAIL=0
 while IFS=$'\t' read -r sz rel; do
-  out="$TMP/$rel"; mkdir -p "$(dirname "$out")"
-  # 路徑穿越防線（第二道）：確認解析後的路徑落在 TMP 內
-  real_out="$(python3 -I -c "
+  out="$TMP/$rel"
+  # 路徑穿越防線（第二道）：在任何檔案系統操作之前，確認解析後的路徑落在 TMP 內
+  python3 -I -c "
 import os, sys
 real = os.path.realpath(sys.argv[1])
 base = sys.argv[2]
 if not (real == base or real.startswith(base + os.sep)):
-    sys.exit('FATAL: 路徑穿越: ' + real + ' 不在 ' + base + ' 內')
-print(real)" "$out" "$REAL_TMP")" || { log "FATAL: 路徑穿越偵測到 rel=$rel"; exit 1; }
+    sys.exit('FATAL: 路徑穿越: ' + real + ' 不在 ' + base + ' 內')" \
+    "$out" "$REAL_TMP" >/dev/null || { log "FATAL: 路徑穿越偵測到 rel=$rel"; exit 1; }
+  mkdir -p "$(dirname "$out")"
   ok=0
   for try in 1 2 3; do
     rm -f "$out"
@@ -112,6 +113,8 @@ with open(sys.argv[1]) as f:
             sys.exit('FATAL: sha256 檔第 %d 行格式不對' % lineno)
         if os.path.isabs(p) or '..' in p.split('/'):
             sys.exit('FATAL: sha256 檔第 %d 行路徑穿越: %s' % (lineno, p))
+        if os.path.normpath(p) not in manifest_paths:
+            sys.exit('FATAL: sha256 檔第 %d 行指向未下載的檔案: %s' % (lineno, p))
         real = os.path.realpath(os.path.join(base, p))
         if not (real == base or real.startswith(base + os.sep)):
             sys.exit('FATAL: sha256 檔第 %d 行路徑落在 TMP 外: %s' % (lineno, p))
