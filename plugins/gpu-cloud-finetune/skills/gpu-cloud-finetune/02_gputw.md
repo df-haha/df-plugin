@@ -129,6 +129,6 @@ H100 我們去問時常缺貨。
 | `/vault` API 回 `missing required scope: vault:read` | 金鑰沒開 vault 權限 | 到網頁替 API 金鑰加 `vault:read` |
 | 停機保險的硬上限沒照預期生效 | 沿用了別支腳本的預設值（曾經是 55 小時） | 每次發射都明確寫上硬上限，並在 log 印出實際生效值 |
 | 發射時 ssh 回 rc=124 | 發射用的 ssh 設了逾時 | 實測無害；以機上 log 和標記檔為準 |
-| ssh 被 hostkey 警告擋住、或出現 bad signature | 本機記得的舊主機指紋跟新機器對不上 | 自動化 ssh 加 `-o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no` |
+| ssh 被 hostkey 警告擋住、或出現 bad signature | 本機記得的舊主機指紋跟新機器對不上 | 用每輪專屬 known_hosts＋`accept-new`：`-o UserKnownHostsFile=$LOCAL_DIR/known_hosts.$INSTANCE_ID.$$ -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=accept-new`。同一輪內第一次連線信任新指紋，之後若指紋改變（可能是中間人）會拒絕連線。**不建議**用 `StrictHostKeyChecking=no`＋`UserKnownHostsFile=/dev/null`——完全關掉檢查會讓中間人能假裝訓練還在跑（停機保險不停機）或塞假檔案。停機保險範本 `deadman_template.sh` 已預設 accept-new；除錯時設 `SSH_INSECURE_HOSTKEY=1` 可恢復舊行為。 |
 | Blackwell 卡上 `torch.cuda.is_available()` 是 True，一算就炸 "no kernel image" | torch 不是 CUDA 12.8+ 編的 | 先跑 `gpu_preflight.py` |
 | `pip install` 後 torch／transformers 版本被偷改 | 沒鎖版本、`-q` 讓它無聲 | 用 lock 檔 |
