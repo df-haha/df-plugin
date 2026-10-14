@@ -1,6 +1,6 @@
 {
   "name": "gpu-cloud-finetune",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Rent cloud GPUs (Colab CLI, gputw.ai, RunPod) to evaluate models, run QLoRA fine-tunes and quantization, with dead-man auto-stop safeguards.",
   "author": {
     "name": "df-haha"
