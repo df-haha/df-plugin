@@ -1,7 +1,7 @@
 {
   "name": "daily-agenda",
   "version": "0.0.1-dev",
-  "description": "（開發中，未發布）一次讀取 Outlook 信件、行事曆與 LINE Desktop，依個人判斷準則彙整待辦與行程；對外動作（回 LINE、建行事曆）一律經本人確認。僅支援 Windows 原生 Claude Code。",
+  "description": "（測試中）一次讀取 Outlook 信件、行事曆與 LINE Desktop，依個人判斷準則彙整待辦與行程；對外動作（回 LINE、建行事曆）一律經本人確認。僅支援 Windows 原生 Claude Code。",
   "author": {
     "name": "df-haha"
   }
