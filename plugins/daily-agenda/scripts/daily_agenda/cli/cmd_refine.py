@@ -124,14 +124,18 @@ def handle(argv: list[str], deps: Deps) -> int:
         )
 
         # Run analyzer
+        progress = deps.progress
         try:
             prompt = analyze.load_prompt("refine")
             bundle_bytes = bundle_path.read_bytes()
-            analyzer_output = analyze.run_analyzer(
-                bundle_bytes, prompt,
-                model=cfg.get("analysis", {}).get("model"),
-                timeout_s=cfg.get("analysis", {}).get("timeout_s", 600),
-            )
+            progress.event("analyze_batch", i=1, n=1)
+            with progress.heartbeat():
+                analyzer_output = analyze.run_analyzer(
+                    bundle_bytes, prompt,
+                    model=cfg.get("analysis", {}).get("model"),
+                    timeout_s=cfg.get("analysis", {}).get("timeout_s", 600),
+                )
+            progress.event("analyze_batch_done", i=1, n=1)
             draft_text, changes = validate.validate_refine_draft(
                 analyzer_output.output,
             )

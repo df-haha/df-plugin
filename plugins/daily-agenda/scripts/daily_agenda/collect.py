@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
+from .progress import Progress
+
 
 # ---------------------------------------------------------------------------
 # Protocols (duck-typed sources — tests inject fakes)
@@ -108,6 +110,7 @@ def _collect_line(
     line: LineSource,
     now: datetime,
     initial_days: int,
+    progress: Progress = Progress(None),
 ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
     """Collect LINE messages.
 
@@ -164,10 +167,14 @@ def _collect_line(
     known_chats = list(known_chats_map.values())
 
     # Read messages for each active chat
+    progress.event("line_list", n=len(active_chats))
     records: list[dict[str, Any]] = []
     seen_src_ids: set[str] = set()
+    chat_index = 0
 
     for chat in active_chats:
+        chat_index += 1
+        progress.throttled_chat(chat_index, len(active_chats))
         chat_ref = chat.get("chatRef", "")
         chat_name = chat.get("chatName", "")
         chat_type = chat.get("chatType", "auto")
@@ -259,6 +266,7 @@ def _collect_mail(
     graph: GraphSource,
     now: datetime,
     initial_days: int,
+    progress: Progress = Progress(None),
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, str]]:
     """Collect Outlook mail.  Returns (records, status_dict, updated_mail_index)."""
     checkpoint = (state.get("checkpoints") or {}).get("mail")
@@ -275,7 +283,8 @@ def _collect_mail(
     seen_src_ids: set[str] = set()
     from_ms = int(from_dt.timestamp() * 1000)
 
-    for folder in folders:
+    for folder_idx, folder in enumerate(folders, 1):
+        progress.event("mail", i=folder_idx, n=len(folders))
         items = graph.mail_list(days=days, folder=folder)
         for item in items:
             msg_id = item.get("id", "")
@@ -346,8 +355,10 @@ def _collect_calendar(
     *,
     graph: GraphSource,
     now: datetime,
+    progress: Progress = Progress(None),
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Collect calendar events (today + 3 days, always full refresh)."""
+    progress.event("calendar")
     tz = ZoneInfo(cfg.get("tz", "Asia/Taipei"))
     items = graph.calendar_list(days_ahead=3, days_back=1)
 
@@ -399,6 +410,7 @@ def collect(
     graph: GraphSource | None = None,
     run_id: str = "",
     initial_days: int = 14,
+    progress: Progress = Progress(None),
 ) -> CollectResult:
     """Run collection across all enabled sources.
 
@@ -411,6 +423,7 @@ def collect(
     graph : Graph source (None = disabled / not configured)
     run_id : unique identifier for this run
     initial_days : lookback days when no checkpoint exists
+    progress : progress writer (default no-op)
     """
     # -- consent gate (must be first) --
     consent = (cfg.get("consent") or {}).get("accepted_at")
@@ -434,6 +447,7 @@ def collect(
         try:
             line_records, line_status, known_chats, new_chats = _collect_line(
                 cfg, state, line=line, now=now, initial_days=initial_days,
+                progress=progress,
             )
             result.records.extend(line_records)
             result.source_status["line"] = line_status
@@ -464,6 +478,7 @@ def collect(
         try:
             mail_records, mail_status, mail_index = _collect_mail(
                 cfg, state, graph=graph, now=now, initial_days=initial_days,
+                progress=progress,
             )
             result.records.extend(mail_records)
             result.source_status["mail"] = mail_status
@@ -489,7 +504,7 @@ def collect(
     # -- Calendar --
     if graph is not None:
         try:
-            cal_records, cal_status = _collect_calendar(cfg, graph=graph, now=now)
+            cal_records, cal_status = _collect_calendar(cfg, graph=graph, now=now, progress=progress)
             result.records.extend(cal_records)
             result.source_status["calendar"] = cal_status
         except Exception as exc:

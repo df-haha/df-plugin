@@ -217,6 +217,80 @@ def validate_criteria_draft(obj: dict) -> str:
     return text
 
 
+# ---------------------------------------------------------------------------
+# Observations (criteria map-reduce, batch analysis)
+# ---------------------------------------------------------------------------
+
+_MAX_OBSERVATIONS: int = 40
+_MAX_OBS_CATEGORY: int = 50
+_MAX_OBS_PATTERN: int = 200
+_VALID_FREQUENCIES: frozenset[str] = frozenset({"high", "medium", "low"})
+_VALID_OBS_PRIORITIES: frozenset[str] = frozenset({"P0", "P1", "P2"})
+_ALLOWED_OBS_KEYS: frozenset[str] = frozenset({"category", "pattern", "frequency", "priority_signal"})
+
+
+def validate_observations(obj: dict) -> list[dict]:
+    """Validate criteria-observe model output.
+
+    Returns the list of observation dicts on success; raises
+    :class:`ModelOutputInvalid` on structural or content failure.
+    """
+    if not isinstance(obj, dict):
+        raise ModelOutputInvalid("observations output is not an object")
+
+    if obj.get("schema_version") != 1:
+        raise ModelOutputInvalid("missing or unsupported schema_version")
+
+    allowed_top = {"schema_version", "observations"}
+    if set(obj.keys()) - allowed_top:
+        raise ModelOutputInvalid("unknown fields in observations output")
+
+    obs_list = obj.get("observations")
+    if not isinstance(obs_list, list):
+        raise ModelOutputInvalid("'observations' must be a list")
+
+    if len(obs_list) > _MAX_OBSERVATIONS:
+        raise ModelOutputInvalid(
+            f"too many observations ({len(obs_list)} > {_MAX_OBSERVATIONS})"
+        )
+
+    result: list[dict] = []
+    for i, item in enumerate(obs_list):
+        if not isinstance(item, dict):
+            raise ModelOutputInvalid(f"observations[{i}] is not an object")
+        if set(item.keys()) != _ALLOWED_OBS_KEYS:
+            raise ModelOutputInvalid(f"observations[{i}] has invalid keys")
+
+        cat = item.get("category")
+        if not isinstance(cat, str) or not cat.strip():
+            raise ModelOutputInvalid(f"observations[{i}].category is empty or missing")
+        if len(cat) > _MAX_OBS_CATEGORY:
+            raise ModelOutputInvalid(f"observations[{i}].category too long")
+
+        pattern = item.get("pattern")
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise ModelOutputInvalid(f"observations[{i}].pattern is empty or missing")
+        if len(pattern) > _MAX_OBS_PATTERN:
+            raise ModelOutputInvalid(f"observations[{i}].pattern too long")
+
+        freq = item.get("frequency")
+        if freq not in _VALID_FREQUENCIES:
+            raise ModelOutputInvalid(f"observations[{i}].frequency invalid")
+
+        prio = item.get("priority_signal")
+        if prio not in _VALID_OBS_PRIORITIES:
+            raise ModelOutputInvalid(f"observations[{i}].priority_signal invalid")
+
+        result.append({
+            "category": cat,
+            "pattern": pattern,
+            "frequency": freq,
+            "priority_signal": prio,
+        })
+
+    return result
+
+
 _MAX_REFINE_CHANGES: int = 10
 _MAX_CHANGE_SUMMARY: int = 200
 _MAX_CHANGE_REASON: int = 200

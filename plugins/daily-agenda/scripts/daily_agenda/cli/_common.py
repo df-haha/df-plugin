@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from daily_agenda import state as _state
 from daily_agenda.messages import humanize
+from daily_agenda.progress import Progress
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +39,9 @@ class Deps:
     arch_checker: Callable[[], dict[str, str]] | None = None
     fetch: Callable[..., bytes] | None = None
     db_dir: Path | None = None
+
+    # Progress writer — injected from --progress-file or env; None = no-op.
+    progress: Progress = field(default_factory=lambda: Progress(None))
 
     @classmethod
     def production(cls) -> Deps:
@@ -108,13 +112,36 @@ class Deps:
 # JSON output
 # ---------------------------------------------------------------------------
 
+# Module-level progress reference so emit() can write terminal events.
+# Set by main() at entry, cleared in finally.  Tests call main() repeatedly
+# in-process, so the reset matters.
+_current_progress: Progress | None = None
+
+
+def set_current_progress(p: Progress | None) -> None:
+    """Set the module-level progress reference (called by main)."""
+    global _current_progress
+    _current_progress = p
+
+
 def emit(obj: dict[str, Any], *, exit_code: int | None = None) -> int:
     """Print one JSON object to stdout; return exit code.
 
     Fills ``message`` from ``humanize(code)`` when not already present.
+    Also writes a terminal ``done``/``failed`` progress event when a
+    progress file is active.
     """
     if "message" not in obj:
         obj["message"] = humanize(obj.get("code"))
+
+    # Terminal progress event
+    if _current_progress is not None:
+        code = obj.get("code")
+        if obj.get("ok", False):
+            _current_progress.done(code=code)
+        else:
+            _current_progress.failed(code=code)
+
     json.dump(obj, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
     sys.stdout.flush()
@@ -136,9 +163,10 @@ class _ArgParser(argparse.ArgumentParser):
 
 
 def parse_root_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
-    """Parse only the top-level command name; return (ns, remaining)."""
-    parser = _ArgParser(prog="daily_agenda", add_help=False)
+    """Parse top-level command name and ``--progress-file``; return (ns, remaining)."""
+    parser = _ArgParser(prog="daily_agenda", add_help=False, allow_abbrev=False)
     parser.add_argument("command", nargs="?", default=None)
+    parser.add_argument("--progress-file", default=None, dest="progress_file")
     return parser.parse_known_args(argv)
 
 

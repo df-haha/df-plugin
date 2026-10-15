@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from daily_agenda import criteria, ledger, state
+from daily_agenda.analyze import AnalyzerResult
 from daily_agenda.cli import main
 from daily_agenda.cli._common import Deps
 from tests.conftest import (
@@ -82,8 +83,8 @@ class TestF2FactoryRaise:
             ),
         )
 
-        with patch("daily_agenda.analyze.analyze_batches") as mock:
-            mock.return_value = {"schema_version": 1, "items": []}
+        with patch("daily_agenda.analyze.run_analyzer") as mock:
+            mock.return_value = AnalyzerResult(output={"schema_version": 1, "items": []}, ms=0)
             code, obj = _run_cli(["run"], deps, capsys)
 
         # Should succeed with LINE skipped, not INTERNAL_ERROR
@@ -270,8 +271,8 @@ class TestF7NewChatsRef:
             line_source_factory=lambda **kw: fake_line,
         )
 
-        with patch("daily_agenda.analyze.analyze_batches") as mock:
-            mock.return_value = {"schema_version": 1, "items": []}
+        with patch("daily_agenda.analyze.run_analyzer") as mock:
+            mock.return_value = AnalyzerResult(output={"schema_version": 1, "items": []}, ms=0)
             code, obj = _run_cli(["run"], deps, capsys)
 
         assert obj["ok"] is True

@@ -173,6 +173,7 @@ def _run_pipeline(
     try:
         result = collect.collect(
             cfg, st, now=now, line=line_src, graph=graph_src, run_id=run_id,
+            progress=deps.progress,
         )
     except collect.CollectError as exc:
         return emit({"ok": False, "code": exc.code})
@@ -212,14 +213,27 @@ def _run_pipeline(
         )
         bundle_paths.append(bp)
 
-    # Analyze
+    # Analyze — with progress events per batch
+    progress = deps.progress
     model_output: dict[str, Any]
     try:
         prompt = analyze.load_prompt("agenda")
-        batch_bytes_list = [bp.read_bytes() for bp in bundle_paths]
-        model_output = analyze.analyze_batches(batch_bytes_list, prompt,
-                                                model=cfg.get("analysis", {}).get("model"),
-                                                timeout_s=cfg.get("analysis", {}).get("timeout_s", 600))
+        n_batches = len(bundle_paths)
+        items: list[Any] = []
+        for bi, bp in enumerate(bundle_paths, 1):
+            progress.event("analyze_batch", i=bi, n=n_batches)
+            with progress.heartbeat():
+                ar = analyze.run_analyzer(
+                    bp.read_bytes(), prompt,
+                    model=cfg.get("analysis", {}).get("model"),
+                    timeout_s=cfg.get("analysis", {}).get("timeout_s", 600),
+                )
+            progress.event("analyze_batch_done", i=bi, n=n_batches)
+            batch_items = ar.output.get("items")
+            if not isinstance(batch_items, list):
+                raise analyze.AnalyzerError("MODEL_OUTPUT_INVALID")
+            items.extend(batch_items)
+        model_output = {"schema_version": 1, "items": items}
     except analyze.AnalyzerError as exc:
         return emit({"ok": False, "code": exc.code})
 

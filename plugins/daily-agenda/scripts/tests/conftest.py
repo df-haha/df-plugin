@@ -94,12 +94,14 @@ class FakeLine:
         probe_ok: bool = True,
         probe_code: str | None = None,
         fail_on_messages: str | None = None,
+        fail_on_recent_chats: str | None = None,
     ) -> None:
         self._chats = chats or []
         self._messages = messages or []
         self._probe_ok = probe_ok
         self._probe_code = probe_code
         self._fail_on_messages = fail_on_messages
+        self._fail_on_recent_chats = fail_on_recent_chats
         self.probe_calls = 0
         self.recent_chats_calls = 0
         self.messages_calls = 0
@@ -112,6 +114,9 @@ class FakeLine:
 
     def recent_chats(self, *, days: int, offset: int = 0, limit: int = 50) -> dict[str, Any]:
         self.recent_chats_calls += 1
+        if self._fail_on_recent_chats:
+            from daily_agenda.line_source import LineSourceError
+            raise LineSourceError(self._fail_on_recent_chats)
         page = self._chats[offset:offset + limit]
         return {
             "ok": True,

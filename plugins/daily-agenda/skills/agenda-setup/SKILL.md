@@ -1,7 +1,7 @@
 ---
 name: agenda-setup
 description: daily-agenda 首次設定（第 0–8 步）：資料外送說明與同意、環境檢查、LINE 試讀、自動判定 LINE 帳號資料、串 Outlook、選擇不讀的 LINE 對話、個人資料夾索引、輸出偏好與排程、掃描過去資料建立判斷準則。也處理修改排除對話、重設、解除安裝。觸發：「/agenda-setup」「設定每日彙整」「daily agenda 設定」「改排除的 LINE 對話」「解除安裝 daily-agenda」。
-allowed-tools: Bash, Read, Write, AskUserQuestion
+allowed-tools: Bash, Read, Write, AskUserQuestion, Monitor
 ---
 
 # daily-agenda 首次設定
@@ -19,8 +19,26 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 1. **第 0 步同意之前，不得執行任何會讀取 LINE、信件、行事曆的指令**（`probe`、`outlook-preview`、`chats list`、`line-detect`、`trust probe`、`criteria draft`）。
 2. 使用者看不懂的技術細節不要問（例如版本雜湊、資料庫檔名）；只在真的需要使用者決定時才問。
 3. 每個 AskUserQuestion 卡片要自足：寫清楚背景、選項代表什麼、預設是哪個。
-4. 不要自己讀 `runs/` 裡的 bundle 或任何收集到的原始資料；只看指令的摘要輸出。
+4. 不要自己讀 `runs/` 裡的 bundle 或任何收集到的原始資料；只看指令的摘要輸出。唯一例外：`runs/progress/*.jsonl` 可透過 `DA progress show` 或 `DA progress watch` 讀取（進度檔不含原始資料）。
 5. 本 plugin **不會**把 LINE 註冊成你的 MCP 工具，也不會在設定中送出任何訊息。
+
+## 長時間指令的執行模式
+
+以下指令可能執行超過 2 分鐘：`runtime install`（下載 ~100MB）、`trust probe`（試讀 LINE ~11 秒/次）、`criteria draft`。對這些指令：
+
+1. 先建立 progress file（進度檔）：`DA progress new` → 取得 `progress_file` 路徑。
+2. 用 Bash 的 `run_in_background: true` 啟動指令，加上 `--progress-file "<路徑>"`：
+   ```bash
+   uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda <子指令> --progress-file "<路徑>"
+   ```
+3. 用 Monitor 工具追蹤進度（每行一則繁中進度訊息，完成或失敗時自動結束）：
+   ```bash
+   uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda progress watch --file "<路徑>"
+   ```
+4. 背景指令完成時（harness 通知），**停止 Monitor**（如果還在跑），以背景指令的 stdout JSON 為權威結果（涵蓋 crash 或 kill 後無 terminal event 的情況）。
+5. **如果 Monitor 不可用**（fallback，備援）：前景執行 `DA progress watch --file "<路徑>" --max-s 100`（`--max-s` 指定總秒數上限，到期自動結束 exit 3）。若 exit 3，重跑 watch（直到 exit 0 或 1 表示完成/失敗）。背景 Bash 完成通知到達時，停止 watch 並以 stdout JSON 為準。
+
+向使用者轉述進度時，只在階段變化時簡短說一句（例如「正在讀取 LINE 聊天室 35/170」「AI 分析中」），不要每個事件都說。
 
 ## 開始前
 
@@ -50,13 +68,13 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
    - `CLAUDE_FLAGS_MISSING` → 請使用者更新 Claude Code 後重跑，結束。
    - 缺 Node／uv → 給指令，請使用者裝好後說「好了」，再重跑 `DA envcheck`。
    - `LINE_NOT_RUNNING` → 請使用者打開 LINE 並登入；若使用者說不用 LINE，記下「只用 Outlook」，跳到第 3 步。
-2. `DA runtime install`（下載並驗證執行元件；可能要幾分鐘，先告訴使用者在下載）。失敗時轉述 `message`；雜湊不符一律停止，不要嘗試繞過。
+2. `DA runtime install`（下載並驗證執行元件；可能要幾分鐘）。**使用長時間指令的執行模式**：先 `DA progress new`，再背景執行 + Monitor 追蹤，告訴使用者「正在下載約 100MB 的執行元件，請稍候」。失敗時轉述 `message`；雜湊不符一律停止，不要嘗試繞過。
 
 ## 第 2 步：LINE 試讀與帳號偵測（US-1, US-2）
 
 用 AskUserQuestion 問一句：「要試讀一次 LINE，確認讀得到嗎？（會檢查 LINE 程式的數位簽章，再試讀一則對話資訊，不會送出任何東西）」選項「好（建議）」／「先跳過 LINE，只用 Outlook」。
 
-- 好 → `DA trust probe`。這個指令會自動完成簽章驗證、帳號資料偵測（如果還沒設定的話）和試讀，一步到位。
+- 好 → `DA trust probe`。**使用長時間指令的執行模式**（trust probe 每個 LINE 資料庫試讀約 11 秒）。
   - `trusted`／`already_trusted` → 告訴使用者「已自動找到你目前登入的 LINE 資料，並確認讀得到」，繼續第 3 步。
   - `MULTIPLE_DATABASES_OK` → 這種情況少見。用 AskUserQuestion 列出 `candidates`（顯示「最後更新時間」，不要顯示檔名以外的技術細節），說明「這台電腦有多份 LINE 資料都讀得到，請選最近在用的那一份（通常是最後更新時間最新的）」，然後 `DA line-select --database <候選的 name>`，再重跑一次 `DA trust probe`。
   - `LINE_SIGNATURE_INVALID` → 轉述；LINE 改為不使用，跳到第 3 步。
@@ -101,10 +119,11 @@ AskUserQuestion：「你有沒有放個人工作背景的資料夾（例如筆�
 ## 第 7 步：建立判斷準則第一版（US-6）
 
 1. AskUserQuestion：「要掃描多久以前的資料來建立你的判斷準則？」選項「7 天（最快）」「14 天（建議）」「30 天（LINE 一次最多可讀取的天數，較完整但較慢）」。
-2. `DA criteria draft --days N`（告訴使用者需要一點時間）。
-3. 讀取輸出的 `draft_path`（這是 AI 整理出的準則草稿，不是原始資料），把全文給使用者看，問「要直接採用、還是要修改哪裡？」。
-4. 依使用者意見修改草稿（用 Write 寫到同一個 draft_path），直到使用者說同意。
-5. `DA criteria save --file "<draft_path>"` → 回報「判斷準則第 1 版已儲存」。
+2. 告訴使用者「正在掃描過去 N 天的資料，由 AI 分析並建立判斷準則。14 天大約需要 3–5 分鐘，30 天可能更久。」
+3. **使用長時間指令的執行模式**：先 `DA progress new`，再背景執行 `DA criteria draft --days N --progress-file "<路徑>"`，用 Monitor 追蹤 `DA progress watch --file "<路徑>"`。
+4. 讀取輸出的 `draft_path`（這是 AI 整理出的準則草稿，不是原始資料），把全文給使用者看，問「要直接採用、還是要修改哪裡？」。
+5. 依使用者意見修改草稿（用 Write 寫到同一個 draft_path），直到使用者說同意。
+6. `DA criteria save --file "<draft_path>"` → 回報「判斷準則第 1 版已儲存」。
 
 ## 完成
 

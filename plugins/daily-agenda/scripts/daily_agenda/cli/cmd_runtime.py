@@ -21,15 +21,16 @@ def handle(argv: list[str], deps: Deps) -> int:
         components: list[str] | None = None
         if "--with-cua" in argv:
             components = list(runtime.DEFAULT_COMPONENTS) + ["cua"]
-        result = runtime.install(
-            deps.home,
-            plugin_root=deps.plugin_root,
-            components=components,
-            fetch=deps.fetch,
-            runner=runner,
-            which=which,
-            arch_checker=deps.arch_checker,
-        )
+        with deps.progress.heartbeat():
+            result = runtime.install(
+                deps.home,
+                plugin_root=deps.plugin_root,
+                components=components,
+                fetch=deps.fetch,
+                runner=runner,
+                which=which,
+                arch_checker=deps.arch_checker,
+            )
         return emit({"ok": result["ok"], "code": None, "components": result["components"]})
 
     elif sub == "status":
