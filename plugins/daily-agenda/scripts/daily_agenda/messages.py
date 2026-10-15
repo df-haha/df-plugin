@@ -50,6 +50,9 @@ _MESSAGES: dict[str, str] = {
     "RUNTIME_ZIP_UNSAFE": "下載的壓縮檔含有不安全的路徑，已拒絕解壓。請回報此問題。",
     "RUNTIME_PLATFORM_MISMATCH": "Python 環境不是 Windows 64 位元，無法安裝所需元件。",
     "RUNTIME_INSTALL_FAILED": "元件安裝失敗，舊版本已保留。請確認磁碟空間後重試。",
+    # CLI
+    "ARG_ERROR": "指令參數不正確，請確認用法。",
+    "INTERNAL_ERROR": "發生內部錯誤。請把這個訊息告訴維護者。",
 }
 
 

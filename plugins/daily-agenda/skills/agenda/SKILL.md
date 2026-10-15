@@ -33,7 +33,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
    - 「今天的彙整已產生：<outputs 路徑>（報表代碼 <report_code>）。」
    - 待辦數量摘要（今天要處理 N 項，其中 P0 有 X 項；可能已完成 M 項）。
    - 任何 `sources` 狀態不是 ok 的來源，轉述其 `message`（例如「LINE 這次沒讀到：請打開 LINE 視窗…；下次會補讀這段期間」）。
-   - `new_chats` 不是空的 → 「本次新增的 LINE 對話：…。要不要把其中某些設成不讀？」使用者要排除 → `DA exclude --add <ref>`。
+   - `new_chats` 不是空的（格式是 `[{ref, name}]`）→ 「本次新增的 LINE 對話：<列出 name>。要不要把其中某些設成不讀？」使用者要排除 → 用對應的 `ref` 呼叫 `DA exclude --add <ref>`。
    - `rejected_items` > 0 → 一句話：「有 N 筆 AI 結果因為引用不到原始資料而被略過。」
 4. 提供開啟方式：在 Windows 上可用 `start "" "<路徑>"` 開啟（使用者同意再開）。
 5. 若 `needs.refine: true` → 進入 C。
@@ -43,7 +43,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 使用者說「R-7K2 的 3、5 做完了」：
 1. `DA mark-done --report R-7K2 --items 3,5`。
 2. 成功 → 回報哪幾項已標記完成（用輸出中的標題）。
-3. `STALE_REPORT`（使用者沒帶報表代碼、或代碼不是最新一份）→ `DA show --report <使用者說的代碼或省略> --items 3,5` 或請使用者描述，**重新列出相關項目的代碼與標題**，用 AskUserQuestion 請使用者確認是哪幾項，再 `DA mark-done --todo T-…`。絕不猜測。
+3. `STALE_REPORT`（使用者帶的報表代碼不是最新一份，或沒帶代碼）→ 告訴使用者「你說的報表代碼不是最新的，編號可能已經變了」，然後用 `DA show --todo T-…`（請使用者告訴你待辦代碼 T-xxxx）或讀最新彙整檔幫使用者找到正確的 T-xxxx，再 `DA mark-done --todo T-…`。絕不猜測。
 
 其他：
 - 「T-4821 做完了」→ `DA mark-done --todo T-4821`。

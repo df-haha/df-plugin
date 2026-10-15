@@ -24,7 +24,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 
 ## 開始前
 
-先跑 `DA consent --status` 與 `DA config get`。如果已經完成過設定，問使用者要「從頭重設」「只改排除的 LINE 對話（跳到第 5 步）」「只改輸出或排程（跳到第 7 步）」「重建判斷準則（跳到第 8 步）」「解除安裝」。
+先跑 `DA consent --status` 與 `DA config get`。如果已經完成過設定，問使用者要「從頭重設」「只改排除的 LINE 對話（跳到第 4 步）」「只改輸出或排程（跳到第 6 步）」「重建判斷準則（跳到第 7 步）」「解除安裝」。
 
 ## 第 0 步：資料外送說明與同意（US-0）
 
@@ -49,27 +49,20 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
    - `NOT_WINDOWS` → 說明只支援 Windows 原生 Claude Code，結束。
    - `CLAUDE_FLAGS_MISSING` → 請使用者更新 Claude Code 後重跑，結束。
    - 缺 Node／uv → 給指令，請使用者裝好後說「好了」，再重跑 `DA envcheck`。
-   - `LINE_NOT_RUNNING` → 請使用者打開 LINE 並登入；若使用者說不用 LINE，記下「只用 Outlook」，跳到第 4 步。
+   - `LINE_NOT_RUNNING` → 請使用者打開 LINE 並登入；若使用者說不用 LINE，記下「只用 Outlook」，跳到第 3 步。
 2. `DA runtime install`（下載並驗證執行元件；可能要幾分鐘，先告訴使用者在下載）。失敗時轉述 `message`；雜湊不符一律停止，不要嘗試繞過。
 
-## 第 2 步：LINE 試讀（US-1）
+## 第 2 步：LINE 試讀與帳號偵測（US-1, US-2）
 
-用 AskUserQuestion 問一句：「要試讀一次 LINE，確認讀得到嗎？（只讀最近的一則對話資訊，不會送出任何東西）」選項「好（建議）」／「先跳過 LINE，只用 Outlook」。
+用 AskUserQuestion 問一句：「要試讀一次 LINE，確認讀得到嗎？（會檢查 LINE 程式的數位簽章，再試讀一則對話資訊，不會送出任何東西）」選項「好（建議）」／「先跳過 LINE，只用 Outlook」。
 
-- 好 → `DA trust probe`。
-  - `trusted`／`already_trusted` → 繼續第 3 步。
-  - `LINE_SIGNATURE_INVALID` → 轉述；LINE 改為不使用，跳到第 4 步。
+- 好 → `DA trust probe`。這個指令會自動完成簽章驗證、帳號資料偵測（如果還沒設定的話）和試讀，一步到位。
+  - `trusted`／`already_trusted` → 告訴使用者「已自動找到你目前登入的 LINE 資料，並確認讀得到」，繼續第 3 步。
+  - `MULTIPLE_DATABASES_OK` → 這種情況少見。用 AskUserQuestion 列出 `candidates`（顯示「最後更新時間」，不要顯示檔名以外的技術細節），說明「這台電腦有多份 LINE 資料都讀得到，請選最近在用的那一份（通常是最後更新時間最新的）」，然後 `DA line-select --database <候選的 name>`，再重跑一次 `DA trust probe`。
+  - `LINE_SIGNATURE_INVALID` → 轉述；LINE 改為不使用，跳到第 3 步。
   - 其他代碼（例如 `SESSION_KEY_UNAVAILABLE`）→ 轉述 `message`（例如「請打開 LINE 視窗並確認已登入」），請使用者處理後說「好了」再試一次；第二次仍失敗就問要不要先只用 Outlook。
 
-## 第 3 步：自動判定 LINE 帳號資料（US-2）
-
-`DA line-detect`：
-
-- `status: ok` → 告訴使用者「已自動找到你目前登入的 LINE 資料」，繼續。
-- `status: multiple` → 這種情況少見。用 AskUserQuestion 列出候選（顯示「最後更新時間」，不要顯示檔名以外的技術細節），說明「這台電腦有多份 LINE 資料都讀得到，請選最近在用的那一份（通常是最後更新時間最新的）」，然後 `DA line-select --database <檔名>`。
-- `status: failed` → 轉述 `message`（AS-2），問「先只用 Outlook 繼續嗎？」。
-
-## 第 4 步：串 Outlook（US-3）
+## 第 3 步：串 Outlook（US-3）
 
 1. 先確認使用者已安裝並登入 `df-graph`：`DA probe`，看 `sources.mail`。
    - `DF_GRAPH_NOT_REGISTERED`／`DF_GRAPH_AUTH` → 請使用者執行 `/df-graph-setup`（那是另一個 plugin 的設定流程，會開瀏覽器登入一次），完成後回來說「好了」，再跑一次 `DA probe`（本工具直接啟動 df-graph，不需要重啟 Claude Code）。
@@ -78,7 +71,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 3. `DA outlook-preview`，把最近 3 封信的主旨與寄件者、今天的行程列給使用者看。
 4. 用 AskUserQuestion：「上面是你最近的信與今天的行程，看起來正確嗎？」選項「對（預設，直接選這個）」／「不對」。不對 → 請使用者描述，協助排查（通常是登入了別的帳號 → 重跑 `/df-graph-setup`）。
 
-## 第 5 步：選擇不讀的 LINE 對話（US-12）
+## 第 4 步：選擇不讀的 LINE 對話（US-12）
 
 （沒有使用 LINE 就跳過。）
 
@@ -87,14 +80,14 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 3. 對話多時，用多個 AskUserQuestion（multiSelect，每張最多 4 個選項不夠用時）——建議做法：先把清單用編號列在回覆正文，再請使用者直接打編號（例如「3, 7, 12」或「都不排除」），比卡片更快。
 4. `DA exclude --set <選到的 ref ...>`（沒選就 `DA exclude --set`）。回報「已排除 N 個對話」。
 
-## 第 6 步：個人資料夾（US-4）
+## 第 5 步：個人資料夾（US-4）
 
 AskUserQuestion：「你有沒有放個人工作背景的資料夾（例如筆記、專案說明）？有的話我會建立索引（只記錄檔名、標題、摘要，不會搬動或複製原檔），讓 AI 判斷待辦時更了解你的工作。」選項「有，我告訴你路徑」／「沒有，跳過」。
 
 - 有 → 請使用者給路徑 → `DA ctx index --dir "<路徑>"`，回報檔案數。
 - 沒有 → `DA ctx index --skip`。
 
-## 第 7 步：輸出偏好與排程（US-5）
+## 第 6 步：輸出偏好與排程（US-5）
 
 依序問（每張卡片自足）：
 
@@ -105,7 +98,7 @@ AskUserQuestion：「你有沒有放個人工作背景的資料夾（例如筆�
 
 寫入：`DA config set output.formats=<…> output.dir="<…>" refine.every_runs=<…> refine.every_days=<…>`；要排程則 `DA schedule install --time HH:MM`。
 
-## 第 8 步：建立判斷準則第一版（US-6）
+## 第 7 步：建立判斷準則第一版（US-6）
 
 1. AskUserQuestion：「要掃描多久以前的資料來建立你的判斷準則？」選項「7 天（最快）」「14 天（建議）」「30 天（LINE 一次最多可讀取的天數，較完整但較慢）」。
 2. `DA criteria draft --days N`（告訴使用者需要一點時間）。

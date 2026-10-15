@@ -1,0 +1,119 @@
+[
+  {
+    "name": "get_line_chatroom_history_default",
+    "description": "Extract conversation history from a specific LINE group chat or individual chat, when the amount of data to be read is uncertain, always use this function.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "chatName": {
+          "type": "string",
+          "description": "Name of the chat/group to extract history from"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date to extract history for (YYYY-MM-DD format, defaults to today)"
+        },
+        "messageLimit": {
+          "type": "number",
+          "description": "Maximum number of messages to extract (default: 100)",
+          "default": 100
+        }
+      },
+      "required": [
+        "chatName"
+      ]
+    }
+  },
+  {
+    "name": "get_line_chatroom_history_long",
+    "description": "Extract conversation history from a specific LINE group chat or individual chat, when a more complete set of content is needed, such as for summarizing or analyzing data over a period of time.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "chatName": {
+          "type": "string",
+          "description": "Name of the chat/group to extract history from"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date to extract history for (YYYY-MM-DD format, defaults to today)"
+        },
+        "messageLimit": {
+          "type": "number",
+          "description": "Maximum number of messages to extract (default: 100)",
+          "default": 100
+        }
+      },
+      "required": [
+        "chatName"
+      ]
+    }
+  },
+  {
+    "name": "get_line_chatroom_history_short",
+    "description": "Extract conversation history from a specific LINE group chat or individual chat, when a quick response is needed, only retrieve the most recent few messages.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "chatName": {
+          "type": "string",
+          "description": "Name of the chat/group to extract history from"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date to extract history for (YYYY-MM-DD format, defaults to today)"
+        },
+        "messageLimit": {
+          "type": "number",
+          "description": "Maximum number of messages to extract (default: 100)",
+          "default": 100
+        }
+      },
+      "required": [
+        "chatName"
+      ]
+    }
+  },
+  {
+    "name": "send_message_manual",
+    "description": "Send a message to a specific LINE chat or group, with pre-send review in LINE. If the user’s intent to auto-send is unclear, use this function by default",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "chatName": {
+          "type": "string",
+          "description": "Name of the chat/group to send message to"
+        },
+        "message": {
+          "type": "string",
+          "description": "Message content to send"
+        }
+      },
+      "required": [
+        "chatName",
+        "message"
+      ]
+    }
+  },
+  {
+    "name": "send_message_auto",
+    "description": "Send a message to a specific LINE chat or group. Sends immediately with no pre-send review in LINE. Use this only if the user explicitly requests immediate sending; otherwise, do not call this function",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "chatName": {
+          "type": "string",
+          "description": "Name of the chat/group to send message to"
+        },
+        "message": {
+          "type": "string",
+          "description": "Message content to send"
+        }
+      },
+      "required": [
+        "chatName",
+        "message"
+      ]
+    }
+  }
+]

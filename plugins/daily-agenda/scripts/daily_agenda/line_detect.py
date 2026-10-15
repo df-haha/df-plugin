@@ -86,9 +86,16 @@ def detect_main_database(
         }
 
     if len(successes) == 0:
+        # If all candidates share one error code (or there is only one candidate),
+        # use that code as top-level instead of the generic MAIN_DATABASE_NOT_FOUND.
+        failure_codes = {r["code"] for r in results if r.get("code")}
+        if len(failure_codes) == 1:
+            top_code = failure_codes.pop()
+        else:
+            top_code = "MAIN_DATABASE_NOT_FOUND"
         return {
             "status": "failed",
-            "code": "MAIN_DATABASE_NOT_FOUND",
+            "code": top_code,
             "candidates": results,
         }
 

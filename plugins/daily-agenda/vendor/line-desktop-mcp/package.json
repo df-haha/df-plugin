@@ -1,0 +1,73 @@
+{
+  "name": "line-desktop-mcp",
+  "version": "3.3.5",
+  "description": "LINE Agent MCP: scoped Windows LINE Desktop history, media previews and confirmed reply workflows",
+  "main": "./src/server.js",
+  "bin": {
+    "line-desktop-mcp": "./src/server.js",
+    "line-cli": "./src/cli.js"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node scripts/run-tests.js",
+    "test:python": "node scripts/run-python-tests.js"
+  },
+  "keywords": [
+    "mcp",
+    "line",
+    "automation",
+    "gui",
+    "applescript",
+    "desktop"
+  ],
+  "author": "Geoffrey Wang",
+  "contributors": [
+    {
+      "name": "bensonmaxai",
+      "url": "https://github.com/bensonmaxai"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bensonmaxai/line-desktop-mcp.git"
+  },
+  "homepage": "https://github.com/bensonmaxai/line-desktop-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/bensonmaxai/line-desktop-mcp/issues"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "applescript": "^1.0.0",
+    "chardet": "^2.1.0",
+    "iconv-lite": "^0.6.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "os": [
+    "win32",
+    "darwin"
+  ],
+  "files": [
+    "npm-shrinkwrap.json",
+    "src/**/*",
+    "scripts/run-tests.js",
+    "scripts/run-python-tests.js",
+    "scripts/benchmark-large-reader.py",
+    "docs/**/*.md",
+    "docs/assets/*.png",
+    "docs/assets/*.svg",
+    "CHANGELOG.md",
+    "test/**/*",
+    "!**/__pycache__/**",
+    "!**/*.pyc"
+  ]
+}

@@ -1,0 +1,376 @@
+"""run [--noninteractive] — the /agenda pipeline.
+
+Pipeline: publish-backlog check → lock → collect → analyze → validate →
+ledger → render → commit generation → publish.
+"""
+
+from __future__ import annotations
+
+import json
+import secrets
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from daily_agenda import (
+    analyze, bundle, collect, criteria, ledger, render, runtime, state, validate,
+)
+from daily_agenda.line_source import LineSourceError
+from ._common import Deps, emit, require_consent
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _build_src_index(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Build ``{src_id: {"label": str, "href": None}}`` for source annotations."""
+    index: dict[str, dict[str, Any]] = {}
+    for rec in records:
+        sid = rec.get("src_id", "")
+        kind = rec.get("kind", "")
+        ut = rec.get("untrusted", {})
+
+        if kind == "line_message":
+            label = f"LINE · {ut.get('chat_name', '')}"
+        elif kind == "mail":
+            label = f"Mail · {ut.get('from', '')}"
+        elif kind == "event":
+            label = f"行事曆 · {ut.get('subject', '')}"
+        elif kind == "ctx":
+            label = f"Ctx · {rec.get('path', '')}"
+        else:
+            label = sid
+
+        index[sid] = {"label": label, "href": None}
+    return index
+
+
+def _load_ctx(h: Path) -> list[dict[str, Any]]:
+    """Load ctx-index.jsonl."""
+    path = h / "ctx-index.jsonl"
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+        if not text:
+            return []
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+    except FileNotFoundError:
+        return []
+
+
+class _UntrustedLine:
+    """Dummy LINE source for noninteractive mode when trust is unverified."""
+
+    def probe(self) -> dict[str, Any]:
+        return {"ok": False, "code": "LINE_BUILD_UNVERIFIED", "ms": 0}
+
+    def recent_chats(self, *, days: int, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+        raise LineSourceError("LINE_BUILD_UNVERIFIED")
+
+    def messages(self, **kwargs: Any) -> dict[str, Any]:
+        raise LineSourceError("LINE_BUILD_UNVERIFIED")
+
+
+# ---------------------------------------------------------------------------
+# Handler
+# ---------------------------------------------------------------------------
+
+def handle(argv: list[str], deps: Deps) -> int:
+    noninteractive = deps.noninteractive or "--noninteractive" in argv
+
+    cfg = state.load_config(deps.home)
+    rc = require_consent(cfg)
+    if rc is not None:
+        return rc
+
+    h = deps.home
+    now = deps.now_factory()
+
+    # 1. Publish backlog check
+    pub_status = state.ensure_published(h)
+    if pub_status.get("status") == "failed":
+        return emit({"ok": False, "code": "PUBLISH_FAILED"})
+
+    # 2. Check runtime sync
+    needs_runtime_sync = False
+    try:
+        rt_status = runtime.status(h, deps.plugin_root)
+        mcp_comp = rt_status.get("components", {}).get("line-desktop-mcp", {})
+        if mcp_comp.get("code") == "RUNTIME_OUTDATED":
+            needs_runtime_sync = True
+    except Exception:
+        pass
+
+    if needs_runtime_sync:
+        return emit({"ok": False, "code": "RUNTIME_OUTDATED",
+                      "needs": {"runtime_sync": True, "line_trust": False, "refine": False}})
+
+    # 3. Acquire lock
+    try:
+        lock_ctx = state.acquire_lock(h)
+        lock_path = lock_ctx.__enter__()
+    except state.Locked:
+        return emit({"ok": False, "code": "LOCKED"})
+
+    try:
+        return _run_pipeline(h, cfg, now, deps, noninteractive)
+    finally:
+        lock_ctx.__exit__(None, None, None)
+
+
+def _run_pipeline(
+    h: Path,
+    cfg: dict[str, Any],
+    now: datetime,
+    deps: Deps,
+    noninteractive: bool,
+) -> int:
+    st = state.load_state(h)
+    ldg = state.load_ledger(h)
+    run_id = now.strftime("%Y%m%d-%H%M") + "-" + secrets.token_hex(2)
+
+    # Build sources
+    line_src: Any = None
+    needs_line_trust = False
+    line_enabled = cfg.get("line", {}).get("enabled", False)
+
+    if line_enabled:
+        if deps.line_source_factory:
+            try:
+                line_src = deps.line_source_factory(
+                    main_database=cfg["line"].get("main_database", ""),
+                    trusted_builds_path=str(h / "trusted_builds.json"),
+                )
+            except Exception:
+                # Runtime not installed — collect will report LINE skipped
+                line_src = None
+
+            # Quick probe to check trust
+            probe_result = line_src.probe() if line_src else {"ok": False, "code": "LINE_RUNTIME_MISSING"}
+            if not probe_result.get("ok"):
+                code = probe_result.get("code", "")
+                if code == "LINE_BUILD_UNVERIFIED":
+                    needs_line_trust = True
+                    if noninteractive:
+                        line_src = _UntrustedLine()
+                    else:
+                        # Interactive: signal to caller
+                        return emit({
+                            "ok": False, "code": "LINE_BUILD_UNVERIFIED",
+                            "needs": {"line_trust": True, "runtime_sync": False, "refine": False},
+                        })
+        else:
+            line_src = None
+
+    graph_src: Any = None
+    if deps.graph_factory and cfg.get("mail", {}).get("enabled", True):
+        try:
+            graph_src = deps.graph_factory()
+        except Exception:
+            pass
+
+    # Collect
+    try:
+        result = collect.collect(
+            cfg, st, now=now, line=line_src, graph=graph_src, run_id=run_id,
+        )
+    except collect.CollectError as exc:
+        return emit({"ok": False, "code": exc.code})
+
+    # Load criteria and ctx
+    crit_text = criteria.read_latest(h)
+    ctx_entries = _load_ctx(h)
+
+    # Write bundle
+    runs_dir = h / "runs" / run_id
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    open_todos = [t for t in ldg if t["status"] in ("open", "maybe_done")]
+    batch_bytes = cfg.get("analysis", {}).get("batch_bytes", 300_000)
+    batches = bundle.split_batches(result.records, batch_bytes)
+    if not batches:
+        batches = [[]]  # At least one batch (may have zero records)
+
+    bundle_paths: list[Path] = []
+    for i, batch_records in enumerate(batches):
+        bp = runs_dir / f"bundle-{i + 1}.jsonl"
+
+        class _BatchResult:
+            def __init__(self, records: list, base: Any, idx: int, total: int) -> None:
+                self.run_id = base.run_id
+                self.generated_at = base.generated_at
+                self.tz = base.tz
+                self.records = records
+                self.source_status = base.source_status
+                self.new_chats = base.new_chats
+                self.criteria_version = base.criteria_version
+
+        batch_result = _BatchResult(batch_records, result, i + 1, len(batches))
+        bundle.write_bundle(
+            bp, result=batch_result, criteria=crit_text, open_todos=open_todos,
+            ctx=ctx_entries, batch_index=i + 1, batch_total=len(batches),
+        )
+        bundle_paths.append(bp)
+
+    # Analyze
+    model_output: dict[str, Any]
+    try:
+        prompt = analyze.load_prompt("agenda")
+        batch_bytes_list = [bp.read_bytes() for bp in bundle_paths]
+        model_output = analyze.analyze_batches(batch_bytes_list, prompt,
+                                                model=cfg.get("analysis", {}).get("model"),
+                                                timeout_s=cfg.get("analysis", {}).get("timeout_s", 600))
+    except analyze.AnalyzerError as exc:
+        return emit({"ok": False, "code": exc.code})
+
+    # Write model.json
+    from daily_agenda.fsutil import atomic_write_json
+    atomic_write_json(runs_dir / "model.json", model_output)
+
+    # Validate
+    bundle_src_ids: set[str] = set()
+    for rec in result.records:
+        if rec.get("src_id"):
+            bundle_src_ids.add(rec["src_id"])
+    for todo in open_todos:
+        for sid in todo.get("src_ids", []):
+            bundle_src_ids.add(sid)
+
+    open_todo_ids = {t["id"] for t in open_todos}
+
+    try:
+        val_result = validate.validate(model_output, bundle_src_ids, open_todo_ids)
+    except validate.ModelOutputInvalid:
+        return emit({"ok": False, "code": "MODEL_OUTPUT_INVALID"})
+
+    rejected_count = len(val_result.rejected)
+
+    # Apply to ledger
+    new_ldg = ledger.apply_model(ldg, val_result.items, now=now)
+    new_ldg = ledger.auto_collapse(new_ldg, now=now)
+
+    # Build view
+    report_code = ledger.new_report_code()
+    events = [r for r in result.records if r.get("kind") == "event"]
+    skipped = [item for item in val_result.items if item.get("action") == "skip"]
+    new_chat_names = [c.get("name", "") for c in result.new_chats]
+    new_chats_output = [{"ref": c.get("ref", ""), "name": c.get("name", "")} for c in result.new_chats]
+    src_index = _build_src_index(result.records)
+
+    # Build meta dict for view
+    meta: dict[str, Any] = {
+        "sources": result.source_status,
+        "new_chats": [{"ref": c.get("ref", "")} for c in result.new_chats],
+        "batch": {"index": 1, "total": len(batches)},
+    }
+
+    notices: list[str] = []
+    if needs_line_trust:
+        notices.append("LINE 更新到新版本，需要手動確認一次。")
+
+    view = render.build_view(
+        state=st, ledger=new_ldg, bundle_meta=meta, events=events,
+        new_chat_names=new_chat_names, notices=notices, now=now,
+        report_code=report_code, skipped=skipped, src_index=src_index,
+    )
+
+    # Render outputs
+    formats = cfg.get("output", {}).get("formats", ["html"])
+    out_dir = cfg.get("output", {}).get("dir")
+    if not out_dir:
+        out_dir = str(h / "output")
+
+    outputs: dict[str, str] = {}
+    publish_targets: list[dict] = []
+    date_str = now.strftime("%Y-%m-%d")
+
+    for fmt in formats:
+        content = render.render(view, fmt)
+        outputs[fmt] = content
+        target_path = state.output_filename(Path(out_dir), date_str, fmt)
+        publish_targets.append({"fmt": fmt, "path": str(target_path)})
+
+    # Build new state
+    new_st = dict(st)
+    new_st["checkpoints"] = result.new_checkpoints
+    if result.known_chats:
+        new_st["known_chats"] = result.known_chats
+    new_st["mail_index"] = result.mail_index or st.get("mail_index", {})
+    new_st["runs_since_refine"] = st.get("runs_since_refine", 0) + 1
+    new_st["criteria_version"] = criteria.latest_version(h)
+    new_st["report_code"] = report_code
+    new_st["report_index"] = view.get("report_index", {})
+    new_st["last_run"] = {
+        "run_id": run_id,
+        "at": now.isoformat(),
+        "sources": {k: {"status": v.get("status")} for k, v in result.source_status.items()},
+    }
+
+    # Stage, commit, publish
+    staging = state.stage_generation(
+        h, state=new_st, ledger=new_ldg, outputs=outputs, publish_targets=publish_targets,
+    )
+    gen = state.commit_generation(h, staging)
+
+    publish_result: dict[str, Any] = {"status": "ok"}
+    try:
+        state.publish(h, gen)
+    except state.PublishFailed:
+        publish_result = {"status": "failed", "code": "PUBLISH_FAILED"}
+
+    # Check refine needs
+    refine_cfg = cfg.get("refine", {})
+    every_runs = refine_cfg.get("every_runs", 10)
+    every_days = refine_cfg.get("every_days", 14)
+    needs_refine = new_st["runs_since_refine"] >= every_runs
+    if not needs_refine and new_st.get("last_refine_at"):
+        try:
+            last_dt = datetime.fromisoformat(new_st["last_refine_at"])
+            needs_refine = (now - last_dt).days >= every_days
+        except (ValueError, TypeError):
+            pass
+
+    # Build output list
+    output_paths = [pt["path"] for pt in publish_targets]
+
+    # Source summary (no raw content)
+    sources_summary: dict[str, Any] = {}
+    for k, v in result.source_status.items():
+        entry: dict[str, Any] = {"status": v.get("status", "skipped")}
+        if v.get("code"):
+            entry["code"] = v["code"]
+            from daily_agenda.messages import humanize as _humanize
+            entry["message"] = _humanize(v["code"])
+        if "messages" in v:
+            entry["count"] = v["messages"]
+        if "events" in v:
+            entry["count"] = v["events"]
+        if "chats" in v:
+            entry["chats"] = v["chats"]
+        sources_summary[k] = entry
+
+    # Counts
+    counts = {
+        "open": sum(1 for t in new_ldg if t["status"] == "open"),
+        "maybe_done": sum(1 for t in new_ldg if t["status"] == "maybe_done"),
+        "collapsed": sum(1 for t in new_ldg if t["status"] == "collapsed"),
+        "done": sum(1 for t in new_ldg if t["status"] == "done"),
+        "dismissed": sum(1 for t in new_ldg if t["status"] == "dismissed"),
+        "p0": sum(1 for t in new_ldg if t["status"] == "open" and t.get("priority") == "P0"),
+    }
+
+    return emit({
+        "ok": publish_result["status"] != "failed",
+        "code": publish_result.get("code"),
+        "report_code": report_code,
+        "outputs": output_paths,
+        "sources": sources_summary,
+        "counts": counts,
+        "new_chats": new_chats_output,
+        "needs": {
+            "line_trust": needs_line_trust,
+            "refine": needs_refine,
+            "runtime_sync": False,
+        },
+        "rejected_items": rejected_count,
+    })

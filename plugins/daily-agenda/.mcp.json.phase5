@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "actions": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/actions/server.mjs"]
+    }
+  }
+}

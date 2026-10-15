@@ -57,7 +57,8 @@ class TestDetectMainDatabase:
             }),
         )
         assert result["status"] == "failed"
-        assert result["code"] == "MAIN_DATABASE_NOT_FOUND"
+        # When all candidates share the same error code, it becomes top-level
+        assert result["code"] == "SESSION_KEY_UNAVAILABLE"
         assert len(result["candidates"]) == 2
 
     def test_multiple_success(self, tmp_path: Path) -> None:
