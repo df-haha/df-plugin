@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from daily_agenda import collect, ctx_index, state
+from daily_agenda.fence import fence_untrusted
 from ._common import Deps, emit, require_consent
 
 
@@ -70,7 +71,8 @@ def handle_outlook_preview(argv: list[str], deps: Deps) -> int:
     try:
         mails = graph.mail_list(days=3, folder="inbox")[:3]
         mail_preview = [
-            {"from": m.get("from", ""), "subject": m.get("subject", "")}
+            {"from": fence_untrusted(m.get("from", "")),
+             "subject": fence_untrusted(m.get("subject", ""))}
             for m in mails
         ]
     except Exception as exc:
@@ -80,7 +82,8 @@ def handle_outlook_preview(argv: list[str], deps: Deps) -> int:
     try:
         events = graph.calendar_list(days_ahead=1, days_back=0)
         event_preview = [
-            {"subject": e.get("subject", ""), "start": e.get("start", ""), "end": e.get("end", "")}
+            {"subject": fence_untrusted(e.get("subject", "")),
+             "start": e.get("start", ""), "end": e.get("end", "")}
             for e in events
         ]
     except Exception:
@@ -98,8 +101,12 @@ def handle_outlook_preview(argv: list[str], deps: Deps) -> int:
 # ---------------------------------------------------------------------------
 
 def handle_chats(argv: list[str], deps: Deps) -> int:
-    if not argv or argv[0] != "list":
-        return emit({"ok": False, "code": "ARG_ERROR", "detail": "usage: chats list --days N"}, exit_code=2)
+    if not argv or argv[0] not in ("list", "new"):
+        return emit({"ok": False, "code": "ARG_ERROR", "detail": "usage: chats list --days N | chats new"}, exit_code=2)
+
+    if argv[0] == "new":
+        return _handle_chats_new(deps)
+
 
     cfg = state.load_config(deps.home)
     rc = require_consent(cfg)
@@ -133,13 +140,36 @@ def handle_chats(argv: list[str], deps: Deps) -> int:
     for c in chats:
         result_chats.append({
             "ref": c["ref"],
-            "name": c["name"],
+            "name": fence_untrusted(c["name"]),
             "type": c["type"],
             "last_at": c.get("last_message_at", ""),
             "excluded": c["ref"] in excluded_refs,
         })
 
     return emit({"ok": True, "code": None, "chats": result_chats})
+
+
+# ---------------------------------------------------------------------------
+# chats new — list new chats from the latest run (fenced names)
+# ---------------------------------------------------------------------------
+
+def _handle_chats_new(deps: Deps) -> int:
+    """Return fenced names of chats first seen in the latest run."""
+    st = state.load_state(deps.home)
+    last_run = st.get("last_run", {})
+    new_chats = last_run.get("new_chats", [])
+
+    if not new_chats:
+        return emit({"ok": True, "code": None, "chats": [], "count": 0})
+
+    result_chats = []
+    for c in new_chats:
+        result_chats.append({
+            "ref": c.get("ref", ""),
+            "name": fence_untrusted(c.get("name", "")),
+        })
+
+    return emit({"ok": True, "code": None, "chats": result_chats, "count": len(result_chats)})
 
 
 # ---------------------------------------------------------------------------

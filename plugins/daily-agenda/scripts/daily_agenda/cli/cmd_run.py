@@ -268,7 +268,8 @@ def _run_pipeline(
     events = [r for r in result.records if r.get("kind") == "event"]
     skipped = [item for item in val_result.items if item.get("action") == "skip"]
     new_chat_names = [c.get("name", "") for c in result.new_chats]
-    new_chats_output = [{"ref": c.get("ref", ""), "name": c.get("name", "")} for c in result.new_chats]
+    # F4b: emit only refs+count, not attacker-controlled names
+    new_chat_refs = [c.get("ref", "") for c in result.new_chats]
     src_index = _build_src_index(result.records)
 
     # Build meta dict for view
@@ -318,6 +319,8 @@ def _run_pipeline(
         "run_id": run_id,
         "at": now.isoformat(),
         "sources": {k: {"status": v.get("status")} for k, v in result.source_status.items()},
+        # F4b: store new_chats in state so `chats new` can retrieve names
+        "new_chats": [{"ref": c.get("ref", ""), "name": c.get("name", "")} for c in result.new_chats],
     }
 
     # Stage, commit, publish
@@ -380,7 +383,8 @@ def _run_pipeline(
         "outputs": output_paths,
         "sources": sources_summary,
         "counts": counts,
-        "new_chats": new_chats_output,
+        "new_chats_count": len(new_chat_refs),
+        "new_chat_refs": new_chat_refs,
         "needs": {
             "line_trust": needs_line_trust,
             "refine": needs_refine,

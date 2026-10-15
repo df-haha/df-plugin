@@ -8,9 +8,10 @@ from datetime import datetime
 from pathlib import Path
 
 from daily_agenda import analyze, criteria, state, validate
+from daily_agenda.fence import fence_untrusted
 from daily_agenda.fsutil import jsonl_line
 from daily_agenda.ledger import feedback_signals
-from ._common import Deps, emit, require_consent
+from ._common import Deps, emit, require_consent, validate_file_flag
 
 
 def _write_refine_bundle(
@@ -154,20 +155,26 @@ def handle(argv: list[str], deps: Deps) -> int:
             encoding="utf-8",
         )
 
+        # F4d: fence change summaries/reasons (model-derived from third-party)
+        fenced_changes = []
+        for ch in changes:
+            fenced_changes.append({
+                "summary": fence_untrusted(ch.get("summary", "")) if ch.get("summary") else "",
+                "reason": fence_untrusted(ch.get("reason", "")) if ch.get("reason") else "",
+            })
+
         return emit({
             "ok": True, "code": None,
             "draft_path": str(draft_path),
             "base_version": base_version,
             "feedback_count": len(signals),
-            "changes": changes,
+            "changes": fenced_changes,
         })
 
     elif sub == "apply":
-        file_path: str | None = None
-        for i, arg in enumerate(argv):
-            if arg == "--file" and i + 1 < len(argv):
-                file_path = argv[i + 1]
-
+        file_path, err = validate_file_flag(argv, h)
+        if err is not None:
+            return err
         if not file_path:
             return emit({"ok": False, "code": "ARG_ERROR", "detail": "usage: refine apply --file F"}, exit_code=2)
 

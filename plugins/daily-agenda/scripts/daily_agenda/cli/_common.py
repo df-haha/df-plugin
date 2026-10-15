@@ -162,12 +162,121 @@ class _ArgParser(argparse.ArgumentParser):
         sys.exit(2)
 
 
+def _validate_progress_file(path_str: str | None) -> str | None:
+    """Validate --progress-file path (F3).
+
+    Defense-in-depth (the hook also validates the full path):
+    - Must end in .jsonl
+    - Must not contain path traversal (.. components)
+    - Must not contain glob/brace/wildcard characters
+    """
+    if path_str is None:
+        return None
+    p = Path(path_str)
+    if p.suffix != ".jsonl":
+        emit({"ok": False, "code": "ARG_ERROR",
+              "detail": "--progress-file must end in .jsonl"}, exit_code=2)
+        sys.exit(2)
+    if ".." in p.parts:
+        emit({"ok": False, "code": "ARG_ERROR",
+              "detail": "--progress-file must not contain .."}, exit_code=2)
+        sys.exit(2)
+    # Reject glob/brace/wildcard chars (each char individually)
+    for ch in "{}*?~":
+        if ch in path_str:
+            emit({"ok": False, "code": "ARG_ERROR",
+                  "detail": f"--progress-file must not contain '{ch}'"}, exit_code=2)
+            sys.exit(2)
+    return path_str
+
+
+def _validate_progress_file_home(path_str: str | None, home: Path) -> str | None:
+    """Validate --progress-file resolves under ``home/runs/progress/``.
+
+    Called AFTER deps is resolved (so we know the real home).
+    """
+    if path_str is None:
+        return None
+    resolved = Path(path_str).resolve()
+    allowed = (home / "runs" / "progress").resolve()
+    try:
+        resolved.relative_to(allowed)
+    except ValueError:
+        emit({"ok": False, "code": "ARG_ERROR",
+              "detail": f"--progress-file must be under {allowed}"}, exit_code=2)
+        sys.exit(2)
+    return path_str
+
+
 def parse_root_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     """Parse top-level command name and ``--progress-file``; return (ns, remaining)."""
     parser = _ArgParser(prog="daily_agenda", add_help=False, allow_abbrev=False)
     parser.add_argument("command", nargs="?", default=None)
     parser.add_argument("--progress-file", default=None, dest="progress_file")
-    return parser.parse_known_args(argv)
+    ns, remaining = parser.parse_known_args(argv)
+    # Reject duplicate --progress-file: count occurrences in argv
+    pf_count = sum(1 for a in argv if a == "--progress-file" or a.startswith("--progress-file="))
+    if pf_count > 1:
+        emit({"ok": False, "code": "ARG_ERROR",
+              "detail": "--progress-file must not be specified more than once"}, exit_code=2)
+        sys.exit(2)
+    ns.progress_file = _validate_progress_file(ns.progress_file)
+    return ns, remaining
+
+
+def validate_file_flag(argv: list[str], home: Path) -> tuple[str | None, int | None]:
+    """Extract and validate a single ``--file`` argument (item 3).
+
+    Returns ``(path, None)`` on success or ``(None, exit_code)`` on error
+    (error already emitted).
+    """
+    # Reject =form
+    for arg in argv:
+        if arg.startswith("--file="):
+            emit({"ok": False, "code": "ARG_ERROR",
+                  "detail": "--file must use space separator, not ="}, exit_code=2)
+            return None, 2
+
+    # Collect all occurrences
+    paths: list[str] = []
+    for i, arg in enumerate(argv):
+        if arg == "--file" and i + 1 < len(argv):
+            paths.append(argv[i + 1])
+
+    if len(paths) == 0:
+        return None, None  # caller handles missing
+
+    if len(paths) > 1:
+        emit({"ok": False, "code": "ARG_ERROR",
+              "detail": "--file must not be specified more than once"}, exit_code=2)
+        return None, 2
+
+    file_path = paths[0]
+
+    # Reject traversal
+    if ".." in Path(file_path).parts:
+        emit({"ok": False, "code": "ARG_ERROR",
+              "detail": "--file path must not contain .."}, exit_code=2)
+        return None, 2
+
+    # Reject glob chars
+    for ch in "{}*?~":
+        if ch in file_path:
+            emit({"ok": False, "code": "ARG_ERROR",
+                  "detail": f"--file path must not contain '{ch}'"}, exit_code=2)
+            return None, 2
+
+    # Require under home/runs/
+    resolved = Path(file_path).resolve()
+    allowed = (home / "runs").resolve()
+    try:
+        resolved.relative_to(allowed)
+    except ValueError:
+        emit({"ok": False, "code": "ARG_ERROR",
+              "detail": f"--file must point to a file under {allowed}"}, exit_code=2)
+        return None, 2
+
+    return file_path, None
 
 
 def require_consent(cfg: dict[str, Any]) -> int | None:

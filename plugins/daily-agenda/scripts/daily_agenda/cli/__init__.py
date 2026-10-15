@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ._common import Deps, emit, parse_root_args, set_current_progress
+from ._common import Deps, emit, parse_root_args, set_current_progress, _validate_progress_file_home
 from daily_agenda.progress import Progress
 
 
@@ -40,6 +40,11 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
             # Startup failures (e.g. missing tzdata on Windows) must still
             # honour the one-JSON contract.
             return emit({"ok": False, "code": "INTERNAL_ERROR", "detail": type(exc).__name__})
+
+        # F3/item2: validate progress path against resolved home
+        # Only in production (deps not injected) — tests control their own paths
+        if deps is None:
+            _validate_progress_file_home(progress_path_str, d.home)
 
         # Attach resolved progress to deps
         if progress is not None:

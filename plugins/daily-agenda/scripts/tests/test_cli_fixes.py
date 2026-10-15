@@ -276,11 +276,11 @@ class TestF7NewChatsRef:
             code, obj = _run_cli(["run"], deps, capsys)
 
         assert obj["ok"] is True
-        # new_chats should be list of dicts with ref and name
-        assert len(obj["new_chats"]) > 0
-        assert isinstance(obj["new_chats"][0], dict)
-        assert "ref" in obj["new_chats"][0]
-        assert "name" in obj["new_chats"][0]
+        # F4b: run output has count + refs, not names
+        assert obj["new_chats_count"] > 0
+        assert isinstance(obj["new_chat_refs"], list)
+        assert len(obj["new_chat_refs"]) > 0
+        assert isinstance(obj["new_chat_refs"][0], str)
 
 
 # ---------------------------------------------------------------------------

@@ -6,8 +6,9 @@ import secrets
 from pathlib import Path
 
 from daily_agenda import criteria, state
+from daily_agenda.fence import fence_untrusted
 from daily_agenda.messages import humanize
-from ._common import Deps, emit, require_consent
+from ._common import Deps, emit, require_consent, validate_file_flag
 
 
 def handle(argv: list[str], deps: Deps) -> int:
@@ -44,15 +45,13 @@ def handle(argv: list[str], deps: Deps) -> int:
         if text is None:
             return emit({"ok": False, "code": "CONFIG_MISSING", "detail": f"version {version} not found"})
 
-        # ★ command — shows content
-        return emit({"ok": True, "code": None, "version": version, "text": text})
+        # F4d: fence criteria text (model-derived from third-party content)
+        return emit({"ok": True, "code": None, "version": version, "text": fence_untrusted(text)})
 
     elif sub == "save":
-        file_path: str | None = None
-        for i, arg in enumerate(argv):
-            if arg == "--file" and i + 1 < len(argv):
-                file_path = argv[i + 1]
-
+        file_path, err = validate_file_flag(argv, deps.home)
+        if err is not None:
+            return err
         if not file_path:
             return emit({"ok": False, "code": "ARG_ERROR", "detail": "usage: criteria save --file F"}, exit_code=2)
 

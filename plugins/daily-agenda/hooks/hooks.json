@@ -1,5 +1,5 @@
 {
-  "description": "daily-agenda 縱深防護：攔下非代理路徑的 LINE 送出類工具。matcher 限定只對 LINE 送出類工具觸發 hook，所以 hook 壞掉只影響 LINE 送出（fail-closed），不影響其他工具（fail-open）。",
+  "description": "daily-agenda 縱深防護。(1) LINE guard：攔下非代理路徑的 LINE 送出類工具（matcher 限定，hook 壞只影響 LINE 送出）。(2) Session taint lock：讀取外部訊息原文後鎖定對話，只允許 daily-agenda 功能（matcher 空字串＝所有工具）。",
   "hooks": {
     "PreToolUse": [
       {
@@ -9,6 +9,16 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\"",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/lock.mjs\"",
+            "timeout": 15
           }
         ]
       }

@@ -481,7 +481,9 @@ class TestRefineDraftCLI:
         assert "draft_path" in obj
         assert obj["feedback_count"] == 1
         assert len(obj["changes"]) == 1
-        assert obj["changes"][0]["summary"] == "加入 P0 條件"
+        # F4d: changes are fenced (model-derived from third-party content)
+        assert "加入 P0 條件" in obj["changes"][0]["summary"]
+        assert obj["changes"][0]["summary"].startswith("<<<UNTRUSTED-")
 
         # Verify draft file written
         draft = Path(obj["draft_path"])

@@ -92,7 +92,7 @@ describe('prepare_action (line_reply)', () => {
     const result = JSON.parse(resp.result.content[0].text);
     assert.ok(result.id);
     assert.match(result.id, /^[0-9a-f]{32}$/);
-    assert.equal(result.target_display, 'LINE 群組「測試群組」');
+    assert.equal(result.target_display, 'LINE 群組「測試群組」 (chat:aabbccddee112233aabbccdd)');
     assert.equal(result.content_display, '收到，明天下午兩點開會');
     assert.ok(result.expires_at);
 
@@ -155,6 +155,75 @@ describe('prepare_action (line_reply)', () => {
       },
     }));
     assert.equal(resp.result.isError, true);
+  });
+});
+
+// ── F7/Item6: name resolution from CURRENT + state.json ──
+
+describe('prepare_action name resolution (F7)', () => {
+  it('resolves chat_name from known_chats via CURRENT file', async () => {
+    const home = await tmpHome();
+    // Plant CURRENT=1 and gen/1/state.json
+    await fs.writeFile(path.join(home, 'CURRENT'), '1\n');
+    await fs.mkdir(path.join(home, 'gen', '1'), { recursive: true });
+    await fs.writeFile(path.join(home, 'gen', '1', 'state.json'), JSON.stringify({
+      known_chats: [
+        { ref: 'chat:aabbccddee112233aabbccdd', name: '真正的群組名稱' },
+      ],
+    }));
+
+    const { server } = await makeServer({ home });
+    const resp = JSON.parse(await server.handleMessage({
+      jsonrpc: '2.0', id: 50, method: 'tools/call',
+      params: {
+        name: 'prepare_action',
+        arguments: {
+          kind: 'line_reply',
+          target: {
+            chat_ref: 'chat:aabbccddee112233aabbccdd',
+            chat_name: '攻擊者假名', // model-supplied wrong name
+            chat_type: 'group',
+          },
+          content: '測試訊息',
+        },
+      },
+    }));
+    const result = JSON.parse(resp.result.content[0].text);
+    // Name should be resolved from state, not model-supplied
+    assert.ok(result.target_display.includes('真正的群組名稱'), `got: ${result.target_display}`);
+    assert.ok(!result.target_display.includes('攻擊者假名'), `should not contain attacker name`);
+    assert.ok(result.target_display.includes('chat:aabbccddee112233aabbccdd'), `should show ref`);
+  });
+
+  it('uses fallback name for valid unknown ref', async () => {
+    const home = await tmpHome();
+    await fs.writeFile(path.join(home, 'CURRENT'), '1\n');
+    await fs.mkdir(path.join(home, 'gen', '1'), { recursive: true });
+    await fs.writeFile(path.join(home, 'gen', '1', 'state.json'), JSON.stringify({
+      known_chats: [
+        { ref: 'chat:000000000000000000000000', name: 'Only Known Chat' },
+      ],
+    }));
+
+    const { server } = await makeServer({ home });
+    const resp = JSON.parse(await server.handleMessage({
+      jsonrpc: '2.0', id: 51, method: 'tools/call',
+      params: {
+        name: 'prepare_action',
+        arguments: {
+          kind: 'line_reply',
+          target: {
+            chat_ref: 'chat:ffffffffffffffffffffffff', // valid 24 hex, not in known_chats
+            chat_name: 'Fallback Name',
+            chat_type: 'direct',
+          },
+          content: '測試',
+        },
+      },
+    }));
+    const result = JSON.parse(resp.result.content[0].text);
+    // resolveKnownChatName returns null for unknown ref → fallback to model name
+    assert.ok(result.target_display.includes('Fallback Name'), `got: ${result.target_display}`);
   });
 });
 

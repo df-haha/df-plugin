@@ -1,0 +1,7 @@
+{
+  "_doc": "CLI subcommands that emit raw third-party content (chat names, senders, subjects, message text). Adding a raw command = one line here + RAW_EMITTING_COMMANDS in Python fence module. Python test_fence.py::test_registry_consistency enforces sync.",
+  "commands": [
+    "chats",
+    "outlook-preview"
+  ]
+}
