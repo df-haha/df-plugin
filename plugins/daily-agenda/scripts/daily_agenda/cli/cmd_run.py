@@ -178,17 +178,26 @@ def _run_pipeline(
     except collect.CollectError as exc:
         return emit({"ok": False, "code": exc.code})
 
-    # Load criteria and ctx
+    # Load criteria, ctx, and profile
     crit_text = criteria.read_latest(h)
     ctx_entries = _load_ctx(h)
+    from daily_agenda import profile as _profile
+    profile_text = _profile.read_latest(h)
 
     # Write bundle
     runs_dir = h / "runs" / run_id
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     open_todos = [t for t in ldg if t["status"] in ("open", "maybe_done")]
+    # Account for profile + criteria overhead in batch sizing
     batch_bytes = cfg.get("analysis", {}).get("batch_bytes", 300_000)
-    batches = bundle.split_batches(result.records, batch_bytes)
+    overhead = 0
+    if profile_text:
+        overhead += len(profile_text.encode("utf-8")) + 100
+    if crit_text:
+        overhead += len(crit_text.encode("utf-8")) + 100
+    effective_batch = max(batch_bytes - overhead, batch_bytes // 3)
+    batches = bundle.split_batches(result.records, effective_batch)
     if not batches:
         batches = [[]]  # At least one batch (may have zero records)
 
@@ -209,7 +218,8 @@ def _run_pipeline(
         batch_result = _BatchResult(batch_records, result, i + 1, len(batches))
         bundle.write_bundle(
             bp, result=batch_result, criteria=crit_text, open_todos=open_todos,
-            ctx=ctx_entries, batch_index=i + 1, batch_total=len(batches),
+            ctx=ctx_entries, profile_text=profile_text,
+            batch_index=i + 1, batch_total=len(batches),
         )
         bundle_paths.append(bp)
 

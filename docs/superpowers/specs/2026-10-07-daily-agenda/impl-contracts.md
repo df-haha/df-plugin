@@ -20,7 +20,8 @@
 
 ```
 config.json  CURRENT  gen/<n>/  gen/<n>.staging/  criteria/v<N>.md  ctx-index.jsonl
-trusted_builds.json  actions/{pending,committing,done}/  runs/<run_id>/  runs/lock  runtime/
+profile/v<N>.md  profile/coverage.json  profile/cadence.json  profile/questions.json
+docs-cache/<batch-id>/  trusted_builds.json  actions/{pending,committing,done}/  runs/<run_id>/  runs/lock  runtime/
 ```
 
 ### config.json（schema_version 1）
@@ -104,8 +105,12 @@ def output_filename(out_dir: Path, date: str, fmt: str) -> Path   # agenda-YYYY-
  "untrusted":{"from":"…","to":"…","subject":"…","body":"…"}}
 {"kind":"event","src_id":"event:<id>","start":"iso","end":"iso","all_day":false,"web_link":"https://…",
  "untrusted":{"subject":"…","location":"…","organizer":"…","preview":"…"}}
+{"kind":"profile","untrusted":{"text":"…個人工作檔案全文…"}}
 {"kind":"ctx","path":"relative/path.md","untrusted":{"title":"…","summary":"…"}}
 ```
+
+- `profile`：使用者的個人工作檔案。放在 `untrusted` 裡，因為可能包含推斷出的第三方名稱。分析程序用它判斷 Q1–Q5（是不是找我、誰找我多重要、多急、做完沒、不用看）。
+- **Taint registry 注意事項**：`scan` 和 `raw` 作為 raw-commands.json 的 first-token，任何未來新增的 `scan <x>` 或 `raw <x>` 子命令也會觸發 taint。新增良性子命令時需將其排除或使用不同的頂層命令名稱。
 
 - `src_id` 是全域唯一、穩定的來源 ID；validate.py 以 bundle 內出現過的 `src_id` 集合驗證模型輸出。
 - 排除的對話：在呼叫 LINE 讀取**之前**就過濾（不讀它的訊息）；bundle 中不得出現其 `chat_ref`、名稱、任何訊息（SC-3 測試以此檢查）。
@@ -230,9 +235,16 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 | `exclude --set REF...｜--add REF｜--remove REF` | setup 第 5 步／之後修改 | excluded 數量 |
 | ★`mail folders` | setup 第 5 步 | `[{ref,path,total,unread,well_known,skip_recommended,selected}]` |
 | ★`mail select --set REF...｜--add REF｜--remove REF` | setup 第 5 步／之後修改 | selected 數量；自動寫入 `mail.folder_labels` |
-| `ctx index --dir D｜--skip` | setup 第 6 步 | 檔案數 |
+| `ctx index --dir D｜--skip` | setup 第 6 步（**已棄用**，改用 profile） | 檔案數 |
+| `docs convert --path "<p>" [--path ...]` | setup 新步驟：轉換使用者文件 | `files[]`、`skipped_count` |
+| `scan raw --days N` | setup 第 8 步：掃描原始訊息樣本；同時儲存 records.jsonl + source-status.json 供 criteria draft --from-run 重用 | `run_id`、`raw_dir`、`files[]`、`total_chars`、`source_status` |
+| `raw show --todo <id>` | `/agenda` 中查看原始訊息 | `records[]`（fenced）、`missing[]` |
+| `profile show [--version N]`／`profile save --file F`／`profile list`／`profile restore --version N` | 個人工作檔案管理 | `version`、`text`（fenced） |
+| `profile coverage [save --file F]` | 維度覆蓋率管理 | `coverage` |
+| `profile cadence [--set now｜agenda｜refine｜later]` | 設定補充頻率 | `cadence` |
+| `profile next-question [--context agenda｜refine]` | 取得下一個要問的維度。`--context` 只在 cadence 匹配時回傳問題。限速：同一天或同一 generation 只問一題 | `question`、`dim`、`cadence` |
 | `config get`／`config set KEY=VALUE...` | setup 第 7 步（output.dir、output.formats、refine.every_runs、refine.every_days、analysis.model） | 設定摘要 |
-| `criteria draft --days 7｜14｜30` | setup 第 8 步：收集 N 天＋無工具分析 → 草稿檔 | `draft_path` |
+| `criteria draft --days 7｜14｜30 [--from-run <run_id>]` | setup 第 9 步：分析 → 草稿檔。`--from-run` 重用 scan raw 儲存的 records（不再重新收集），包含 profile；驗證 run_id 格式（`YYYYMMDD-HHMM-XXXX`）且路徑在 `<home>/runs/` 下；LINE enabled 時要求 saved status=="ok"（skipped/failed 均拒絕）；days 從 scan-meta.json 取 | `draft_path` |
 | ★`criteria show [--version N]`／`criteria save --file F`／`criteria list`／`criteria restore --version N` | 準則管理 | `version` |
 | `run [--noninteractive]` | `/agenda` 全流程（補發檢查→鎖→收集→分析→驗證→登記簿→輸出→提交→發布） | `report_code`、`outputs[]`、`sources{}`、`counts{}`、`new_chats`（名稱★）、`needs{line_trust,refine,runtime_sync}`、`rejected_items` 數 |
 | ★`show --report R --items 3,5｜--todo T-1,T-2` | 標記前重新列出確認 | 項目標題 |

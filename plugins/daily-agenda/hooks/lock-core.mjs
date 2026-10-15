@@ -66,7 +66,7 @@ export const loadRegistry = () => {
     const data = JSON.parse(readFileSync(join(__dirname, 'raw-commands.json'), 'utf8'));
     _registryCache = new Set(data.commands || []);
   } catch {
-    _registryCache = new Set(['chats', 'outlook-preview']);
+    _registryCache = new Set(['chats', 'outlook-preview', 'raw', 'scan']);
   }
   return _registryCache;
 };
@@ -288,7 +288,7 @@ const ALLOWED_SKILLS = new Set([
 
 // Fully denied (cannot be scoped safely)
 const DENIED_SUBCOMMANDS = new Set([
-  'schedule', 'uninstall', 'runtime', 'trust', 'ctx',
+  'schedule', 'uninstall', 'runtime', 'trust', 'ctx', 'docs',
 ]);
 
 export const checkTaintedAllow = (toolName, toolInput, ctx) => {
@@ -400,6 +400,18 @@ export const checkTaintedBash = (toolInput, ctx) => {
     }
     if (argsStr.startsWith('apply')) return _requireFileUnderRuns(argsStr, 'refine apply', ctx);
     return deny('（Bash：不允許此 refine 操作）');
+  }
+
+  if (subcommand === 'profile') {
+    if (argsStr === '' || argsStr.startsWith('show') || argsStr.startsWith('list') || argsStr.startsWith('next-question')) {
+      return { allow: true };
+    }
+    if (argsStr.startsWith('restore')) return { allow: true };
+    if (argsStr.startsWith('cadence')) return { allow: true };
+    if (argsStr.startsWith('save')) return _requireFileUnderRuns(argsStr, 'profile save', ctx);
+    if (argsStr.startsWith('coverage save')) return _requireFileUnderRuns(argsStr, 'profile coverage save', ctx);
+    if (argsStr.startsWith('coverage')) return { allow: true }; // coverage (read) without save
+    return deny('（Bash：不允許此 profile 操作）');
   }
 
   if (DENIED_SUBCOMMANDS.has(subcommand)) return deny(`（Bash：不允許 ${subcommand}）`);
@@ -524,13 +536,25 @@ export const checkTaintedWrite = (toolInput, ctx) => {
     if (normFile.startsWith(normHome + '/runs/') && normFile.endsWith('/criteria-draft.md')) {
       return { allow: true };
     }
+    if (normFile.startsWith(normHome + '/runs/') && normFile.endsWith('/profile-draft.md')) {
+      return { allow: true };
+    }
+    if (normFile.startsWith(normHome + '/runs/') && normFile.endsWith('/coverage-draft.json')) {
+      return { allow: true };
+    }
   } else {
     if (/[/\\]\.daily-agenda[/\\]runs[/\\][^/\\]+[/\\]criteria-draft\.md$/i.test(filePath)) {
       return { allow: true };
     }
+    if (/[/\\]\.daily-agenda[/\\]runs[/\\][^/\\]+[/\\]profile-draft\.md$/i.test(filePath)) {
+      return { allow: true };
+    }
+    if (/[/\\]\.daily-agenda[/\\]runs[/\\][^/\\]+[/\\]coverage-draft\.json$/i.test(filePath)) {
+      return { allow: true };
+    }
   }
 
-  return deny('（Write：只能寫入 .daily-agenda/runs/ 下的判斷準則草稿）');
+  return deny('（Write：只能寫入 .daily-agenda/runs/ 下的草稿檔案）');
 };
 
 // ---------------------------------------------------------------------------

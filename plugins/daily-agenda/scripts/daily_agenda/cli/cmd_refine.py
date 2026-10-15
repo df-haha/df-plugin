@@ -20,6 +20,7 @@ def _write_refine_bundle(
     criteria_text: str,
     criteria_version: int,
     signals: list[dict],
+    profile_text: str | None = None,
 ) -> None:
     """Write a feedback.jsonl bundle for the refine analyzer."""
     lines: list[str] = []
@@ -30,6 +31,13 @@ def _write_refine_bundle(
         "version": criteria_version,
         "text": criteria_text,
     }))
+
+    # profile (untrusted — may contain inferred third-party names)
+    if profile_text:
+        lines.append(jsonl_line({
+            "kind": "profile",
+            "untrusted": {"text": profile_text},
+        }))
 
     # feedback lines — untrusted text nested under "untrusted"
     for sig in signals:
@@ -115,6 +123,10 @@ def handle(argv: list[str], deps: Deps) -> int:
         runs_dir = h / "runs" / run_id
         runs_dir.mkdir(parents=True, exist_ok=True)
 
+        # Load profile for refine bundle
+        from daily_agenda import profile as _profile
+        profile_text = _profile.read_latest(h)
+
         # Write feedback bundle
         bundle_path = runs_dir / "feedback.jsonl"
         _write_refine_bundle(
@@ -122,6 +134,7 @@ def handle(argv: list[str], deps: Deps) -> int:
             criteria_text=criteria_text,
             criteria_version=base_version,
             signals=signals,
+            profile_text=profile_text,
         )
 
         # Run analyzer

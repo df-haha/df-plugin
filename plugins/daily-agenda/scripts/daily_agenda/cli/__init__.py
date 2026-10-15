@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
         from . import cmd_consent, cmd_config, cmd_env, cmd_runtime, cmd_trust
         from . import cmd_line, cmd_collect, cmd_mail, cmd_criteria, cmd_ledger_ops
         from . import cmd_refine, cmd_schedule, cmd_uninstall, cmd_run
-        from . import cmd_progress
+        from . import cmd_progress, cmd_profile, cmd_docs, cmd_scan, cmd_raw
 
         dispatch: dict[str, Any] = {
             "consent": cmd_consent.handle,
@@ -85,6 +85,10 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
             "dismiss": cmd_ledger_ops.handle_dismiss,
             "restore": cmd_ledger_ops.handle_restore,
             "refine": cmd_refine.handle,
+            "profile": cmd_profile.handle,
+            "docs": cmd_docs.handle,
+            "scan": cmd_scan.handle,
+            "raw": cmd_raw.handle,
             "schedule": cmd_schedule.handle,
             "uninstall": cmd_uninstall.handle,
             # progress: stream command (watch) is exempt from one-JSON contract

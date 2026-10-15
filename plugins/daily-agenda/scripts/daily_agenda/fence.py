@@ -25,6 +25,8 @@ from typing import Any
 RAW_EMITTING_COMMANDS: frozenset[str] = frozenset({
     "chats",
     "outlook-preview",
+    "raw",
+    "scan",
 })
 
 # F6: match any case of UNTRUSTED- token, any run of 3+ angle brackets,

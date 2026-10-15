@@ -12,6 +12,8 @@ const da = (sub, args = '') =>
   `uv run --quiet --project "\${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda ${sub}${args ? ' ' + args : ''}`;
 const pf = `"${DA_HOME}/runs/progress/x.jsonl"`;
 const draft = `${DA_HOME}/runs/20261015-0900-abc1/criteria-draft.md`;
+const profileDraft = `${DA_HOME}/runs/20261015-0900-abc1/profile-draft.md`;
+const coverageDraft = `${DA_HOME}/runs/20261015-0900-abc1/coverage-draft.json`;
 
 // ============================================================================
 // canonicalize
@@ -31,9 +33,9 @@ describe('canonicalize', () => {
 // ============================================================================
 
 describe('loadRegistry', () => {
-  it('loads chats + outlook-preview', () => {
+  it('loads chats + outlook-preview + raw + scan', () => {
     const r = loadRegistry();
-    assert.ok(r.has('chats') && r.has('outlook-preview'));
+    assert.ok(r.has('chats') && r.has('outlook-preview') && r.has('raw') && r.has('scan'));
   });
 });
 
@@ -65,6 +67,8 @@ describe('checkBashTaint', () => {
   it('taints on chats list', () => assert.ok(checkBashTaint('uv run --quiet --project "/p/s" python -m daily_agenda chats list --days 30').taint));
   it('taints on outlook-preview', () => assert.ok(checkBashTaint('uv run --quiet --project "/p/s" python -m daily_agenda outlook-preview').taint));
   it('taints with --progress-file before subcmd', () => assert.ok(checkBashTaint('uv run --quiet --project "/p/s" python -m daily_agenda --progress-file /tmp/x chats list').taint));
+  it('taints on scan raw', () => assert.ok(checkBashTaint('uv run --quiet --project "/p/s" python -m daily_agenda scan raw --days 14').taint));
+  it('taints on raw show', () => assert.ok(checkBashTaint('uv run --quiet --project "/p/s" python -m daily_agenda raw show --todo T-1').taint));
 
   // N5: developer commands must NOT taint
   it('N5: grep -rn chats scripts/daily_agenda', () => {
@@ -130,6 +134,8 @@ describe('checkTaintedAllow', () => {
   it('denies WebFetch', () => assert.ok(!checkTaintedAllow('WebFetch', {}, CTX).allow));
   it('denies df-graph', () => assert.ok(!checkTaintedAllow('mcp__df-graph__mail_send', {}, CTX).allow));
   it('allows Write criteria-draft', () => assert.ok(checkTaintedAllow('Write', { file_path: draft }, CTX).allow));
+  it('allows Write profile-draft', () => assert.ok(checkTaintedAllow('Write', { file_path: profileDraft }, CTX).allow));
+  it('allows Write coverage-draft', () => assert.ok(checkTaintedAllow('Write', { file_path: coverageDraft }, CTX).allow));
   it('denies Write arbitrary', () => assert.ok(!checkTaintedAllow('Write', { file_path: '/tmp/x' }, CTX).allow));
 });
 
@@ -151,6 +157,26 @@ describe('checkTaintedBash', () => {
   it('allows refine skip', () => assert.ok(checkTaintedBash({ command: da('refine', 'skip') }, CTX).allow));
   it('allows criteria save under runs/', () => assert.ok(checkTaintedBash({ command: da('criteria', `save --file "${draft}"`) }, CTX).allow));
   it('allows refine apply under runs/', () => assert.ok(checkTaintedBash({ command: da('refine', `apply --file "${draft}"`) }, CTX).allow));
+
+  // Profile commands
+  it('allows profile show', () => assert.ok(checkTaintedBash({ command: da('profile', 'show') }, CTX).allow));
+  it('allows profile list', () => assert.ok(checkTaintedBash({ command: da('profile', 'list') }, CTX).allow));
+  it('allows profile next-question', () => assert.ok(checkTaintedBash({ command: da('profile', 'next-question') }, CTX).allow));
+  it('allows profile restore', () => assert.ok(checkTaintedBash({ command: da('profile', 'restore --version 1') }, CTX).allow));
+  it('allows profile cadence', () => assert.ok(checkTaintedBash({ command: da('profile', 'cadence --set now') }, CTX).allow));
+  it('allows profile save under runs/', () => assert.ok(checkTaintedBash({ command: da('profile', `save --file "${profileDraft}"`) }, CTX).allow));
+  it('allows profile coverage save under runs/', () => assert.ok(checkTaintedBash({ command: da('profile', `coverage save --file "${coverageDraft}"`) }, CTX).allow));
+  it('allows profile coverage (read)', () => assert.ok(checkTaintedBash({ command: da('profile', 'coverage') }, CTX).allow));
+  it('denies profile save outside', () => assert.ok(!checkTaintedBash({ command: da('profile', 'save --file /etc/passwd') }, CTX).allow));
+
+  // docs is denied when tainted
+  it('denies docs', () => assert.ok(!checkTaintedBash({ command: da('docs', 'convert --path /tmp/x') }, CTX).allow));
+
+  // scan raw (allowed — raw-emitting command already taints, but allowed after taint)
+  it('allows scan raw', () => assert.ok(checkTaintedBash({ command: da('scan', 'raw --days 14') }, CTX).allow));
+
+  // raw show
+  it('allows raw show', () => assert.ok(checkTaintedBash({ command: da('raw', 'show --todo T-1') }, CTX).allow));
 
   // Item1: consent
   it('allows consent --status', () => assert.ok(checkTaintedBash({ command: da('consent', '--status') }, CTX).allow));
@@ -213,6 +239,7 @@ describe('setup walk + re-entry (tainted)', () => {
   it('mail select', () => assert.ok(checkTaintedBash({ command: da('mail', 'select --set inbox') }, CTX).allow));
   it('progress new', () => assert.ok(checkTaintedBash({ command: da('progress', 'new') }, CTX).allow));
   it('criteria draft', () => assert.ok(checkTaintedBash({ command: da('criteria', `draft --days 14 --progress-file ${pf}`) }, CTX).allow));
+  it('criteria draft --from-run', () => assert.ok(checkTaintedBash({ command: da('criteria', 'draft --from-run 20261015-0900-abc1') }, CTX).allow));
   it('Read draft', () => assert.ok(checkTaintedAllow('Read', { file_path: draft }, CTX).allow));
   it('Write draft', () => assert.ok(checkTaintedAllow('Write', { file_path: draft }, CTX).allow));
   it('criteria save', () => assert.ok(checkTaintedBash({ command: da('criteria', `save --file "${draft}"`) }, CTX).allow));
@@ -224,6 +251,35 @@ describe('setup walk + re-entry (tainted)', () => {
   it('refine apply', () => assert.ok(checkTaintedBash({ command: da('refine', `apply --file "${draft}"`) }, CTX).allow));
   it('criteria restore', () => assert.ok(checkTaintedBash({ command: da('criteria', 'restore --version 1') }, CTX).allow));
   it('envcheck', () => assert.ok(checkTaintedBash({ command: da('envcheck') }, CTX).allow));
+
+  // Profile setup steps
+  it('profile show', () => assert.ok(checkTaintedBash({ command: da('profile', 'show') }, CTX).allow));
+  it('profile list', () => assert.ok(checkTaintedBash({ command: da('profile', 'list') }, CTX).allow));
+  it('profile save under runs/', () => assert.ok(checkTaintedBash({ command: da('profile', `save --file "${profileDraft}"`) }, CTX).allow));
+  it('profile coverage save under runs/', () => assert.ok(checkTaintedBash({ command: da('profile', `coverage save --file "${coverageDraft}"`) }, CTX).allow));
+  it('profile cadence', () => assert.ok(checkTaintedBash({ command: da('profile', 'cadence --set agenda') }, CTX).allow));
+  it('profile next-question', () => assert.ok(checkTaintedBash({ command: da('profile', 'next-question') }, CTX).allow));
+  it('profile restore', () => assert.ok(checkTaintedBash({ command: da('profile', 'restore --version 1') }, CTX).allow));
+  it('Write profile-draft', () => assert.ok(checkTaintedAllow('Write', { file_path: profileDraft }, CTX).allow));
+  it('Write coverage-draft', () => assert.ok(checkTaintedAllow('Write', { file_path: coverageDraft }, CTX).allow));
+  it('scan raw', () => assert.ok(checkTaintedBash({ command: da('scan', 'raw --days 14') }, CTX).allow));
+  it('raw show', () => assert.ok(checkTaintedBash({ command: da('raw', 'show --todo T-1') }, CTX).allow));
+});
+
+// ============================================================================
+// docs-cache does NOT taint (profile doc reading)
+// ============================================================================
+
+describe('docs-cache no taint', () => {
+  it('reading docs-cache does not taint', () => {
+    assert.ok(!checkReadTaint(DA_HOME + '/docs-cache/abc123/file.txt', DA_HOME).taint);
+  });
+  it('reading profile/ does not taint', () => {
+    assert.ok(!checkReadTaint(DA_HOME + '/profile/v1.md', DA_HOME).taint);
+  });
+  it('reading criteria/ does not taint', () => {
+    assert.ok(!checkReadTaint(DA_HOME + '/criteria/v1.md', DA_HOME).taint);
+  });
 });
 
 // ============================================================================
@@ -256,6 +312,8 @@ describe('unified deny reason', () => {
 
 describe('checkTaintedWrite', () => {
   it('allows criteria-draft', () => assert.ok(checkTaintedWrite({ file_path: draft }, CTX).allow));
+  it('allows profile-draft', () => assert.ok(checkTaintedWrite({ file_path: profileDraft }, CTX).allow));
+  it('allows coverage-draft', () => assert.ok(checkTaintedWrite({ file_path: coverageDraft }, CTX).allow));
   it('denies arbitrary', () => assert.ok(!checkTaintedWrite({ file_path: '/tmp/x' }, CTX).allow));
   it('denies traversal', () => assert.ok(!checkTaintedWrite({ file_path: DA_HOME + '/runs/../../.ssh/x' }, CTX).allow));
   it('denies null', () => assert.ok(!checkTaintedWrite({}, CTX).allow));

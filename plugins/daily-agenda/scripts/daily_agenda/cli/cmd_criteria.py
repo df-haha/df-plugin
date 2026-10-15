@@ -89,22 +89,34 @@ def handle(argv: list[str], deps: Deps) -> int:
             return rc
 
         days = 14
+        from_run: str | None = None
         for i, arg in enumerate(argv):
             if arg == "--days" and i + 1 < len(argv):
                 try:
                     days = int(argv[i + 1])
                 except ValueError:
                     return emit({"ok": False, "code": "ARG_ERROR", "detail": "--days must be integer"}, exit_code=2)
+            elif arg == "--from-run" and i + 1 < len(argv):
+                from_run = argv[i + 1]
 
         from daily_agenda import analyze, bundle, collect, validate
         from daily_agenda.line_source import LineSourceError
         from daily_agenda.state import _initial_state
 
+        progress = deps.progress
+
+        if from_run is not None:
+            # --- Reuse saved records from a previous scan raw run ---
+            return _draft_from_run(
+                from_run, cfg, deps, argv, days, progress,
+                analyze, bundle, validate,
+            )
+
+        # --- Fresh collection path (original behavior) ---
         now = deps.now_factory()
         run_id = now.strftime("%Y%m%d-%H%M") + "-" + secrets.token_hex(2)
         runs_dir = deps.home / "runs" / run_id
         runs_dir.mkdir(parents=True, exist_ok=True)
-        progress = deps.progress
 
         # Build LINE source — map factory errors to their code (#2)
         line_src = None
@@ -121,9 +133,6 @@ def handle(argv: list[str], deps: Deps) -> int:
                 return emit({"ok": False, "code": "LINE_RUNTIME_MISSING"})
 
         # --- Fail-fast LINE check (D) ---
-        # Before collecting mail or calling the analyzer, verify LINE is
-        # reachable.  criteria draft is a one-shot scan with no degradation
-        # path, so an unreachable LINE is a hard failure.
         if line_src is not None:
             progress.event("line_check")
             try:
@@ -140,7 +149,6 @@ def handle(argv: list[str], deps: Deps) -> int:
             except Exception:
                 pass
 
-        # Collect with initial_days=days, fresh state (no checkpoints)
         try:
             result = collect.collect(
                 cfg, _initial_state(), now=now, line=line_src, graph=graph_src,
@@ -150,51 +158,171 @@ def handle(argv: list[str], deps: Deps) -> int:
             return emit({"ok": False, "code": exc.code})
 
         # --- Check LINE collection result (#2) ---
-        # criteria draft has no degradation path: if LINE is enabled and
-        # failed during collection, fail the whole draft.
         if line_enabled and line_src is not None:
             line_status = result.source_status.get("line", {})
             if line_status.get("status") == "failed":
                 code = line_status.get("code") or "LOCAL_READER_FAILED"
                 return emit({"ok": False, "code": code})
 
-        # --- Batched analysis ---
-        batch_bytes_cfg = cfg.get("analysis", {}).get("batch_bytes", 300_000)
-        batches = bundle.split_batches(result.records, batch_bytes_cfg)
-        model_cfg = cfg.get("analysis", {}).get("model")
-        timeout_s = cfg.get("analysis", {}).get("timeout_s", 600)
-
-        if len(batches) <= 1:
-            # Single batch (or empty) — use original criteria prompt directly
-            bundle_path = runs_dir / "bundle.jsonl"
-            bundle.write_bundle(bundle_path, result=result, criteria=None, open_todos=[], ctx=[])
-
-            try:
-                prompt = analyze.load_prompt("criteria")
-                progress.event("analyze_batch", i=1, n=1)
-                with progress.heartbeat():
-                    analyzer_output = analyze.run_analyzer(
-                        bundle_path.read_bytes(), prompt,
-                        model=model_cfg, timeout_s=timeout_s,
-                    )
-                progress.event("analyze_batch_done", i=1, n=1)
-                criteria_text = validate.validate_criteria_draft(analyzer_output.output)
-            except analyze.AnalyzerError as exc:
-                return emit({"ok": False, "code": exc.code})
-            except validate.ModelOutputInvalid:
-                return emit({"ok": False, "code": "MODEL_OUTPUT_INVALID"})
-
-            return _emit_draft(runs_dir, criteria_text, days, batches_skipped=0)
-        else:
-            # Multiple batches — map/reduce
-            return _draft_map_reduce(
-                batches, result, runs_dir, progress, model_cfg, timeout_s,
-                days, analyze, bundle, validate,
-            )
+        return _draft_analyze(
+            result.records, result, runs_dir, cfg, deps, days, progress,
+            analyze, bundle, validate,
+        )
 
     else:
         return emit({"ok": False, "code": "ARG_ERROR",
                       "detail": "usage: criteria draft|show|save|list|restore"}, exit_code=2)
+
+
+# ---------------------------------------------------------------------------
+# --from-run: reuse saved records
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+_RUN_ID_RE = _re.compile(r"^\d{8}-\d{4}-[0-9a-f]{4}$")
+
+
+def _draft_from_run(
+    from_run: str,
+    cfg: dict,
+    deps: object,
+    argv: list[str],
+    days: int,
+    progress: object,
+    analyze: object,
+    bundle: object,
+    validate: object,
+) -> int:
+    """``criteria draft --from-run <run_id>`` — reuse saved records."""
+    from daily_agenda.scan_raw import load_records, load_source_status
+
+    # Validate run_id format
+    if not _RUN_ID_RE.match(from_run):
+        return emit({"ok": False, "code": "ARG_ERROR",
+                      "detail": f"invalid run_id format: {from_run}"}, exit_code=2)
+
+    home = deps.home  # type: ignore[attr-defined]
+    source_run_dir = home / "runs" / from_run
+
+    # Validate path is under <home>/runs/
+    try:
+        source_run_dir.resolve().relative_to((home / "runs").resolve())
+    except ValueError:
+        return emit({"ok": False, "code": "ARG_ERROR",
+                      "detail": f"run_id resolves outside runs/: {from_run}"}, exit_code=2)
+
+    # Load saved records
+    try:
+        records = load_records(source_run_dir)
+    except FileNotFoundError:
+        return emit({"ok": False, "code": "ARG_ERROR",
+                      "detail": f"no saved records for run {from_run}"}, exit_code=2)
+
+    # Load saved source status and apply LINE fail-fast semantics
+    try:
+        source_status = load_source_status(source_run_dir)
+    except FileNotFoundError:
+        source_status = {}
+
+    line_enabled = cfg.get("line", {}).get("enabled", False)
+    if line_enabled:
+        line_status = source_status.get("line", {})
+        # Require status=="ok" when LINE is enabled — "skipped" or "failed"
+        # both indicate LINE wasn't successfully read during the scan.
+        if line_status.get("status") != "ok":
+            code = line_status.get("code") or "LOCAL_READER_FAILED"
+            return emit({"ok": False, "code": code})
+
+    # Load the scan's original days from saved metadata
+    from daily_agenda.fsutil import read_json
+    scan_meta = read_json(source_run_dir / "scan-meta.json", default={})
+    if isinstance(scan_meta, dict) and "days" in scan_meta:
+        days = scan_meta["days"]
+
+    # Build a minimal result-like dict for bundle writing
+    now = deps.now_factory()  # type: ignore[attr-defined]
+    run_id = now.strftime("%Y%m%d-%H%M") + "-" + secrets.token_hex(2)
+    runs_dir = home / "runs" / run_id
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    result_dict = {
+        "run_id": run_id,
+        "generated_at": now.isoformat(),
+        "tz": cfg.get("tz", "Asia/Taipei"),
+        "source_status": source_status,
+        "new_chats": [],
+        "records": records,
+        "criteria_version": 1,
+    }
+
+    return _draft_analyze(
+        records, result_dict, runs_dir, cfg, deps, days, progress,
+        analyze, bundle, validate,
+    )
+
+
+def _draft_analyze(
+    records: list,
+    result: object,
+    runs_dir: Path,
+    cfg: dict,
+    deps: object,
+    days: int,
+    progress: object,
+    analyze: object,
+    bundle: object,
+    validate: object,
+) -> int:
+    """Shared analysis path for both fresh-collect and --from-run."""
+    from daily_agenda import profile as _profile
+
+    home = deps.home  # type: ignore[attr-defined]
+    profile_text = _profile.read_latest(home)
+
+    # Account for profile + criteria overhead in batch sizing
+    batch_bytes_cfg = cfg.get("analysis", {}).get("batch_bytes", 300_000)
+    overhead = 0
+    if profile_text:
+        overhead += len(profile_text.encode("utf-8")) + 100  # JSON wrapper
+    from daily_agenda import criteria as _criteria
+    crit_text = _criteria.read_latest(home)
+    if crit_text:
+        overhead += len(crit_text.encode("utf-8")) + 100
+    effective_batch = max(batch_bytes_cfg - overhead, batch_bytes_cfg // 3)
+    batches = bundle.split_batches(records, effective_batch)  # type: ignore[attr-defined]
+    model_cfg = cfg.get("analysis", {}).get("model")
+    timeout_s = cfg.get("analysis", {}).get("timeout_s", 600)
+
+    if len(batches) <= 1:
+        bundle_path = runs_dir / "bundle.jsonl"
+        bundle.write_bundle(  # type: ignore[attr-defined]
+            bundle_path, result=result, criteria=None, open_todos=[], ctx=[],
+            profile_text=profile_text,
+        )
+
+        try:
+            prompt = analyze.load_prompt("criteria")  # type: ignore[attr-defined]
+            progress.event("analyze_batch", i=1, n=1)  # type: ignore[attr-defined]
+            with progress.heartbeat():  # type: ignore[attr-defined]
+                analyzer_output = analyze.run_analyzer(  # type: ignore[attr-defined]
+                    bundle_path.read_bytes(), prompt,
+                    model=model_cfg, timeout_s=timeout_s,
+                )
+            progress.event("analyze_batch_done", i=1, n=1)  # type: ignore[attr-defined]
+            criteria_text = validate.validate_criteria_draft(analyzer_output.output)  # type: ignore[attr-defined]
+        except analyze.AnalyzerError as exc:  # type: ignore[attr-defined]
+            return emit({"ok": False, "code": exc.code})
+        except validate.ModelOutputInvalid:  # type: ignore[attr-defined]
+            return emit({"ok": False, "code": "MODEL_OUTPUT_INVALID"})
+
+        return _emit_draft(runs_dir, criteria_text, days, batches_skipped=0)
+    else:
+        return _draft_map_reduce(
+            batches, result, runs_dir, progress, model_cfg, timeout_s,
+            days, analyze, bundle, validate,
+            profile_text=profile_text,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +385,8 @@ def _draft_map_reduce(
     analyze: object,
     bundle: object,
     validate: object,
+    *,
+    profile_text: str | None = None,
 ) -> int:
     """Map each batch → observations, reduce → final criteria.
 
@@ -274,6 +404,7 @@ def _draft_map_reduce(
         batch_result = _make_batch_result(batch_records, result)
         bundle.write_bundle(  # type: ignore[attr-defined]
             bp, result=batch_result, criteria=None, open_todos=[], ctx=[],
+            profile_text=profile_text,
             batch_index=idx, batch_total=n_batches,
         )
 
@@ -310,6 +441,13 @@ def _draft_map_reduce(
             "kind": "criteria",
             "version": 0,
             "text": seed_text,
+        }))
+
+    # Include profile in reduce bundle if available
+    if profile_text:
+        reduce_lines.append(jsonl_line({
+            "kind": "profile",
+            "untrusted": {"text": profile_text},
         }))
 
     for obs in observations:
