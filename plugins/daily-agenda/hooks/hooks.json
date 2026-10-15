@@ -1,5 +1,5 @@
 {
-  "description": "daily-agenda 縱深防護。(1) LINE guard：攔下非代理路徑的 LINE 送出類工具（matcher 限定，hook 壞只影響 LINE 送出）。(2) Session taint lock：讀取外部訊息原文後鎖定對話，只允許 daily-agenda 功能（matcher 空字串＝所有工具）。",
+  "description": "daily-agenda 縱深防護。(1) LINE guard：攔下非代理路徑的 LINE 送出類工具。(2) PreToolUse session taint lock：command-form + path-reference 檢測。(3) PostToolUse sentinel detection：content-based 偵測，讓 shell 語法 bypass 無效。",
   "hooks": {
     "PreToolUse": [
       {
@@ -19,6 +19,18 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/lock.mjs\"",
             "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Read|Grep|Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-lock.mjs\"",
+            "timeout": 10
           }
         ]
       }

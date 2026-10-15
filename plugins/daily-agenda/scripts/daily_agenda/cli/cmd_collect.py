@@ -71,8 +71,8 @@ def handle_outlook_preview(argv: list[str], deps: Deps) -> int:
     try:
         mails = graph.mail_list(days=3, folder="inbox")[:3]
         mail_preview = [
-            {"from": fence_untrusted(m.get("from", "")),
-             "subject": fence_untrusted(m.get("subject", ""))}
+            {"from": fence_untrusted(m.get("from", ""), raw=True),
+             "subject": fence_untrusted(m.get("subject", ""), raw=True)}
             for m in mails
         ]
     except Exception as exc:
@@ -82,7 +82,7 @@ def handle_outlook_preview(argv: list[str], deps: Deps) -> int:
     try:
         events = graph.calendar_list(days_ahead=1, days_back=0)
         event_preview = [
-            {"subject": fence_untrusted(e.get("subject", "")),
+            {"subject": fence_untrusted(e.get("subject", ""), raw=True),
              "start": e.get("start", ""), "end": e.get("end", "")}
             for e in events
         ]
@@ -140,7 +140,7 @@ def handle_chats(argv: list[str], deps: Deps) -> int:
     for c in chats:
         result_chats.append({
             "ref": c["ref"],
-            "name": fence_untrusted(c["name"]),
+            "name": fence_untrusted(c["name"], raw=True),
             "type": c["type"],
             "last_at": c.get("last_message_at", ""),
             "excluded": c["ref"] in excluded_refs,
@@ -166,7 +166,7 @@ def _handle_chats_new(deps: Deps) -> int:
     for c in new_chats:
         result_chats.append({
             "ref": c.get("ref", ""),
-            "name": fence_untrusted(c.get("name", "")),
+            "name": fence_untrusted(c.get("name", ""), raw=True),
         })
 
     return emit({"ok": True, "code": None, "chats": result_chats, "count": len(result_chats)})

@@ -17,7 +17,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .fence import fence_untrusted
+from .fence import RAW_SENTINEL, fence_untrusted
 from .fsutil import atomic_write_text, atomic_write_json, jsonl_line
 
 
@@ -136,9 +136,10 @@ def write_raw_sample(
             ut = sample[0].get("untrusted", {})
             chat_name = ut.get("chat_name", chat_ref)
 
-        lines = [f"# LINE: {chat_name}\n"]
-        lines.append(f"chat_ref: {chat_ref}\n")
-        lines.append(f"messages: {len(messages)} total, {len(sample)} sampled\n\n")
+        S = RAW_SENTINEL
+        lines = [f"{S} # LINE: {chat_name}\n"]
+        lines.append(f"{S} chat_ref: {chat_ref}\n")
+        lines.append(f"{S} messages: {len(messages)} total, {len(sample)} sampled\n\n")
 
         for msg in sample:
             ut = msg.get("untrusted", {})
@@ -147,7 +148,10 @@ def write_raw_sample(
             ts = msg.get("ts", "")
             if len(text) > MAX_CHARS_PER_MESSAGE:
                 text = text[:MAX_CHARS_PER_MESSAGE] + "…"
-            lines.append(f"[{ts}] {sender}: {text}\n")
+            # Stamp every line (including multi-line body after split)
+            body_lines = f"[{ts}] {sender}: {text}".split("\n")
+            for bl in body_lines:
+                lines.append(f"{S} {bl}\n")
 
         content = "".join(lines)
         remaining = TOTAL_CHARS_CAP - total_chars
@@ -170,8 +174,9 @@ def write_raw_sample(
         items.sort(key=lambda m: m.get("received_at", ""))
         sample = items[-MAX_MAIL_PER_FOLDER:]
 
-        lines = [f"# Mail: {folder}\n"]
-        lines.append(f"messages: {len(items)} total, {len(sample)} sampled\n\n")
+        S = RAW_SENTINEL
+        lines = [f"{S} # Mail: {folder}\n"]
+        lines.append(f"{S} messages: {len(items)} total, {len(sample)} sampled\n\n")
 
         for item in sample:
             ut = item.get("untrusted", {})
@@ -181,7 +186,11 @@ def write_raw_sample(
             ts = item.get("received_at", "")
             if len(body) > MAX_CHARS_PER_MESSAGE:
                 body = body[:MAX_CHARS_PER_MESSAGE] + "…"
-            lines.append(f"## [{ts}] {sender}: {subject}\n{body}\n\n")
+            # Stamp every line including multi-line body
+            header_and_body = f"## [{ts}] {sender}: {subject}\n{body}"
+            for bl in header_and_body.split("\n"):
+                lines.append(f"{S} {bl}\n")
+            lines.append("\n")
 
         content = "".join(lines)
         remaining = TOTAL_CHARS_CAP - total_chars
@@ -198,6 +207,7 @@ def write_raw_sample(
     # Write stats (includes per-sender counts — file only, taints when read)
     stats_path = output_dir / "stats.json"
     atomic_write_json(stats_path, {
+        "_raw": RAW_SENTINEL,
         "total_chars": total_chars,
         "line_chats": len(top_chats),
         "mail_folders": len(mail_folders),
@@ -277,7 +287,8 @@ def resolve_raw_for_todo(
     fenced_records: list[str] = []
     for sid in sorted(found.keys()):
         fenced_records.append(fence_untrusted(
-            json.dumps(found[sid], ensure_ascii=False, indent=2)
+            json.dumps(found[sid], ensure_ascii=False, indent=2),
+            raw=True,
         ))
 
     return {

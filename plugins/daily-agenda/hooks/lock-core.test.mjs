@@ -60,7 +60,7 @@ describe('checkReadTaint', () => {
   it('taints under output.dir', () => assert.ok(checkReadTaint('/home/test/docs/da/x.html', DA_HOME, ['/home/test/docs/da']).taint));
   it('taints DA home itself', () => assert.ok(checkReadTaint(DA_HOME, DA_HOME).taint));
   it('no taint on parent', () => assert.ok(!checkReadTaint('/home/test', DA_HOME).taint));
-  it('no taint on config.json', () => assert.ok(!checkReadTaint(DA_HOME + '/config.json', DA_HOME).taint));
+  it('taints on config.json (raw chat names)', () => assert.ok(checkReadTaint(DA_HOME + '/config.json', DA_HOME).taint));
   it('no taint on .', () => assert.ok(!checkReadTaint('.', DA_HOME, [], '/home/test/project').taint));
   it('no taint on runs/../..', () => assert.ok(!checkReadTaint(DA_HOME + '/runs/../../.ssh/id_rsa', DA_HOME).taint));
   it('case-insensitive', () => assert.ok(checkReadTaint('C:\\USERS\\TEST\\.DAILY-AGENDA\\RUNS\\x', 'C:\\Users\\test\\.daily-agenda').taint));
@@ -117,6 +117,29 @@ describe('checkBashTaint', () => {
   // F4: absolute path reference taint
   it('taints on cat of runs/ (absolute)', () => {
     assert.ok(checkBashTaint(`cat ${DA_HOME}/runs/x/bundle.jsonl`, CTX).taint);
+  });
+
+  // Item 4: bash unescape in mechanism-2 path tokens
+  it('R5-4: backslash-escaped path component ru\\ns → runs → taint', () => {
+    assert.ok(checkBashTaint(`cat ${DA_HOME}/ru\\ns/id/records.jsonl`, CTX).taint,
+      'ru\\ns must unescape to runs');
+  });
+  it("R5-4: ANSI-C $'runs' → runs → taint", () => {
+    assert.ok(checkBashTaint(`cat ${DA_HOME}/$'runs'/id/records.jsonl`, CTX).taint,
+      "$'runs' must unescape to runs");
+  });
+  it('R5-4: backslash-escaped on Windows-style path', () => {
+    const winCtx = { daHome: 'C:\\Users\\haha\\.daily-agenda' };
+    assert.ok(checkBashTaint('cat C:/Users/haha/.daily-agenda/ru\\ns/id/records.jsonl', winCtx).taint);
+  });
+  it("R5-4: $'runs' on Linux-style path", () => {
+    assert.ok(checkBashTaint(`cat /home/test/.daily-agenda/$'runs'/id/records.jsonl`, CTX).taint);
+  });
+
+  // Item 6: config.json taint via Bash path reference
+  it('R5-6: cat config.json → taint', () => {
+    assert.ok(checkBashTaint(`cat ${DA_HOME}/config.json`, CTX).taint,
+      'config.json contains raw chat names');
   });
 });
 
@@ -541,6 +564,44 @@ describe('item2-subcmd: subcommand-bound file exemption', () => {
   it('unknown-cmd --file draft path → taint', () => {
     const cmd = da('show', `--file "${DA_HOME}/runs/20261015/criteria-draft.md"`);
     assert.ok(checkBashTaint(cmd, CTX).taint, 'unknown subcmd + --file gets no exemption');
+  });
+});
+
+// ============================================================================
+// Draft laundering: tainted-drafts list prevents exempt bypass
+// ============================================================================
+
+describe('draft laundering prevention', () => {
+  const draftPath = canonicalize(`${DA_HOME}/runs/20261015-0900-abc1/criteria-draft.md`);
+
+  it('draft show of tainted draft → taint', () => {
+    const cmd = da('draft', `show --file "${DA_HOME}/runs/20261015-0900-abc1/criteria-draft.md"`);
+    const ctx = { ...CTX, taintedDrafts: new Set([draftPath]) };
+    assert.ok(checkBashTaint(cmd, ctx).taint, 'draft show of tainted draft must taint');
+  });
+
+  it('draft show of clean draft → no taint', () => {
+    const cmd = da('draft', `show --file "${DA_HOME}/runs/20261015-0900-abc1/criteria-draft.md"`);
+    const ctx = { ...CTX, taintedDrafts: new Set() };
+    assert.ok(!checkBashTaint(cmd, ctx).taint, 'clean draft must not taint');
+  });
+
+  it('Read of tainted draft path → taint', () => {
+    const taintedDrafts = new Set([draftPath]);
+    const r = checkReadTaint(
+      `${DA_HOME}/runs/20261015-0900-abc1/criteria-draft.md`,
+      DA_HOME, [], undefined, taintedDrafts,
+    );
+    assert.ok(r.taint, 'Read of tainted draft must taint');
+  });
+
+  it('Read of clean draft path → normal path-taint (under runs/)', () => {
+    const r = checkReadTaint(
+      `${DA_HOME}/runs/20261015-0900-abc1/criteria-draft.md`,
+      DA_HOME, [], undefined, new Set(),
+    );
+    // Still taints via path-based check (under runs/)
+    assert.ok(r.taint, 'draft under runs/ taints via path check');
   });
 });
 

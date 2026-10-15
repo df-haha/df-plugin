@@ -7,7 +7,7 @@
  */
 
 import { readFileSync, realpathSync } from 'node:fs';
-import { join, dirname, posix, resolve } from 'node:path';
+import { join, dirname, basename, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -63,6 +63,48 @@ export const canonicalize = (p, cwd) => {
   }
 
   return result;
+};
+
+/**
+ * Keys identifying a draft file in tainted-drafts.json. Record (PreToolUse
+ * Write/Edit) and check (Bash --file / Read) both use this, so a draft
+ * written through a symlinked/junction parent still matches when shown via
+ * the real path (and vice versa). Returns the plain canonical form plus the
+ * form with the parent directory resolved through realpath.
+ *
+ * @param {string} p
+ * @param {string} [cwd]
+ * @returns {string[]}
+ */
+export const draftKeys = (p, cwd) => {
+  const plain = canonicalize(p, cwd);
+  if (!plain) return [];
+  const keys = new Set([plain]);
+  const resolveParent = (candidate) => {
+    try {
+      const real = process.platform === 'win32'
+        ? realpathSync.native(dirname(candidate))
+        : realpathSync(dirname(candidate));
+      const k = canonicalize(join(real, basename(candidate)));
+      if (k) keys.add(k);
+    } catch { /* parent missing — plain form only */ }
+  };
+  if (typeof p === 'string' && p.length > 0) {
+    const home = process.env.USERPROFILE || process.env.HOME || '';
+    let raw = p;
+    if (raw === '~' || raw.startsWith('~/') || raw.startsWith('~\\')) raw = home + raw.slice(1);
+    const isAbs = /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/') || raw.startsWith('\\');
+    if (!isAbs && cwd) raw = join(cwd, raw);
+    resolveParent(raw);
+  }
+  resolveParent(plain);
+  return [...keys];
+};
+
+/** True if any key of `p` is in the tainted-drafts set. */
+export const isTaintedDraft = (taintedDrafts, p, cwd) => {
+  if (!(taintedDrafts instanceof Set) || taintedDrafts.size === 0) return false;
+  return draftKeys(p, cwd).some((k) => taintedDrafts.has(k));
 };
 
 // ---------------------------------------------------------------------------
@@ -463,6 +505,16 @@ export const checkBashTaint = (command, ctx) => {
     // bound to subcommand semantics (item 2).
     const exempt = _buildExemptSet(command, ctx);
 
+    // Draft laundering check: if any exempt path was written in a tainted
+    // session, revoke its exemption and taint immediately.
+    if (ctx.taintedDrafts instanceof Set && ctx.taintedDrafts.size > 0) {
+      for (const ep of exempt) {
+        if (isTaintedDraft(ctx.taintedDrafts, ep)) {
+          return { taint: true, reason: `draft file written in a locked session: ${ep}` };
+        }
+      }
+    }
+
     const taintDirs = [
       normHome + '/runs', normHome + '/gen', normHome + '/output',
     ];
@@ -476,8 +528,18 @@ export const checkBashTaint = (command, ctx) => {
     // char — the shell concatenates `~/.daily-agenda/"runs"/x` into one path.
     const tokens = command.split(/[\s;|&<>()`]+/);
     for (const token of tokens) {
-      const clean = token.replace(/["']/g, '');
+      // Process ANSI-C $'...' BEFORE stripping quotes (it needs the $' wrapper)
+      let clean = token.replace(/\$'([^']*)'/g, (_, inner) =>
+        inner.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+             .replace(/\\'/g, "'").replace(/\\\\/g, '\\')
+             .replace(/\\(.)/g, '$1')
+      );
+      // Strip remaining quotes
+      clean = clean.replace(/["']/g, '');
       if (!clean || clean.startsWith('-')) continue;
+
+      // Bash unescape: unquoted \x → x (same rule as shellTokenize)
+      clean = clean.replace(/\\(.)/g, '$1');
 
       // Expand shell variables in the token
       let expanded = clean;
@@ -504,12 +566,13 @@ export const checkBashTaint = (command, ctx) => {
 
       // Check if token is/inside daHome itself (covers `cd ~/.daily-agenda`)
       if (normToken === normHome || normToken.startsWith(normHome + '/')) {
-        // Only taint if it's a taint dir or daHome itself, not just any subpath
         if (normToken === normHome) {
           return { taint: true, reason: `command references DA home: ${clean}` };
         }
-        // Check if it's under a taint dir (glob like <home>/*/x)
-        // Extract the first path component after home
+        // config.json contains raw chat names
+        if (normToken === normHome + '/config.json') {
+          return { taint: true, reason: `command references DA config (raw chat names): ${clean}` };
+        }
         const relative = normToken.slice(normHome.length + 1);
         const firstComponent = relative.split('/')[0];
         if (['runs', 'gen', 'output'].includes(firstComponent)) {
@@ -523,20 +586,27 @@ export const checkBashTaint = (command, ctx) => {
 };
 
 /**
- * Check if a Read/Grep/Glob path targets DA taint-protected directories.
+ * Check if a Read/Grep/Glob path targets DA taint-protected directories
+ * or a draft file that was written during a tainted session.
  *
  * @param {string} filePath
  * @param {string} daHome
  * @param {string[]} [extraPrefixes]
  * @param {string} [cwd]
+ * @param {Set<string>} [taintedDrafts] - canonicalized paths from tainted-drafts.json
  */
-export const checkReadTaint = (filePath, daHome, extraPrefixes, cwd) => {
+export const checkReadTaint = (filePath, daHome, extraPrefixes, cwd, taintedDrafts) => {
   if (typeof filePath !== 'string' || typeof daHome !== 'string') return { taint: false };
   if (filePath.length === 0) return { taint: false };
 
   const normPath = canonicalize(filePath, cwd);
   const normHome = canonicalize(daHome);
   if (!normPath || !normHome) return { taint: false };
+
+  // Draft laundering check: taint if reading a draft written in a tainted session
+  if (isTaintedDraft(taintedDrafts, filePath, cwd)) {
+    return { taint: true, reason: `Read of draft written in a locked session: ${filePath}` };
+  }
 
   const taintDirs = [normHome + '/runs', normHome + '/gen', normHome + '/output'];
 
@@ -552,6 +622,11 @@ export const checkReadTaint = (filePath, daHome, extraPrefixes, cwd) => {
     if (normPath === td || normPath.startsWith(td + '/')) {
       return { taint: true, reason: `Read under taint-protected dir: ${filePath}` };
     }
+  }
+
+  // config.json contains raw chat names in excluded_chats[].name
+  if (normPath === normHome + '/config.json') {
+    return { taint: true, reason: `Read of DA config (contains raw chat names): ${filePath}` };
   }
 
   // Narrow exception: path IS daHome itself

@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
+from .fence import RAW_SENTINEL
 from .progress import Progress
 
 
@@ -225,6 +226,7 @@ def _collect_line(
                     is_self = (msg.get("senderRef") == own_ref) if own_ref else False
 
                     records.append({
+                        "_raw": RAW_SENTINEL,
                         "kind": "line_message",
                         "src_id": src_id,
                         "chat_ref": chat_ref,
@@ -405,6 +407,7 @@ def _collect_mail(
             received_at = full.get("received_at", date_str)
 
             records.append({
+                "_raw": RAW_SENTINEL,
                 "kind": "mail",
                 "src_id": src_id,
                 "internet_message_id": imid,
@@ -481,6 +484,7 @@ def _collect_calendar(
         seen.add(src_id)
 
         records.append({
+            "_raw": RAW_SENTINEL,
             "kind": "event",
             "src_id": src_id,
             "start": item.get("start", ""),

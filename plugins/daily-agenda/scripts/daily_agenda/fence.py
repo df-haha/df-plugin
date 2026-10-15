@@ -3,11 +3,21 @@
 Wraps raw third-party text in per-output random-nonce fences so that
 Claude's context clearly separates data from instructions.
 
-Fence format::
+Fence format (model-derived, ``raw=False``)::
 
     <<<UNTRUSTED-<nonce>
     <text with internal fence markers neutralized>
     UNTRUSTED-<nonce>>>>
+
+Raw format (``raw=True``) — adds a fixed sentinel that the PostToolUse
+hook detects to taint the session::
+
+    <<<UNTRUSTED-<nonce> DA-RAW-3f9a
+    DA-RAW-3f9a <text with markers + sentinel neutralized>
+    DA-RAW-3f9a UNTRUSTED-<nonce>>>>
+
+The sentinel appears on every fence line so that truncated output
+(``head``/``tail``/partial read) still carries it.
 
 The nonce is 16 hex characters, unique per call.
 """
@@ -19,6 +29,14 @@ import re
 import secrets
 from pathlib import Path
 from typing import Any
+
+# ---------------------------------------------------------------------------
+# Raw sentinel — fixed ASCII token detected by the PostToolUse hook.
+# Kept in sync with hooks/raw-commands.json ("raw_sentinel" key).
+# test_fence.py::test_registry_consistency enforces.
+# ---------------------------------------------------------------------------
+
+RAW_SENTINEL: str = "DA-RAW-3f9a"
 
 # Registry of CLI subcommands that emit raw third-party content.
 # Kept in sync with hooks/raw-commands.json — test_fence.py enforces.
@@ -34,6 +52,7 @@ RAW_EMITTING_COMMANDS: frozenset[str] = frozenset({
 _UNTRUSTED_TOKEN_RE = re.compile(r"untrusted-", re.IGNORECASE)
 _LT_RUN_RE = re.compile(r"[<＜]{3,}")
 _GT_RUN_RE = re.compile(r"[>＞]{3,}")
+_SENTINEL_RE = re.compile(re.escape(RAW_SENTINEL))
 
 
 def _generate_nonce() -> str:
@@ -42,26 +61,44 @@ def _generate_nonce() -> str:
 
 
 def _neutralize(text: str) -> str:
-    """Remove any fence-like markers from *text* so nested fences are impossible.
+    """Remove any fence-like markers AND the raw sentinel from *text*.
 
     Handles:
     - Any case of ``UNTRUSTED-`` / ``Untrusted-`` / ``untrusted-``
     - Any run of 3+ ``<`` or ``>`` (ASCII or fullwidth)
-    Replacement strings do not resemble fence markers.
+    - The raw sentinel token (so attacker-supplied text can't forge it)
+    Replacement strings do not resemble fence markers or the sentinel.
     """
     result = _UNTRUSTED_TOKEN_RE.sub("[fence-marker-removed]", text)
     result = _LT_RUN_RE.sub("[lt-run]", result)
     result = _GT_RUN_RE.sub("[gt-run]", result)
+    result = _SENTINEL_RE.sub("[raw-marker-removed]", result)
     return result
 
 
-def fence_untrusted(text: str) -> str:
+def fence_untrusted(text: str, *, raw: bool = False) -> str:
     """Wrap *text* in an untrusted fence with a fresh random nonce.
 
-    Any fence-like markers already in *text* are neutralized first.
+    Any fence-like markers already in *text* are neutralized first
+    (including the raw sentinel itself, so attacker text can't collide).
+
+    When *raw* is ``True``, the fixed sentinel ``DA-RAW-3f9a`` is stamped
+    on every fence line.  The PostToolUse hook detects this sentinel in
+    tool output and marks the session as tainted.
+
+    When *raw* is ``False`` (the default), no sentinel is emitted.  Use
+    ``raw=False`` for model-derived text (criteria, profile, draft_text,
+    ledger titles, refine changes) which is fenced but non-tainting.
     """
     nonce = _generate_nonce()
     safe_text = _neutralize(text)
+    if raw:
+        s = RAW_SENTINEL
+        return (
+            f"<<<UNTRUSTED-{nonce} {s}\n"
+            f"{s} {safe_text}\n"
+            f"{s} UNTRUSTED-{nonce}>>>>"
+        )
     return f"<<<UNTRUSTED-{nonce}\n{safe_text}\nUNTRUSTED-{nonce}>>>>"
 
 

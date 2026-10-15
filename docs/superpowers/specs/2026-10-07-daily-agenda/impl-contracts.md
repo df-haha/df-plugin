@@ -227,7 +227,25 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 
 **Path-reference exemption（mechanism 2）**：checkBashTaint 的 mechanism 2 會對 command 中出現在 `<home>/runs|gen|output` 下的路徑觸發 taint。但 canonical DA invocation（通過 `_parseCanonicalDA` 驗證：`uv run --quiet --project ... python -I -X utf8 -m daily_agenda`、project path 為 template 或 realpath 相符）的 flag 值依 subcommand 語意豁免：`--progress-file`（任何 subcommand）和 `progress show|watch --file` → 只接受 `runs/progress/*.jsonl`；`criteria save` / `refine apply --file` → 只接受 `criteria-draft.md`；`profile save --file` → 只接受 `profile-draft.md`；`profile coverage save --file` → 只接受 `coverage-draft.json`；`draft show --file` → 接受三種 draft basename。其他 subcommand 的 `--file` 無豁免。所有 draft 路徑拒絕含 `raw` segment。非 canonical form（project path 不對、非 `-I -X utf8`、metachar、`$`）不豁免。Registry 機制仍優先：raw-emitting subcommand 即使帶合法 progress-file 也一定 taint。
 
-**Taint detection forms**：`_checkRegistryInvocation` 偵測三種 daily_agenda 執行形式——(A) `-m daily_agenda` 含寬鬆 interpreter match（`python.exe`、`python3.13`、`py`、case-insensitive）和非 canonical module name taint（`daily_agenda.__main__` → taint）；(B) `-c` inline code 提及 `daily_agenda` → taint；(C) script-path（`python daily_agenda/__main__.py`）→ taint。`$`、backtick、`%VAR%` 出現在 `-m daily_agenda` 之後 → taint。`shellTokenize` 依 bash 語意處理 backslash（unquoted `\x` → `x`）。已知 false positive：`grep -rn "python -m daily_agenda chats list" .` 會 taint（quoted mention 匹配 form A），不影響 dev workflow（mechanism 1 需要 `daily_agenda` 在 command 裡，`grep` command 本身就含該字串）。
+**Taint detection forms（PreToolUse layer 1）**：`_checkRegistryInvocation` 偵測三種 daily_agenda 執行形式——(A) `-m daily_agenda`；(B) `-c` inline code；(C) script-path。詳見 lock-core.mjs。
+
+**Content-based sentinel detection（PostToolUse layer 2，defense-in-depth backstop）**：
+- **Sentinel**：固定 ASCII 字串 `DA-RAW-3f9a`，定義在 `fence.py:RAW_SENTINEL` 與 `raw-commands.json:raw_sentinel`，`test_fence.py::test_sentinel_matches_json` 強制同步。
+- **CLI 輸出印記**：`fence_untrusted(text, raw=True)` 在每條 fence 的三行都印上 sentinel（opening/content/closing），截斷輸出仍帶 sentinel。raw-emitting subcommand（chats/outlook-preview/raw/scan）的 `fence_untrusted` 呼叫帶 `raw=True`；model-derived 文字（criteria show/draft_text/profile/refine changes/ledger titles）維持 `raw=False`，不帶 sentinel。`_neutralize` 同時清除輸入中的 sentinel（attacker text 不能偽造）。
+- **JSONL 磁碟印記**：`collect.py` 寫入的每筆含 `untrusted` 欄位的 record 加 `"_raw": "DA-RAW-3f9a"` 作為**第一個 key**（`head -c N` 截斷仍含 sentinel）。所有 reader 以 `rec.get("kind")` 存取已知 key，忽略未知欄位。`gen/`、`output/` 不印記（路徑 taint 已涵蓋；agenda HTML 印 sentinel 會影響使用者體驗）。`docs-cache/` 不印記（使用者文件，非 raw）。
+- **Raw sample 磁碟印記**：`scan_raw.py:write_raw_sample` 寫的 `.md` 檔（LINE chat、mail folder）每行都前綴 `DA-RAW-3f9a `（含多行 body 拆行後逐行印記）。`stats.json` 第一個 key 為 `"_raw": "DA-RAW-3f9a"`。
+- **PostToolUse hook**：`post-lock.mjs`，註冊在 hooks.json `PostToolUse` 下，matcher `Bash|Read|Grep|Monitor`。讀 `tool_response`：Bash = `{stdout, stderr}`，Read = string 或 structured object（fallback `JSON.stringify`），Grep / Monitor = structured JSON。若 sentinel 出現 → 寫 taint marker（含 `transcript_path`）。fail-safe：parse error / exception → `{}`（不崩潰、不阻擋工具流程）。不匹配 Glob（只回傳路徑）。
+- **config.json path-taint**：`<home>/config.json` 含 `line.excluded_chats[].name`（raw chat names）。`checkReadTaint` 和 `checkBashTaint` mechanism 2 對 `<home>/config.json` 做 exact-path taint。CLI `config get` 的 `_ALLOWED_KEYS` 不含 excluded_chats，不會洩露。
+- **Mechanism-2 bash unescape**：path token 在 canonicalize 前先做 ANSI-C `$'...'` 解碼、unquoted `\x` → `x` 反轉義。關閉 `ru\ns` 和 `$'runs'` bypass。
+- **`run` 不帶 sentinel**：`run` 的 CLI 輸出不呼叫 `fence_untrusted(raw=True)`（只有 counts/refs/fenced new_chat names with `raw=False`），因此 PostToolUse 不會 taint。`chats list` 同樣的 chat names 帶 `raw=True` → 會 taint。這是刻意的不對稱（使用者決定 `run` 不鎖定）。
+
+**Draft laundering prevention**：PreToolUse 在 tainted session 中允許 Write/Edit draft 路徑後，將該路徑記錄到 `<daHome>/taint/tainted-drafts.json`（atomic write）。untainted session 中 `_buildExemptSet` 建立的 exempt path 若出現在 tainted-drafts list → 立即 taint（不豁免）。`checkReadTaint` 同理：Read tainted draft → taint。這堵住「tainted session 把 raw content 寫進 draft，untainted session 用 `draft show` 讀回」的漏洞。
+
+**Accepted residual: save-then-show**：tainted session 中 `criteria save` / `profile save` / `refine apply` 寫入的 draft 是 model-derived（AI 從 raw 資料整理出的準則/檔案）。後續 untainted session 的 `criteria show` / `profile show` 以 `fence_untrusted(raw=False)` 回傳該內容，不帶 sentinel → 不 taint。這是 settled decision（model-derived 文字不鎖定）。Draft laundering prevention 只攔「tainted session 直接 Write 的檔案被 `draft show --file` 讀回」的路徑，不攔「CLI 子命令自己讀取已儲存的 criteria/profile」。
+
+**Accepted residuals（content-marker 的設計邊界，不追）**：(1) `$(printf ...)` / `eval` / heredoc 展開後的路徑（shell AST 解析成本不對等）；(2) `jq -r .untrusted.text` / `cut` / `awk` 等 field-extraction transforms 從 JSONL 抽出 raw text 但不攜帶 sentinel（sentinel 在 `_raw` field，不在 `untrusted.text` 裡；Layer 2 的 PostToolUse 在 tool output 中偵測 sentinel，但如果 transform 只輸出 `.untrusted.text` 則 sentinel 不在輸出裡）。這兩類需要對 tool output 做語意分析才能攔截，超出 content-marker 設計範圍。
+
+**PostToolUse schema（evidence）**：`tool_response` 欄位包含工具的結構化輸出——Bash: `{stdout, stderr, interrupted, isImage}`，Read: raw string，Grep: structured object。來源：code.claude.com/docs/en/hooks（2026-10-16 fetch，PostToolUse section offset 100000）。`updatedToolOutput` 可替換 Claude 看到的輸出但不影響已執行的操作。大型 Bash 輸出可能被 Claude Code 截斷為 preview（per-line sentinel 印記確保截斷片段仍含 sentinel）。
 
 | 指令 | 用途 | 輸出重點 |
 |---|---|---|

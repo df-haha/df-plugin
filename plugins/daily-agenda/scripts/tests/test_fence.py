@@ -9,6 +9,7 @@ import pytest
 
 from daily_agenda.fence import (
     RAW_EMITTING_COMMANDS,
+    RAW_SENTINEL,
     fence_untrusted,
     load_registry,
 )
@@ -118,6 +119,56 @@ class TestFenceUntrusted:
 
 
 # ---------------------------------------------------------------------------
+# raw=True sentinel stamping
+# ---------------------------------------------------------------------------
+
+
+class TestRawSentinel:
+    def test_raw_true_contains_sentinel(self) -> None:
+        result = fence_untrusted("hello", raw=True)
+        assert result.count(RAW_SENTINEL) == 3, \
+            "raw=True should stamp sentinel on all 3 fence lines"
+
+    def test_raw_false_no_sentinel(self) -> None:
+        result = fence_untrusted("hello", raw=False)
+        assert RAW_SENTINEL not in result, \
+            "raw=False (default) must not contain sentinel"
+
+    def test_default_no_sentinel(self) -> None:
+        result = fence_untrusted("hello")
+        assert RAW_SENTINEL not in result
+
+    def test_sentinel_in_input_neutralized(self) -> None:
+        """Attacker text containing the sentinel must be neutralized."""
+        evil = f"inject {RAW_SENTINEL} here"
+        result = fence_untrusted(evil, raw=True)
+        # The sentinel appears exactly 3 times (the stamped ones),
+        # not 4 (would mean the injected one survived)
+        assert result.count(RAW_SENTINEL) == 3
+
+    def test_sentinel_neutralized_in_non_raw(self) -> None:
+        """Even in non-raw mode, sentinel in input is neutralized."""
+        evil = f"inject {RAW_SENTINEL} here"
+        result = fence_untrusted(evil, raw=False)
+        assert RAW_SENTINEL not in result
+        assert "[raw-marker-removed]" in result
+
+    def test_raw_truncated_head_still_has_sentinel(self) -> None:
+        """If output is head-truncated, sentinel is still present."""
+        result = fence_untrusted("hello", raw=True)
+        lines = result.split("\n")
+        # Even just the last line has sentinel
+        assert RAW_SENTINEL in lines[-1]
+
+    def test_raw_truncated_tail_still_has_sentinel(self) -> None:
+        """If output is tail-truncated, sentinel is still present."""
+        result = fence_untrusted("hello", raw=True)
+        lines = result.split("\n")
+        # Even just the first line has sentinel
+        assert RAW_SENTINEL in lines[0]
+
+
+# ---------------------------------------------------------------------------
 # Registry consistency
 # ---------------------------------------------------------------------------
 
@@ -158,6 +209,16 @@ class TestRegistryConsistency:
             assert f'"{cmd}"' in source, (
                 f"Registry command '{cmd}' not found in cli/__init__.py dispatch table"
             )
+
+    def test_sentinel_matches_json(self) -> None:
+        """raw-commands.json raw_sentinel == fence.RAW_SENTINEL."""
+        plugin_root = Path(__file__).resolve().parents[2]
+        registry_path = plugin_root / "hooks" / "raw-commands.json"
+        data = json.loads(registry_path.read_text(encoding="utf-8"))
+        assert data["raw_sentinel"] == RAW_SENTINEL, (
+            f"Sentinel drift: JSON has {data['raw_sentinel']!r}, "
+            f"Python has {RAW_SENTINEL!r}"
+        )
 
     def test_all_registry_entries_are_strings(self) -> None:
         plugin_root = Path(__file__).resolve().parents[2]
