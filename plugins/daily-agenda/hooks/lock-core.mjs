@@ -7,10 +7,21 @@
  */
 
 import { readFileSync, realpathSync } from 'node:fs';
-import { join, dirname, posix } from 'node:path';
+import { join, dirname, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** The real plugin scripts directory, derived from this hook's own location. */
+const PLUGIN_SCRIPTS_DIR = (() => {
+  try {
+    // hooks/ is a sibling of scripts/ under the plugin root
+    return realpathSync(resolve(__dirname, '..', 'scripts'));
+  } catch {
+    // If resolve fails (hook installed in unusual location), fall back to string-based
+    return resolve(__dirname, '..', 'scripts');
+  }
+})();
 
 // ---------------------------------------------------------------------------
 // Path canonicalization
@@ -76,48 +87,239 @@ export const loadRegistry = () => {
 // ---------------------------------------------------------------------------
 
 /**
- * N5-safe registry check: only match `python -m daily_agenda <subcommand>`
- * where <subcommand> is a registry token. Tolerates optional global flags
- * like --progress-file between daily_agenda and the subcommand.
+ * N5-safe registry check: match `python [-P] -m daily_agenda <subcommand>`
+ * where <subcommand> is a registry token. Tolerates the known root flag
+ * --progress-file between daily_agenda and the subcommand; unknown flags
+ * trigger taint (fail closed).
  *
  * Does NOT false-taint developer commands like `grep -rn chats scripts/`.
  */
+// Known root flags that take a value after a space (not just =).
+const KNOWN_VALUE_FLAGS = new Set(['--progress-file']);
+
+/**
+ * Shell-aware tokenizer: split on unquoted whitespace, respecting "..." and
+ * '...' quotes.  Follows bash semantics for backslash escapes:
+ *
+ *  - Outside quotes: `\x` → `x` (the backslash is consumed).
+ *  - Inside double quotes: `\"` → `"`, `\\` → `\`; other `\x` kept literal
+ *    (preserves Windows paths like `"C:\Users\..."`).
+ *  - Inside single quotes: everything literal (no escape processing).
+ *
+ * Consequence: an unquoted `C:\Users\x` becomes `C:Usersx` (same as bash;
+ * the skill always quotes paths).  A double-quoted path ending in `\"`
+ * doesn't close the quote (same as bash; would be a broken command).
+ */
+export const shellTokenize = (str) => {
+  const tokens = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (inSingle) {
+      if (ch === "'") { inSingle = false; continue; }
+      current += ch;
+    } else if (inDouble) {
+      if (ch === '\\' && i + 1 < str.length) {
+        const next = str[i + 1];
+        // In double quotes, bash only escapes: \\ \" \` \$ \newline
+        if (next === '\\' || next === '"') {
+          current += next;
+          i++;
+          continue;
+        }
+        // All other \x inside double quotes: keep both characters literal
+        current += ch;
+      } else if (ch === '"') {
+        inDouble = false;
+      } else {
+        current += ch;
+      }
+    } else if (ch === '\\' && i + 1 < str.length) {
+      // Outside quotes: \x → x (bash behavior)
+      current += str[i + 1];
+      i++;
+    } else if (ch === "'") {
+      inSingle = true;
+    } else if (ch === '"') {
+      inDouble = true;
+    } else if (/\s/.test(ch)) {
+      if (current.length > 0) { tokens.push(current); current = ''; }
+    } else {
+      current += ch;
+    }
+  }
+  if (current.length > 0) tokens.push(current);
+  return tokens;
+};
+
+/**
+ * Interpreter regex fragment: matches python/py/python3.13/python.exe etc.,
+ * case-insensitive.  Requires the match to follow a shell boundary or start
+ * of string.  Does NOT match `pytest` (after `py`, digits/`.exe` are optional
+ * but the next char must be `\s` or end — `t` fails).
+ */
+const _INTERP_RE = /(?:^|[\s;|&(`])(?:\S*[/\\])?(?:py|python)w?\d*(?:\.\d+)*(?:\.exe)?(?=\s)/i;
+
 const _checkRegistryInvocation = (command) => {
   const registry = loadRegistry();
 
-  // Find the "python -m daily_agenda" anchor
-  const anchor = command.match(
-    /python[23]?\s+-m\s+daily_agenda\b(.*)/
+  // ── Form A: `-m` module invocation ──
+  // Tolerates interpreter flags (e.g. -P) between the interpreter and -m.
+  const anchorA = command.match(
+    /(?:py|python)w?\d*(?:\.\d+)*(?:\.exe)?\s+(?:\S+\s+)*?-m\s+(daily_agenda(?:\.\S*)?)\b(.*)/i
   );
-  if (!anchor) return { taint: false };
-
-  // Everything after "daily_agenda" — split into tokens, skip flags + their values
-  const rest = anchor[1].trim();
-  if (!rest) return { taint: false };
-
-  const tokens = rest.split(/\s+/);
-  let skipNext = false;
-  for (const token of tokens) {
-    const clean = token.replace(/^["']|["']$/g, '');
-    if (skipNext) { skipNext = false; continue; }
-    // Skip flags and mark their value token to skip too
-    if (clean.startsWith('--')) {
-      // --flag=value: skip this token only
-      if (clean.includes('=')) continue;
-      // --flag value: skip this token and the next
-      skipNext = true;
-      continue;
+  if (anchorA) {
+    const moduleName = anchorA[1];
+    // Non-canonical module name (e.g. daily_agenda.__main__) → taint
+    if (moduleName.toLowerCase() !== 'daily_agenda') {
+      return { taint: true, reason: `non-canonical module: ${moduleName}` };
     }
-    if (clean.startsWith('-')) continue;
-    // First non-flag token is the subcommand
-    if (registry.has(clean)) {
-      return { taint: true, reason: `raw-emitting subcommand: ${clean}` };
+
+    const rest = anchorA[2].trim();
+    if (!rest) return { taint: false };
+
+    // Fail closed on unexpanded shell variables / backticks in the rest
+    if (/[$`]|%\w+%/.test(rest)) {
+      return { taint: true, reason: 'unexpanded shell variable or backtick after daily_agenda' };
     }
-    // First non-flag, non-registry token: not a raw command
+
+    const tokens = shellTokenize(rest);
+    let skipNext = false;
+    for (const token of tokens) {
+      if (skipNext) { skipNext = false; continue; }
+
+      if (token.startsWith('--')) {
+        if (token.includes('=')) {
+          const flagName = token.slice(0, token.indexOf('='));
+          if (!KNOWN_VALUE_FLAGS.has(flagName)) {
+            return { taint: true, reason: `unknown root flag: ${flagName}` };
+          }
+          continue;
+        }
+        if (KNOWN_VALUE_FLAGS.has(token)) {
+          skipNext = true;
+          continue;
+        }
+        return { taint: true, reason: `unknown root flag: ${token}` };
+      }
+      if (token.startsWith('-') && token.length > 1) {
+        return { taint: true, reason: `unknown root flag: ${token}` };
+      }
+
+      // First non-flag token is the subcommand
+      if (registry.has(token)) {
+        return { taint: true, reason: `raw-emitting subcommand: ${token}` };
+      }
+      return { taint: false };
+    }
     return { taint: false };
   }
+
+  // ── Form B: `-c` inline code mentioning daily_agenda ──
+  if (_INTERP_RE.test(command) &&
+      /\s+-c\s/.test(command) &&
+      /daily_agenda/i.test(command)) {
+    return { taint: true, reason: 'python -c invocation mentioning daily_agenda' };
+  }
+
+  // ── Form C: script-path invocation (e.g. `python daily_agenda/__main__.py`) ──
+  // Matches an interpreter followed by flags (not -m/-c) and then a path
+  // containing `daily_agenda`.
+  const anchorC = command.match(
+    /(?:py|python)w?\d*(?:\.\d+)*(?:\.exe)?\s+(?:-(?!m\s|-m\s|c\s|-c\s)\S*\s+)*\S*daily_agenda(?:[/\\]|\b)/i
+  );
+  if (anchorC) {
+    // Don't match if it was actually a -m form (already handled above)
+    if (!/\s-m\s/.test(command.slice(0, anchorC.index + anchorC[0].length))) {
+      return { taint: true, reason: 'script-path invocation of daily_agenda' };
+    }
+  }
+
   return { taint: false };
 };
+
+// ---------------------------------------------------------------------------
+// Canonical DA invocation parser (shared by tainted allowlist + exemption)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a canonical DA invocation from a Bash command.
+ * Returns {ok, projectPath, subcommand, argsStr} or {ok:false}.
+ * This is the SAME shape the tainted allowlist checks (python -P -m, strict
+ * regex, template/realpath project path).  Used in both tainted and untainted
+ * paths so the two cannot drift.
+ */
+const _parseCanonicalDA = (command) => {
+  // Pre-checks: sanitize ${CLAUDE_PLUGIN_ROOT}; reject metachar / $ / multiline
+  const sanitized = command.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, '__PLUGIN_ROOT__');
+  if (/[;|&`><()\n\r{}*?~]/.test(sanitized)) return { ok: false };
+  if (/\$/.test(sanitized)) return { ok: false };
+  if (command.includes('\n') || command.includes('\r')) return { ok: false };
+
+  const m = command.match(
+    /^uv\s+run\s+--quiet\s+--project\s+"([^"]+)"\s+python\s+-P\s+-m\s+daily_agenda\s+([a-z][-a-z0-9]*)((?:\s+.*)?)$/
+  );
+  if (!m) return { ok: false };
+
+  const projectPath = m[1];
+  if (!_isAllowedProjectPath(projectPath)) return { ok: false };
+
+  return { ok: true, projectPath, subcommand: m[2], argsStr: (m[3] || '').trim() };
+};
+
+// ---------------------------------------------------------------------------
+// Path-rule helpers (shared between tainted allowlist + untainted exemption)
+// ---------------------------------------------------------------------------
+
+/** Allowed draft basenames that can appear under runs/ in --file values. */
+const DRAFT_BASENAMES = new Set([
+  'criteria-draft.md', 'profile-draft.md', 'coverage-draft.json',
+]);
+
+/**
+ * Check if a path is a valid progress-file: under <home>/runs/progress/,
+ * ends with .jsonl, single depth after progress/.
+ */
+export const _isProgressFilePath = (filePath, ctx) => {
+  if (!ctx?.daHome) return false;
+  const normFile = canonicalize(filePath);
+  const normHome = canonicalize(ctx.daHome);
+  if (!normFile || !normHome) return false;
+  if (!normFile.endsWith('.jsonl')) return false;
+  const prefix = normHome + '/runs/progress/';
+  if (!normFile.startsWith(prefix)) return false;
+  // Must be one level deep (no further / after progress/)
+  const remainder = normFile.slice(prefix.length);
+  if (remainder.includes('/')) return false;
+  return true;
+};
+
+/**
+ * Check if a path is a valid draft file: under <home>/runs/, basename is a
+ * known draft name, and no path segment is 'raw' (to prevent reading raw data
+ * files that happen to be named like drafts).
+ */
+export const _isDraftFilePath = (filePath, ctx) => {
+  if (!ctx?.daHome) return false;
+  const normFile = canonicalize(filePath);
+  const normHome = canonicalize(ctx.daHome);
+  if (!normFile || !normHome) return false;
+  if (!normFile.startsWith(normHome + '/runs/')) return false;
+  // Check basename
+  const basename = normFile.split('/').pop();
+  if (!DRAFT_BASENAMES.has(basename)) return false;
+  // Reject if any segment is 'raw'
+  const relative = normFile.slice((normHome + '/runs/').length);
+  const segments = relative.split('/');
+  if (segments.some(s => s === 'raw')) return false;
+  return true;
+};
+
+// ---------------------------------------------------------------------------
+// Taint detection — mechanism 2 path-reference check
+// ---------------------------------------------------------------------------
 
 /**
  * Check if a Bash command should taint the session.
@@ -126,6 +328,11 @@ const _checkRegistryInvocation = (command) => {
  * 1. Registry: `python -m daily_agenda <registry-subcommand>` (N5-safe)
  * 2. Path references: command tokens that resolve inside DA taint dirs
  *
+ * Mechanism 2 exempts flag values from canonical DA invocations that point to
+ * allowed locations (progress files under runs/progress/, draft files under
+ * runs/ with known basenames).  This prevents `/agenda run --progress-file`
+ * from locking a session that the user decided should stay unlocked.
+ *
  * @param {string} command
  * @param {{ daHome?: string, cwd?: string, extraPrefixes?: string[] }} [ctx]
  */
@@ -133,7 +340,7 @@ export const checkBashTaint = (command, ctx) => {
   if (typeof command !== 'string') return { taint: false };
 
   // 1. Registry check (only for real DA invocations, not grep/git commands)
-  if (command.includes('daily_agenda')) {
+  if (/daily_agenda/i.test(command)) {
     const regResult = _checkRegistryInvocation(command);
     if (regResult.taint) return regResult;
   }
@@ -142,6 +349,31 @@ export const checkBashTaint = (command, ctx) => {
   if (ctx?.daHome) {
     const normHome = canonicalize(ctx.daHome);
     if (!normHome) return { taint: false };
+
+    // Build exempt set: canonicalized paths from canonical DA flag values
+    const exempt = new Set();
+    const canonical = _parseCanonicalDA(command);
+    if (canonical.ok) {
+      const isWatch = canonical.subcommand === 'progress' &&
+                      /^watch\b/.test(canonical.argsStr);
+
+      // Extract --progress-file (for non-watch) or --file (for watch)
+      const pfFlag = isWatch ? '--file' : '--progress-file';
+      if (!canonical.argsStr.includes(pfFlag + '=')) {
+        const pfVals = _extractAllFlag(canonical.argsStr, pfFlag);
+        if (pfVals.length === 1 && _isProgressFilePath(pfVals[0], ctx)) {
+          exempt.add(canonicalize(pfVals[0]));
+        }
+      }
+
+      // Extract --file for non-watch commands (draft files)
+      if (!isWatch && !canonical.argsStr.includes('--file=')) {
+        const fVals = _extractAllFlag(canonical.argsStr, '--file');
+        if (fVals.length === 1 && _isDraftFilePath(fVals[0], ctx)) {
+          exempt.add(canonicalize(fVals[0]));
+        }
+      }
+    }
 
     const taintDirs = [
       normHome + '/runs', normHome + '/gen', normHome + '/output',
@@ -171,6 +403,9 @@ export const checkBashTaint = (command, ctx) => {
 
       const normToken = canonicalize(expanded, ctx.cwd);
       if (!normToken) continue;
+
+      // Skip exempt paths (canonical DA flag values)
+      if (exempt.has(normToken)) continue;
 
       // Check if the token is inside a taint dir
       for (const td of taintDirs) {
@@ -314,6 +549,45 @@ export const checkTaintedAllow = (toolName, toolInput, ctx) => {
 };
 
 // ---------------------------------------------------------------------------
+// Shared project path validation (H2 + L2: single implementation for Bash
+// and Monitor; realpath equality, no suffix matching)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether a --project path points to the real plugin scripts directory.
+ * Accepts both:
+ *  - The ${CLAUDE_PLUGIN_ROOT}/scripts template form (unexpanded by the hook)
+ *  - An absolute path that resolves to the same directory as PLUGIN_SCRIPTS_DIR
+ *
+ * On Windows: case-insensitive comparison (via realpath normalization).
+ * Nonexistent paths → deny (fail closed in tainted state).
+ *
+ * Exported for testing.
+ */
+export const _isAllowedProjectPath = (projectPath) => {
+  // Template form: always allowed (the shell expands it at runtime)
+  const norm = projectPath.replace(/\\/g, '/');
+  if (norm === '__PLUGIN_ROOT__/scripts' ||
+      norm === '${CLAUDE_PLUGIN_ROOT}/scripts') {
+    return true;
+  }
+
+  // Absolute path: compare via realpath
+  try {
+    const resolvedCandidate = realpathSync(projectPath);
+    const resolvedPlugin = realpathSync(PLUGIN_SCRIPTS_DIR);
+    // On Windows, realpath returns native case but we compare case-insensitively.
+    if (process.platform === 'win32') {
+      return resolvedCandidate.toLowerCase() === resolvedPlugin.toLowerCase();
+    }
+    return resolvedCandidate === resolvedPlugin;
+  } catch {
+    // Path doesn't exist or can't be resolved → deny (fail closed)
+    return false;
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Tainted Bash check
 // ---------------------------------------------------------------------------
 
@@ -347,20 +621,11 @@ export const checkTaintedBash = (toolInput, ctx) => {
   if (/[;|&`><()\n\r{}*?~]/.test(sanitized)) return deny('（Bash：不允許 shell 特殊字元）');
   if (/\$/.test(sanitized)) return deny('（Bash：不允許變數展開，$CLAUDE_PLUGIN_ROOT 除外）');
 
-  const daMatch = command.match(
-    /^uv\s+run\s+--quiet\s+--project\s+"([^"]+)"\s+python\s+-m\s+daily_agenda\s+([a-z][-a-z0-9]*)((?:\s+.*)?)$/
-  );
-  if (!daMatch) return deny();
+  const canonical = _parseCanonicalDA(command);
+  if (!canonical.ok) return deny();
 
-  const projectPath = daMatch[1];
-  const subcommand = daMatch[2];
-  const argsStr = (daMatch[3] || '').trim();
-
-  const normProject = projectPath.replace(/\\/g, '/');
-  const isPluginRoot = normProject === '__PLUGIN_ROOT__/scripts' ||
-    normProject === '${CLAUDE_PLUGIN_ROOT}/scripts';
-  const isAbsoluteDA = /^([A-Za-z]:[/\\]|\/)[^]*[/\\]plugins[/\\]daily-agenda[/\\]scripts$/i.test(projectPath);
-  if (!isPluginRoot && !isAbsoluteDA) return deny('（Bash：只允許 daily-agenda 指令）');
+  const subcommand = canonical.subcommand;
+  const argsStr = canonical.argsStr;
 
   // F3/item2: validate --progress-file (reject duplicates, =form, path)
   const pfResult = _validateFlagOccurrences(argsStr, '--progress-file', ctx, true);
@@ -501,17 +766,14 @@ export const checkMonitorCommand = (toolInput, ctx) => {
   if (/[;|&`><()\n\r{}*?~]/.test(sanitized)) return deny('（Monitor：不允許 shell 特殊字元）');
   if (/\$/.test(sanitized)) return deny('（Monitor：不允許變數展開，$CLAUDE_PLUGIN_ROOT 除外）');
 
+  // Require python -P -m (safe-path: cwd not prepended to sys.path)
   const daMatch = command.match(
-    /^uv\s+run\s+--quiet\s+--project\s+"([^"]+)"\s+python\s+-m\s+daily_agenda\s+progress\s+watch\b/
+    /^uv\s+run\s+--quiet\s+--project\s+"([^"]+)"\s+python\s+-P\s+-m\s+daily_agenda\s+progress\s+watch\b/
   );
   if (!daMatch) return deny('（Monitor：只能追蹤 daily-agenda 進度）');
 
   const projectPath = daMatch[1];
-  const normProject = projectPath.replace(/\\/g, '/');
-  const isPluginRoot = normProject === '__PLUGIN_ROOT__/scripts' ||
-    normProject === '${CLAUDE_PLUGIN_ROOT}/scripts';
-  const isAbsoluteDA = /^([A-Za-z]:[/\\]|\/)[^]*[/\\]plugins[/\\]daily-agenda[/\\]scripts$/i.test(projectPath);
-  if (!isPluginRoot && !isAbsoluteDA) return deny('（Monitor：只允許 daily-agenda 進度指令）');
+  if (!_isAllowedProjectPath(projectPath)) return deny('（Monitor：只允許 daily-agenda 進度指令）');
 
   // Validate --file in progress watch
   const argsAfterWatch = command.slice(command.indexOf('watch') + 5).trim();

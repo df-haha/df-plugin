@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from daily_agenda.folder_walk import walk_folders, SKIP_WELL_KNOWN
+from daily_agenda.folder_walk import walk_folders, WalkResult, SKIP_WELL_KNOWN
 from daily_agenda.collect import collect, _migrate_mail_checkpoint
 from daily_agenda.cli import main
 from daily_agenda.cli._common import Deps
@@ -82,8 +82,9 @@ class TestFolderWalk:
             return tree.get(parent_id, [])
 
         result = walk_folders(list_fn)
-        assert len(result) == 3
-        paths = [f["path"] for f in result]
+        assert isinstance(result, WalkResult)
+        assert len(result.folders) == 3
+        paths = [f["path"] for f in result.folders]
         assert "收件匣" in paths
         assert "寄件備份" in paths
 
@@ -98,7 +99,7 @@ class TestFolderWalk:
         }
 
         result = walk_folders(lambda pid: tree.get(pid, []))
-        by_path = {f["path"]: f for f in result}
+        by_path = {f["path"]: f for f in result.folders}
         assert by_path["收件匣"]["well_known"] == "inbox"
         assert by_path["Junk Email"]["well_known"] == "junkemail"
         assert by_path["Custom Folder"]["well_known"] is None
@@ -114,8 +115,8 @@ class TestFolderWalk:
         }
 
         result = walk_folders(lambda pid: tree.get(pid, []))
-        assert len(result) == 3
-        paths = [f["path"] for f in result]
+        assert len(result.folders) == 3
+        paths = [f["path"] for f in result.folders]
         assert "收件匣 / 客戶" in paths
         assert "收件匣 / 豐興" in paths
 
@@ -129,7 +130,7 @@ class TestFolderWalk:
         }
 
         result = walk_folders(lambda pid: tree.get(pid, []), max_depth=2)
-        paths = [f["path"] for f in result]
+        paths = [f["path"] for f in result.folders]
         assert "Root / Level2" in paths
         assert "Root / Level2 / Level3" not in paths
 
@@ -140,7 +141,9 @@ class TestFolderWalk:
         }
 
         result = walk_folders(lambda pid: tree.get(pid, []), max_total=10)
-        assert len(result) == 10
+        assert len(result.folders) == 10
+        assert result.complete is False
+        assert result.truncated is not None
 
     def test_hidden_skipped(self) -> None:
         """Hidden folders are not included."""
@@ -152,8 +155,8 @@ class TestFolderWalk:
         }
 
         result = walk_folders(lambda pid: tree.get(pid, []))
-        assert len(result) == 1
-        assert result[0]["path"] == "收件匣"
+        assert len(result.folders) == 1
+        assert result.folders[0]["path"] == "收件匣"
 
     def test_parent_list_failure_skips_subtree(self) -> None:
         """If listing a child parent fails, its subtree is skipped."""
@@ -163,7 +166,9 @@ class TestFolderWalk:
             return [_make_folder("f1", "Inbox", child_count=2)]
 
         result = walk_folders(failing_list)
-        assert len(result) == 1  # Only top-level Inbox, not its children
+        assert len(result.folders) == 1  # Only top-level Inbox, not its children
+        assert result.complete is False
+        assert len(result.skipped) == 1
 
     def test_top_level_failure_raises(self) -> None:
         """Top-level listing failure propagates (auth, too old, etc.)."""
@@ -183,7 +188,7 @@ class TestFolderWalk:
         }
 
         result = walk_folders(lambda pid: tree.get(pid, []))
-        by_path = {f["path"]: f for f in result}
+        by_path = {f["path"]: f for f in result.folders}
         assert by_path["收件匣"]["well_known"] == "inbox"
         # Subfolder "Sent Items" under Inbox must NOT be tagged as sentitems
         assert by_path["收件匣 / Sent Items"]["well_known"] is None

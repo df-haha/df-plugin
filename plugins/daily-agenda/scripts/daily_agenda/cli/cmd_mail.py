@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from daily_agenda import state
-from daily_agenda.folder_walk import walk_folders, SKIP_WELL_KNOWN, _WELL_KNOWN_NAMES
+from daily_agenda.folder_walk import walk_folders, WalkResult, SKIP_WELL_KNOWN, _WELL_KNOWN_NAMES
 from ._common import Deps, emit, require_consent
 
 
@@ -53,7 +53,7 @@ def _handle_folders(argv: list[str], deps: Deps) -> int:
         return emit({"ok": False, "code": code})
 
     try:
-        folders = walk_folders(graph.folder_list)
+        walk = walk_folders(graph.folder_list)
     except Exception as exc:
         code = getattr(exc, "code", "GRAPH_FAILED")
         return emit({"ok": False, "code": code})
@@ -62,7 +62,7 @@ def _handle_folders(argv: list[str], deps: Deps) -> int:
     selected_refs = set(cfg.get("mail", {}).get("folders", ["inbox"]))
 
     result_folders: list[dict[str, Any]] = []
-    for f in folders:
+    for f in walk.folders:
         ref = _folder_ref(f)
         result_folders.append({
             "ref": ref,
@@ -74,22 +74,31 @@ def _handle_folders(argv: list[str], deps: Deps) -> int:
             "selected": ref in selected_refs,
         })
 
-    return emit({"ok": True, "code": None, "folders": result_folders})
+    result: dict[str, Any] = {
+        "ok": True, "code": None,
+        "folders": result_folders,
+        "complete": walk.complete,
+    }
+    if walk.skipped:
+        result["skipped"] = walk.skipped
+    if walk.truncated:
+        result["truncated"] = walk.truncated
+    return emit(result)
 
 
-def _resolve_folder_map(deps: Deps) -> dict[str, str] | None:
-    """List folders from Graph and return ``{ref: display_path}``.
+def _resolve_folder_map(deps: Deps) -> tuple[dict[str, str] | None, bool]:
+    """List folders from Graph and return ``({ref: display_path}, complete)``.
 
-    Returns None if graph is not available.
+    Returns ``(None, False)`` if graph is not available.
     """
     if not deps.graph_factory:
-        return None
+        return None, False
     try:
         graph = deps.graph_factory()
-        folders = walk_folders(graph.folder_list)
+        walk = walk_folders(graph.folder_list)
     except Exception:
-        return None
-    return {_folder_ref(f): f["path"] for f in folders}
+        return None, False
+    return {_folder_ref(f): f["path"] for f in walk.folders}, walk.complete
 
 
 def _handle_select(argv: list[str], deps: Deps) -> int:
@@ -135,14 +144,23 @@ def _handle_select(argv: list[str], deps: Deps) -> int:
 
     # Validate refs for --set and --add (not --remove)
     folder_map: dict[str, str] | None = None
+    inventory_complete: bool = False
     if refs_to_validate:
         # Well-known names always valid (Graph accepts them regardless of locale)
         unknown = [r for r in refs_to_validate if r not in _ALL_WELL_KNOWN_REFS]
         if unknown:
-            folder_map = _resolve_folder_map(deps)
+            folder_map, inventory_complete = _resolve_folder_map(deps)
             if folder_map is not None:
                 bad = [r for r in unknown if r not in folder_map]
                 if bad:
+                    if not inventory_complete and "--allow-incomplete" not in argv:
+                        return emit(
+                            {"ok": False, "code": "MAIL_FOLDERS_INCOMPLETE",
+                             "message": "信箱資料夾清單不完整（部分子資料夾讀取失敗或已截斷），"
+                                        "無法確認這些 ref 是否存在。"
+                                        "加上 --allow-incomplete 可強制接受。",
+                             "detail": f"unverifiable refs: {', '.join(bad)}"},
+                        )
                     return emit(
                         {"ok": False, "code": "ARG_ERROR",
                          "detail": f"找不到這些信箱資料夾 ref：{', '.join(bad)}"},
@@ -181,7 +199,7 @@ def _handle_select(argv: list[str], deps: Deps) -> int:
     # Store folder labels automatically for status display
     selected = cfg.get("mail", {}).get("folders", [])
     if folder_map is None and refs_to_validate:
-        folder_map = _resolve_folder_map(deps)
+        folder_map, _ = _resolve_folder_map(deps)
     if folder_map:
         labels = {ref: folder_map[ref] for ref in selected if ref in folder_map}
         # Well-known names not in the listing get their canonical name as label

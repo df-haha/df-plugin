@@ -10,6 +10,7 @@ recommend Inbox + subfolders and advise against Sent/Deleted/Junk/Drafts.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 
@@ -49,12 +50,22 @@ def _detect_well_known(name: str) -> str | None:
     return _WELL_KNOWN_NAMES.get(name.strip().lower())
 
 
+@dataclass
+class WalkResult:
+    """Result of :func:`walk_folders`."""
+
+    folders: list[dict[str, Any]] = field(default_factory=list)
+    complete: bool = True
+    skipped: list[dict[str, str]] = field(default_factory=list)
+    truncated: str | None = None
+
+
 def walk_folders(
     list_fn: Callable[[str], list[dict[str, Any]]],
     *,
     max_depth: int = 3,
     max_total: int = 200,
-) -> list[dict[str, Any]]:
+) -> WalkResult:
     """Walk the mailbox folder tree breadth-first.
 
     Parameters
@@ -69,10 +80,12 @@ def walk_folders(
 
     Returns
     -------
-    Flat list of ``{id, path, total, unread, well_known, depth}``
-    sorted by path.  Hidden folders are skipped.
+    :class:`WalkResult` with ``folders`` sorted by path, plus completeness
+    metadata (``complete``, ``skipped``, ``truncated``).
     """
     results: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    truncated: str | None = None
     # Queue: (parent_id, parent_path_parts, current_depth)
     queue: list[tuple[str, list[str], int]] = [("", [], 1)]
 
@@ -80,15 +93,18 @@ def walk_folders(
         parent_id, parent_parts, depth = queue.pop(0)
         try:
             children = list_fn(parent_id)
-        except Exception:
+        except Exception as exc:
             if parent_id == "":
                 # Top-level failure is fatal (auth expired, tool missing, etc.)
                 raise
             # Child folder failures (deleted, etc.) skip that subtree
+            display = " / ".join(parent_parts) if parent_parts else "(root)"
+            skipped.append({"path": display, "reason": type(exc).__name__})
             continue
 
         for child in children:
             if len(results) >= max_total:
+                truncated = f"max_total={max_total}"
                 break
 
             # Skip hidden folders
@@ -114,8 +130,16 @@ def walk_folders(
 
             # Recurse into children if they exist and depth allows
             child_count = child.get("child_count", 0)
-            if child_count and child_count > 0 and depth < max_depth:
-                queue.append((folder_id, path_parts, depth + 1))
+            if child_count and child_count > 0:
+                if depth < max_depth:
+                    queue.append((folder_id, path_parts, depth + 1))
+                else:
+                    truncated = f"max_depth={max_depth}"
+
+    # Pending queue items after max_total hit
+    if queue and truncated is None:
+        truncated = f"max_total={max_total}"
 
     results.sort(key=lambda f: f["path"])
-    return results
+    complete = not skipped and truncated is None
+    return WalkResult(folders=results, complete=complete, skipped=skipped, truncated=truncated)

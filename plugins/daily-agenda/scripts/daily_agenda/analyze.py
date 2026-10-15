@@ -148,4 +148,3 @@ def run_analyzer(stdin_bytes: bytes, prompt: str, *, model: str | None = None,
     return AnalyzerResult(output=extract_json(result["result"]), ms=ms,
                           usage=dict(result.get("usage") or {}))
 
-

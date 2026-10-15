@@ -24,6 +24,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from daily_agenda.fsutil import atomic_write_text
+
 
 # ---------------------------------------------------------------------------
 # Caps
@@ -317,7 +319,7 @@ def convert_paths(
             out_path = output_dir / safe_name
 
         try:
-            out_path.write_text(text, encoding="utf-8")
+            atomic_write_text(out_path, text)
         except OSError:
             skipped.append({"path": str(src), "reason": "write_failed"})
             continue

@@ -9,7 +9,7 @@ allowed-tools: Bash, Read, Write, AskUserQuestion, Monitor
 本 skill 帶使用者完成設定。所有本機動作都透過下面這個指令執行（以下簡稱 `DA`）：
 
 ```bash
-uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda <子指令>
+uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda <子指令>
 ```
 
 每個子指令輸出一個 JSON 物件：`ok`、`code`、`message`（白話）。**失敗時只把 `message` 轉述給使用者，不要貼代碼或原始 JSON。**
@@ -31,11 +31,11 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 1. 先建立 progress file（進度檔）：`DA progress new` → 取得 `progress_file` 路徑。
 2. 用 Bash 的 `run_in_background: true` 啟動指令，加上 `--progress-file "<路徑>"`：
    ```bash
-   uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda <子指令> --progress-file "<路徑>"
+   uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda <子指令> --progress-file "<路徑>"
    ```
 3. 用 Monitor 工具追蹤進度（每行一則繁中進度訊息，完成或失敗時自動結束）：
    ```bash
-   uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda progress watch --file "<路徑>"
+   uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda progress watch --file "<路徑>"
    ```
 4. 背景指令完成時（harness 通知），**停止 Monitor**（如果還在跑），以背景指令的 stdout JSON 為權威結果（涵蓋 crash 或 kill 後無 terminal event 的情況）。
 5. **如果 Monitor 不可用**（fallback，備援）：前景執行 `DA progress watch --file "<路徑>" --max-s 100`（`--max-s` 指定總秒數上限，到期自動結束 exit 3）。若 exit 3，重跑 watch（直到 exit 0 或 1 表示完成/失敗）。背景 Bash 完成通知到達時，停止 watch 並以 stdout JSON 為準。
@@ -137,7 +137,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 
 ## 第 7 步：選擇信箱資料夾（US-14）
 
-1. `DA mail folders`。
+1. `DA mail folders`。若回傳 `complete: false`，告訴使用者：「信箱資料夾清單不完整」並列出 `skipped`（讀取失敗的子資料夾）和 `truncated`（截斷原因），問使用者要不要繼續選取。
 2. 用編號列出資料夾清單（顯示路徑、信件總數），標示建議選取與不建議選取的：
    - 收件匣及其子資料夾：預設勾選（建議）
    - 寄件備份、刪除的郵件、垃圾郵件、草稿、寄件匣：標示「通常不需要」
@@ -156,15 +156,15 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 4. **檢查結果**：確認 `ok: true`。如果失敗（LINE 不可用等），把 `message` 告訴使用者並處理（同第 2 步的 LINE 排錯流程）。確認 `source_status` 中各來源狀態正常。
 5. Read 產生的 `raw/` 檔案（此時對話已鎖定）。
 6. 結合第 3 步讀取的文件（如果有）和 raw 樣本，為每個維度 A–K 判斷：「已有（來源）」「推斷待確認」「缺」。
-7. `DA profile coverage save --file "<runs/<id>/coverage-draft.json>"`（先 Write 到該路徑）。
+7. `DA draft new --kind coverage` 取得 `draft_path`，Write coverage-draft.json 到該 `draft_path`，然後 `DA profile coverage save --file "<draft_path>"`。
 8. 以表格形式顯示覆蓋率給使用者。
 9. AskUserQuestion（自足卡片）：「有些面向目前還缺資料。你想怎麼補？」選項：
    - 「現在一次補完（約 10 分鐘）」→ `DA profile cadence --set now`，然後逐個維度訪談。
    - 「每次跑 /agenda 時順便問 1 題」→ `DA profile cadence --set agenda`。
    - 「調整判斷規則時再一起問」→ `DA profile cadence --set refine`。
    - 「先不補」→ `DA profile cadence --set later`。
-10. 若選「現在」：逐個維度問（AskUserQuestion，每次 ≤4 個選項，允許自由填寫）。推斷的項目問「對/要改」。每個維度回答後，更新 coverage（status → have/inferred）：Write coverage-draft.json → `DA profile coverage save --file ...`。
-11. Write 檔案草稿到 `<runs/<id>/profile-draft.md>`（對照 `templates/profile-template.md` 格式），給使用者看，確認或修改。
+10. 若選「現在」：逐個維度問（AskUserQuestion，每次 ≤4 個選項，允許自由填寫）。推斷的項目問「對/要改」。每個維度回答後，更新 coverage（status → have/inferred）：`DA draft new --kind coverage` 取得 `draft_path`，Write coverage-draft.json 到該 `draft_path`，`DA profile coverage save --file <draft_path>`。
+11. `DA draft new --kind profile` 取得 `draft_path`，Write 檔案草稿到該 `draft_path`（對照 `templates/profile-template.md` 格式），把草稿 Markdown 原文直接貼在回覆正文給使用者看（不要另外產生 HTML／網頁或改排版），確認或修改。
 12. `DA profile save --file "<draft_path>"` → 回報「個人工作檔案 v1 已儲存」。
 
 ## 第 9 步：建立判斷準則第一版（US-6）
@@ -173,7 +173,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 
 1. 告訴使用者「正在根據掃描到的資料，由 AI 分析並建立判斷準則，大約 1–3 分鐘。」
 2. **使用長時間指令的執行模式**：先 `DA progress new`，再背景執行 `DA criteria draft --from-run <第 8 步的 run_id> --progress-file "<路徑>"`，用 Monitor 追蹤。
-3. 讀取輸出的 `draft_path`（這是 AI 整理出的準則草稿，不是原始資料），把全文給使用者看，問「要直接採用、還是要修改哪裡？」。
+3. 輸出中包含 `draft_text`（被圍欄包住的準則草稿全文），把 CLI 回傳的草稿 Markdown 原文直接貼在回覆正文給使用者看（不要另外產生 HTML／網頁或改排版），問「要直接採用、還是要修改哪裡？」。
 4. 依使用者意見修改草稿（用 Write 寫到同一個 draft_path），直到使用者說同意。
 5. `DA criteria save --file "<draft_path>"` → 回報「判斷準則第 1 版已儲存」。
 

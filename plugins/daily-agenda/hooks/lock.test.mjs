@@ -214,8 +214,26 @@ describe('lock hook integration', () => {
               result.stdout.hookSpecificOutput?.permissionDecision !== 'deny');
   });
 
-  it('allows DA run command when tainted', async () => {
+  it('allows DA run command when tainted (with -P)', async () => {
     const sessionId = 'sess-locked-5';
+    mkdirSync(path.join(testHome, 'taint'), { recursive: true });
+    writeFileSync(path.join(testHome, 'taint', sessionId), '{}');
+
+    const result = await runHook(
+      {
+        tool_name: 'Bash',
+        tool_input: { command: 'uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda run' },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+
+    assert.ok(!result.stdout.hookSpecificOutput?.permissionDecision ||
+              result.stdout.hookSpecificOutput?.permissionDecision !== 'deny');
+  });
+
+  it('denies DA run command without -P when tainted (H2)', async () => {
+    const sessionId = 'sess-locked-5b';
     mkdirSync(path.join(testHome, 'taint'), { recursive: true });
     writeFileSync(path.join(testHome, 'taint', sessionId), '{}');
 
@@ -228,8 +246,8 @@ describe('lock hook integration', () => {
       { DAILY_AGENDA_HOME: testHome },
     );
 
-    assert.ok(!result.stdout.hookSpecificOutput?.permissionDecision ||
-              result.stdout.hookSpecificOutput?.permissionDecision !== 'deny');
+    assert.equal(result.stdout.hookSpecificOutput?.permissionDecision, 'deny',
+      'python -m without -P must be denied in tainted sessions');
   });
 
   it('denies arbitrary Bash when tainted', async () => {
@@ -286,21 +304,101 @@ describe('lock hook integration', () => {
 
   // ── Marker cleanup ──
 
-  it('cleans up markers older than 60 days but keeps newer ones', async () => {
-    const sessionId = 'sess-cleanup-new';
-    const oldSessionId = 'sess-cleanup-old';
-    const recentSessionId = 'sess-cleanup-recent';
+  it('M2: deletes 61-day marker whose transcript file is gone', async () => {
+    const sessionId = 'sess-cleanup-m2-deleted';
+    const oldSessionId = 'sess-cleanup-m2-old-deleted';
     mkdirSync(path.join(testHome, 'taint'), { recursive: true });
 
     const { utimesSync } = await import('node:fs');
 
-    // Old marker: 61 days — should be cleaned
+    // Old marker with transcript_path pointing to nonexistent file
     const oldMarkerPath = path.join(testHome, 'taint', oldSessionId);
-    writeFileSync(oldMarkerPath, '{}');
+    writeFileSync(oldMarkerPath, JSON.stringify({
+      tainted_at: '2026-08-01T00:00:00Z',
+      transcript_path: '/tmp/nonexistent-transcript-12345.jsonl',
+    }));
     const sixtyOneDaysAgo = Date.now() - (61 * 24 * 60 * 60 * 1000);
     utimesSync(oldMarkerPath, sixtyOneDaysAgo / 1000, sixtyOneDaysAgo / 1000);
 
-    // Recent marker: 10 days — should be kept
+    // Trigger a taint (runs cleanup)
+    await runHook(
+      {
+        tool_name: 'Bash',
+        tool_input: { command: 'uv run --quiet --project "/p/scripts" python -m daily_agenda chats list --days 30' },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+
+    assert.ok(existsSync(path.join(testHome, 'taint', sessionId)), 'New marker exists');
+    assert.ok(!existsSync(oldMarkerPath), '61-day marker with gone transcript should be deleted');
+  });
+
+  it('M2: keeps 61-day marker whose transcript file still exists', async () => {
+    const sessionId = 'sess-cleanup-m2-kept-tp';
+    const oldSessionId = 'sess-cleanup-m2-old-kept';
+    mkdirSync(path.join(testHome, 'taint'), { recursive: true });
+
+    const { utimesSync } = await import('node:fs');
+
+    // Create a file that simulates the transcript still existing
+    const fakeTranscript = path.join(testHome, 'fake-transcript.jsonl');
+    writeFileSync(fakeTranscript, '[]');
+
+    const oldMarkerPath = path.join(testHome, 'taint', oldSessionId);
+    writeFileSync(oldMarkerPath, JSON.stringify({
+      tainted_at: '2026-08-01T00:00:00Z',
+      transcript_path: fakeTranscript,
+    }));
+    const sixtyOneDaysAgo = Date.now() - (61 * 24 * 60 * 60 * 1000);
+    utimesSync(oldMarkerPath, sixtyOneDaysAgo / 1000, sixtyOneDaysAgo / 1000);
+
+    // Trigger a taint (runs cleanup)
+    await runHook(
+      {
+        tool_name: 'Bash',
+        tool_input: { command: 'uv run --quiet --project "/p/scripts" python -m daily_agenda chats list --days 30' },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+
+    assert.ok(existsSync(oldMarkerPath), '61-day marker with existing transcript must be kept');
+  });
+
+  it('M2: keeps 61-day legacy marker without transcript_path (fail closed)', async () => {
+    const sessionId = 'sess-cleanup-m2-legacy';
+    const oldSessionId = 'sess-cleanup-m2-old-legacy';
+    mkdirSync(path.join(testHome, 'taint'), { recursive: true });
+
+    const { utimesSync } = await import('node:fs');
+
+    // Legacy marker: no transcript_path field
+    const oldMarkerPath = path.join(testHome, 'taint', oldSessionId);
+    writeFileSync(oldMarkerPath, '{"tainted_at":"2026-08-01T00:00:00Z"}');
+    const sixtyOneDaysAgo = Date.now() - (61 * 24 * 60 * 60 * 1000);
+    utimesSync(oldMarkerPath, sixtyOneDaysAgo / 1000, sixtyOneDaysAgo / 1000);
+
+    // Trigger a taint (runs cleanup)
+    await runHook(
+      {
+        tool_name: 'Bash',
+        tool_input: { command: 'uv run --quiet --project "/p/scripts" python -m daily_agenda chats list --days 30' },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+
+    assert.ok(existsSync(oldMarkerPath), 'Legacy marker without transcript_path must be kept (fail closed)');
+  });
+
+  it('M2: keeps 10-day marker regardless', async () => {
+    const sessionId = 'sess-cleanup-m2-recent';
+    const recentSessionId = 'sess-cleanup-m2-recent-kept';
+    mkdirSync(path.join(testHome, 'taint'), { recursive: true });
+
+    const { utimesSync } = await import('node:fs');
+
     const recentMarkerPath = path.join(testHome, 'taint', recentSessionId);
     writeFileSync(recentMarkerPath, '{}');
     const tenDaysAgo = Date.now() - (10 * 24 * 60 * 60 * 1000);
@@ -316,9 +414,28 @@ describe('lock hook integration', () => {
       { DAILY_AGENDA_HOME: testHome },
     );
 
-    assert.ok(existsSync(path.join(testHome, 'taint', sessionId)), 'New marker exists');
-    assert.ok(!existsSync(oldMarkerPath), '61-day marker cleaned up');
-    assert.ok(existsSync(recentMarkerPath), '10-day marker kept');
+    assert.ok(existsSync(recentMarkerPath), '10-day marker must be kept');
+  });
+
+  it('M2: new marker records transcript_path', async () => {
+    const sessionId = 'sess-m2-transcript';
+    const fakeTranscript = '/tmp/session-transcript-for-test.jsonl';
+
+    await runHook(
+      {
+        tool_name: 'Bash',
+        tool_input: { command: 'uv run --quiet --project "/p/scripts" python -m daily_agenda chats list --days 30' },
+        session_id: sessionId,
+        transcript_path: fakeTranscript,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+
+    const markerFile = path.join(testHome, 'taint', sessionId);
+    assert.ok(existsSync(markerFile), 'Marker should exist');
+    const markerData = JSON.parse(readFileSync(markerFile, 'utf8'));
+    assert.equal(markerData.transcript_path, fakeTranscript,
+      'Marker should record transcript_path from hook input');
   });
 
   // ── gen/ taint ──

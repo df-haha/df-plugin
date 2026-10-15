@@ -179,6 +179,7 @@ def handle(argv: list[str], deps: Deps) -> int:
         return emit({
             "ok": True, "code": None,
             "draft_path": str(draft_path),
+            "draft_text": fence_untrusted(draft_text),
             "base_version": base_version,
             "feedback_count": len(signals),
             "changes": fenced_changes,

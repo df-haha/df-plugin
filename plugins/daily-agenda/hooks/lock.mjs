@@ -62,20 +62,31 @@ const isSessionTainted = (daHome, sanitizedId) => {
   }
 };
 
-const markSessionTainted = (daHome, sanitizedId, reason) => {
+const markSessionTainted = (daHome, sanitizedId, reason, transcriptPath) => {
   try {
     mkdirSync(join(daHome, 'taint'), { recursive: true });
-    writeFileSync(markerPath(daHome, sanitizedId), JSON.stringify({
+    const marker = {
       tainted_at: new Date().toISOString(),
       reason,
-    }), 'utf8');
+    };
+    if (typeof transcriptPath === 'string' && transcriptPath.length > 0) {
+      marker.transcript_path = transcriptPath;
+    }
+    writeFileSync(markerPath(daHome, sanitizedId), JSON.stringify(marker), 'utf8');
     return true;
   } catch {
     return false;
   }
 };
 
-/** Opportunistic cleanup of markers older than 60 days. */
+/**
+ * Opportunistic cleanup of markers older than 60 days.
+ *
+ * M2 safe-delete rule: a marker is only deleted if it is older than 60 days
+ * AND its recorded transcript file no longer exists. If the marker has no
+ * transcript_path (legacy), or if the transcript file still exists, the marker
+ * is kept — a resumed session would still have raw content in context.
+ */
 const cleanupOldMarkers = (daHome) => {
   try {
     const taintDir = join(daHome, 'taint');
@@ -86,8 +97,28 @@ const cleanupOldMarkers = (daHome) => {
       try {
         const fp = join(taintDir, f);
         const st = statSync(fp);
-        if (now - st.mtimeMs > maxAge) unlinkSync(fp);
-      } catch { /* ignore */ }
+        if (now - st.mtimeMs <= maxAge) continue; // Not old enough
+
+        // Read the marker to check transcript_path
+        let markerData;
+        try {
+          markerData = JSON.parse(readFileSync(fp, 'utf8'));
+        } catch {
+          // Unparsable marker → keep (fail closed)
+          continue;
+        }
+
+        const tp = markerData?.transcript_path;
+        if (typeof tp !== 'string' || tp.length === 0) {
+          // Legacy marker without transcript_path → keep (fail closed)
+          continue;
+        }
+
+        // Only delete if the transcript file no longer exists
+        if (existsSync(tp)) continue;
+
+        unlinkSync(fp);
+      } catch { /* ignore per-file errors */ }
     }
   } catch { /* ignore */ }
 };
@@ -159,7 +190,8 @@ try {
     }
 
     if (shouldTaint) {
-      const marked = markSessionTainted(daHome, sanitizedId, taintReason);
+      const transcriptPath = hookData?.transcript_path;
+      const marked = markSessionTainted(daHome, sanitizedId, taintReason, transcriptPath);
       if (!marked) {
         outputDeny('無法建立安全標記檔案，為安全起見已阻擋此指令。請確認 .daily-agenda 目錄可寫入。');
         process.exit(0);

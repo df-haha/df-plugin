@@ -215,11 +215,19 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 - 行事曆每次重抓今天＋3 天，不用 checkpoint。
 - `line_collect.mjs`：`node line_collect.mjs --vendor <dir>`，stdin 一個 JSON 請求 `{"op":"probe"|"recentChats"|"messages", ...}`，stdout 一個 JSON 結果；只 import vendor 的唯讀 reader 函式，**不得 import 任何送出相關模組**；環境變數由 Python 端帶入（`LINE_MCP_PYTHON`、`LINE_MCP_SQLITE3MC_DLL`、`LINE_MCP_MAIN_DATABASE`、`LINE_MCP_TRUSTED_BUILDS`），**不設 `LINE_MCP_EXTENSIONS`**。
 
-## 7. CLI（`python -m daily_agenda <cmd>`）
+## 7. CLI（`python -P -m daily_agenda <cmd>`）
 
-呼叫方式（skill 內）：`uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda <cmd>`。
+呼叫方式（skill 內）：`uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda <cmd>`。`-P`（safe-path）防止 cwd 的同名套件覆蓋真正的 `daily_agenda`（Python 3.11+）。
 所有指令 stdout 輸出**一個 JSON 物件**（`{"ok":bool,"code":str|null,"message":白話,...}`），exit code 0＝ok、1＝可預期失敗、2＝參數錯。
 除了標 ★ 的指令，輸出**不得含任何原文**（只有筆數、狀態、代碼、路徑、ID）。★ 指令是 setup／互動流程中刻意顯示給使用者看的內容，只在同意之後可執行。
+
+**Root-arg rejection**：`parse_root_args` 在 command 之前只允許 `--progress-file`；任何其他 flag（如 `--bogus`、`-x`）在 command 之前出現 → `ARG_ERROR` exit 2。這堵住 hook 的 flag-swallow 漏洞（H1b）。command 之後的 flag 由各子命令 parser 處理，不受此限。
+
+**Marker lifecycle（M2）**：taint marker 在建立時記錄 `transcript_path`（來自 hook 的 `hookData.transcript_path`）。60 天清理規則：marker 超過 60 天 AND 其 `transcript_path` 指向的檔案已不存在 → 才刪除。legacy marker（無 `transcript_path`）→ 保留（fail closed），因為無法確認 session 是否仍可恢復。
+
+**Path-reference exemption（mechanism 2）**：checkBashTaint 的 mechanism 2 會對 command 中出現在 `<home>/runs|gen|output` 下的路徑觸發 taint。但 canonical DA invocation（通過 `_parseCanonicalDA` 驗證：`uv run --quiet --project ... python -P -m daily_agenda`、project path 為 template 或 realpath 相符）的 `--progress-file` 值（under `runs/progress/*.jsonl`、single depth）和 `--file` 值（under `runs/`、basename ∈ `{criteria-draft.md, profile-draft.md, coverage-draft.json}`、path 中無 `raw` segment）予以豁免。非 canonical form（project path 不對、無 `-P`、metachar、`$`）不豁免。Registry 機制仍優先：raw-emitting subcommand 即使帶合法 progress-file 也一定 taint。
+
+**Taint detection forms**：`_checkRegistryInvocation` 偵測三種 daily_agenda 執行形式——(A) `-m daily_agenda` 含寬鬆 interpreter match（`python.exe`、`python3.13`、`py`、case-insensitive）和非 canonical module name taint（`daily_agenda.__main__` → taint）；(B) `-c` inline code 提及 `daily_agenda` → taint；(C) script-path（`python daily_agenda/__main__.py`）→ taint。`$`、backtick、`%VAR%` 出現在 `-m daily_agenda` 之後 → taint。`shellTokenize` 依 bash 語意處理 backslash（unquoted `\x` → `x`）。已知 false positive：`grep -rn "python -m daily_agenda chats list" .` 會 taint（quoted mention 匹配 form A），不影響 dev workflow（mechanism 1 需要 `daily_agenda` 在 command 裡，`grep` command 本身就含該字串）。
 
 | 指令 | 用途 | 輸出重點 |
 |---|---|---|
@@ -233,8 +241,8 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 | ★`outlook-preview` | setup 第 4 步 | 最近 3 封信主旨＋寄件者、今天行程（給使用者確認） |
 | ★`chats list --days 30` | setup 第 5 步 | `[{ref,name,type,last_at,excluded}]` |
 | `exclude --set REF...｜--add REF｜--remove REF` | setup 第 5 步／之後修改 | excluded 數量 |
-| ★`mail folders` | setup 第 5 步 | `[{ref,path,total,unread,well_known,skip_recommended,selected}]` |
-| ★`mail select --set REF...｜--add REF｜--remove REF` | setup 第 5 步／之後修改 | selected 數量；自動寫入 `mail.folder_labels` |
+| ★`mail folders` | setup 第 5 步 | `folders[{ref,path,total,unread,well_known,skip_recommended,selected}]`、`complete`（bool）、`skipped[{path,reason}]`（失敗的子資料夾）、`truncated`（截斷原因字串或 null） |
+| ★`mail select --set REF...｜--add REF｜--remove REF [--allow-incomplete]` | setup 第 5 步／之後修改。`--set`/`--add` 對非 well-known ref 做 inventory 驗證；inventory 不完整且 ref 不在清單中 → `MAIL_FOLDERS_INCOMPLETE`（加 `--allow-incomplete` 可強制接受） | selected 數量；自動寫入 `mail.folder_labels` |
 | `ctx index --dir D｜--skip` | setup 第 6 步（**已棄用**，改用 profile） | 檔案數 |
 | `docs convert --path "<p>" [--path ...]` | setup 新步驟：轉換使用者文件 | `files[]`、`skipped_count` |
 | `scan raw --days N` | setup 第 8 步：掃描原始訊息樣本；同時儲存 records.jsonl + source-status.json 供 criteria draft --from-run 重用 | `run_id`、`raw_dir`、`files[]`、`total_chars`、`source_status` |
@@ -244,7 +252,9 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 | `profile cadence [--set now｜agenda｜refine｜later]` | 設定補充頻率 | `cadence` |
 | `profile next-question [--context agenda｜refine]` | 取得下一個要問的維度。`--context` 只在 cadence 匹配時回傳問題。限速：同一天或同一 generation 只問一題 | `question`、`dim`、`cadence` |
 | `config get`／`config set KEY=VALUE...` | setup 第 7 步（output.dir、output.formats、refine.every_runs、refine.every_days、analysis.model） | 設定摘要 |
-| `criteria draft --days 7｜14｜30 [--from-run <run_id>]` | setup 第 9 步：分析 → 草稿檔。`--from-run` 重用 scan raw 儲存的 records（不再重新收集），包含 profile；驗證 run_id 格式（`YYYYMMDD-HHMM-XXXX`）且路徑在 `<home>/runs/` 下；LINE enabled 時要求 saved status=="ok"（skipped/failed 均拒絕）；days 從 scan-meta.json 取 | `draft_path` |
+| `criteria draft --days 7｜14｜30 [--from-run <run_id>]` | setup 第 9 步：分析 → 草稿檔。`--from-run` 重用 scan raw 儲存的 records（不再重新收集），包含 profile；驗證 run_id 格式（`YYYYMMDD-HHMM-XXXX`）且路徑在 `<home>/runs/` 下；LINE enabled 時要求 saved status=="ok"（skipped/failed 均拒絕）；days 從 scan-meta.json 取 | `draft_path`、`draft_text`（fenced） |
+| `draft new --kind criteria｜profile｜coverage` | 在 `<home>/runs/drafts/<ts-hex>/` 建立空白（或以目前版本為種子的）草稿檔，回傳 `draft_path`。供 Claude Write 後再 save/apply。檔名必須是 `criteria-draft.md`/`profile-draft.md`/`coverage-draft.json`（符合 lock-core hook allowlist） | `draft_path`、`kind`、`seeded` |
+| `draft show --file F` | 回傳 fenced 草稿文字，Claude 不需直接 Read runs/ 下的檔案。`--file` 限制為 runs/ 下的已知草稿檔名 | `text`（fenced）、`draft_path` |
 | ★`criteria show [--version N]`／`criteria save --file F`／`criteria list`／`criteria restore --version N` | 準則管理 | `version` |
 | `run [--noninteractive]` | `/agenda` 全流程（補發檢查→鎖→收集→分析→驗證→登記簿→輸出→提交→發布） | `report_code`、`outputs[]`、`sources{}`、`counts{}`、`new_chats`（名稱★）、`needs{line_trust,refine,runtime_sync}`、`rejected_items` 數 |
 | ★`show --report R --items 3,5｜--todo T-1,T-2` | 標記前重新列出確認 | 項目標題 |
@@ -252,7 +262,7 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 | `reject-done --todo T-1` | 可能已完成→其實沒做完 | |
 | `dismiss --todo T-1` | 不再追蹤 | |
 | `restore T-xxxx` | 摺疊→移回待辦 | |
-| `refine status`／`refine draft`／`refine apply --file F`／`refine skip` | 修正準則（US-9） | `due`、`reason`、`draft_path` |
+| `refine status`／`refine draft`／`refine apply --file F`／`refine skip` | 修正準則（US-9） | `due`、`reason`、`draft_path`、`draft_text`（fenced） |
 | `schedule install --time HH:MM｜remove｜status` | setup 第 7 步 | |
 | `uninstall [--purge]` | 回滾 | |
 

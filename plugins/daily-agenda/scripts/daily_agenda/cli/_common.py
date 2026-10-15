@@ -209,7 +209,40 @@ def _validate_progress_file_home(path_str: str | None, home: Path) -> str | None
 
 
 def parse_root_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
-    """Parse top-level command name and ``--progress-file``; return (ns, remaining)."""
+    """Parse top-level command name and ``--progress-file``; return (ns, remaining).
+
+    H1b hardening: reject unknown root-level flags that appear before the
+    command name.  Only ``--progress-file`` (space or ``=`` form) is allowed
+    before the positional command token.  Flags that appear *after* the command
+    are forwarded to subcommand parsers via ``remaining`` and are not checked
+    here.
+    """
+    # --- Pre-scan: reject unknown flags before the command ---
+    _KNOWN_ROOT_VALUE_FLAGS = {"--progress-file"}
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok.startswith("--"):
+            flag_name = tok.split("=", 1)[0]  # e.g. --progress-file or --evil
+            if flag_name in _KNOWN_ROOT_VALUE_FLAGS:
+                if "=" not in tok:
+                    i += 2  # skip the flag and its value
+                else:
+                    i += 1  # --flag=value: skip this token only
+                continue
+            # Unknown flag before command → reject
+            emit({"ok": False, "code": "ARG_ERROR",
+                  "detail": f"unknown root-level flag: {tok}"}, exit_code=2)
+            sys.exit(2)
+        elif tok.startswith("-") and len(tok) > 1:
+            # Unknown short flag before command → reject
+            emit({"ok": False, "code": "ARG_ERROR",
+                  "detail": f"unknown root-level flag: {tok}"}, exit_code=2)
+            sys.exit(2)
+        else:
+            break  # First non-flag token is the command; stop scanning
+        i += 1
+
     parser = _ArgParser(prog="daily_agenda", add_help=False, allow_abbrev=False)
     parser.add_argument("command", nargs="?", default=None)
     parser.add_argument("--progress-file", default=None, dest="progress_file")

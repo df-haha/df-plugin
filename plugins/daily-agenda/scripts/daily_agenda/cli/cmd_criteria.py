@@ -333,17 +333,24 @@ def _draft_analyze(
 _MAX_TOTAL_OBSERVATIONS = 400
 
 
+def _getfield(obj: object, name: str) -> object:
+    """Get a field from *obj* by attribute or key (dict)."""
+    if isinstance(obj, dict):
+        return obj[name]
+    return getattr(obj, name)
+
+
 class _BatchResult:
     """Lightweight adapter so ``bundle.write_bundle`` sees a CollectResult-like object."""
 
     def __init__(self, records: list, base: object) -> None:
-        self.run_id = base.run_id  # type: ignore[attr-defined]
-        self.generated_at = base.generated_at  # type: ignore[attr-defined]
-        self.tz = base.tz  # type: ignore[attr-defined]
+        self.run_id = _getfield(base, "run_id")
+        self.generated_at = _getfield(base, "generated_at")
+        self.tz = _getfield(base, "tz")
         self.records = records
-        self.source_status = base.source_status  # type: ignore[attr-defined]
-        self.new_chats = base.new_chats  # type: ignore[attr-defined]
-        self.criteria_version = base.criteria_version  # type: ignore[attr-defined]
+        self.source_status = _getfield(base, "source_status")
+        self.new_chats = _getfield(base, "new_chats")
+        self.criteria_version = _getfield(base, "criteria_version")
 
 
 def _make_batch_result(records: list, base: object) -> _BatchResult:
@@ -353,7 +360,12 @@ def _make_batch_result(records: list, base: object) -> _BatchResult:
 def _emit_draft(runs_dir: Path, criteria_text: str, days: int, *, batches_skipped: int = 0) -> int:
     draft_path = runs_dir / "criteria-draft.md"
     draft_path.write_text(criteria_text, encoding="utf-8")
-    result: dict = {"ok": True, "code": None, "draft_path": str(draft_path), "days": days}
+    result: dict = {
+        "ok": True, "code": None,
+        "draft_path": str(draft_path),
+        "draft_text": fence_untrusted(criteria_text),
+        "days": days,
+    }
     if batches_skipped > 0:
         result["batches_skipped"] = batches_skipped
     return emit(result)
