@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import subprocess
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -36,44 +35,23 @@ class GraphClientError(Exception):
 # ---------------------------------------------------------------------------
 
 def _load_claude_json(claude_json_path: Path | None = None) -> dict[str, Any] | None:
-    """Read ``~/.claude.json`` and return the ``mcpServers["df-graph"]`` entry."""
+    """Read ``~/.claude.json`` and return the ``mcpServers["df-graph"]`` entry.
+
+    Only reads the **top-level** ``mcpServers`` key (user scope).  Does NOT
+    read ``projects[...]`` entries or cwd ``.mcp.json`` — those are
+    project-scoped and would bypass Claude Code's trust prompt.
+    """
     path = claude_json_path or Path.home() / ".claude.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
+    if not isinstance(data, dict):
+        return None
     servers = data.get("mcpServers", {})
+    if not isinstance(servers, dict):
+        return None
     return servers.get("df-graph")
-
-
-def _parse_claude_mcp_get() -> dict[str, Any] | None:
-    """Fallback: parse ``claude mcp get df-graph`` text output."""
-    try:
-        proc = subprocess.run(
-            ["claude", "mcp", "get", "df-graph"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",  # cp950 safety on CJK Windows
-            timeout=10,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if proc.returncode != 0 or "No MCP server" in proc.stdout:
-        return None
-    # Parse key: value lines
-    result: dict[str, Any] = {"type": "stdio"}
-    for line in proc.stdout.splitlines():
-        line = line.strip()
-        if line.startswith("command:"):
-            result["command"] = line.split(":", 1)[1].strip()
-        elif line.startswith("args:"):
-            raw = line.split(":", 1)[1].strip()
-            try:
-                result["args"] = json.loads(raw)
-            except json.JSONDecodeError:
-                result["args"] = raw.split()
-    return result if "command" in result else None
 
 
 def resolve_server_params(
@@ -82,17 +60,42 @@ def resolve_server_params(
 ) -> StdioServerParameters:
     """Resolve the df-graph MCP server command.
 
+    The sole production source is the **user-scope** ``~/.claude.json``
+    top-level ``mcpServers["df-graph"]`` entry — the same registration that
+    ``claude mcp add df-graph --scope user`` writes.  This file is NOT
+    influenced by the working directory; project-scoped servers
+    (``projects[...]`` in ``~/.claude.json`` or cwd ``.mcp.json``) are
+    deliberately ignored so a malicious repo cannot inject its own command.
+
     *server_config* overrides all other sources (used by tests to inject a
-    fake server command).
+    fake server command without touching the real config file).
     """
-    cfg = server_config or _load_claude_json(claude_json_path) or _parse_claude_mcp_get()
-    if not cfg or cfg.get("type") != "stdio" or not cfg.get("command"):
+    cfg = server_config if server_config is not None else _load_claude_json(claude_json_path)
+
+    if not isinstance(cfg, dict):
+        raise GraphClientError("DF_GRAPH_NOT_REGISTERED")
+    if cfg.get("type") != "stdio":
         raise GraphClientError("DF_GRAPH_NOT_REGISTERED")
 
+    command = cfg.get("command")
+    if not isinstance(command, str) or not command:
+        raise GraphClientError("DF_GRAPH_NOT_REGISTERED")
+
+    args = cfg.get("args", [])
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        raise GraphClientError("DF_GRAPH_NOT_REGISTERED")
+
+    env = cfg.get("env")
+    if env is not None:
+        if not isinstance(env, dict):
+            raise GraphClientError("DF_GRAPH_NOT_REGISTERED")
+        if not all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()):
+            raise GraphClientError("DF_GRAPH_NOT_REGISTERED")
+
     return StdioServerParameters(
-        command=cfg["command"],
-        args=cfg.get("args", []),
-        env=cfg.get("env") or None,
+        command=command,
+        args=args,
+        env=env if env else None,
     )
 
 

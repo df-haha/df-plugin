@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+import daily_agenda.graph_client as graph_client_module
 from daily_agenda.graph_client import (
     GraphClientError,
     _parse_mail_get,
@@ -176,3 +177,142 @@ class TestResolveServerParams:
             "args": ["fake_server.py"],
         })
         assert params.command == "python"
+
+    def test_valid_with_env(self, tmp_path) -> None:
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(json.dumps({
+            "mcpServers": {
+                "df-graph": {
+                    "type": "stdio",
+                    "command": "uv",
+                    "args": ["run", "server.py"],
+                    "env": {"FOO": "bar"},
+                }
+            }
+        }), encoding="utf-8")
+        params = resolve_server_params(claude_json_path=claude_json)
+        assert params.command == "uv"
+        assert params.env == {"FOO": "bar"}
+
+    def test_valid_no_args(self, tmp_path) -> None:
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(json.dumps({
+            "mcpServers": {
+                "df-graph": {
+                    "type": "stdio",
+                    "command": "my-server",
+                }
+            }
+        }), encoding="utf-8")
+        params = resolve_server_params(claude_json_path=claude_json)
+        assert params.command == "my-server"
+        assert params.args == []
+
+    def test_valid_no_env(self, tmp_path) -> None:
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(json.dumps({
+            "mcpServers": {
+                "df-graph": {
+                    "type": "stdio",
+                    "command": "uv",
+                    "args": ["run"],
+                }
+            }
+        }), encoding="utf-8")
+        params = resolve_server_params(claude_json_path=claude_json)
+        assert params.env is None
+
+
+class TestFallbackRemoved:
+    """The ``claude mcp get`` fallback has been removed entirely."""
+
+    def test_no_parse_claude_mcp_get_function(self) -> None:
+        """The module must not export or contain _parse_claude_mcp_get."""
+        assert not hasattr(graph_client_module, "_parse_claude_mcp_get")
+
+    def test_no_subprocess_import(self) -> None:
+        """The module must not import subprocess."""
+        assert "subprocess" not in vars(graph_client_module)
+
+    def test_missing_config_does_not_invoke_subprocess(self, tmp_path, monkeypatch) -> None:
+        """With no config, resolve_server_params raises without spawning a process."""
+        import subprocess as subprocess_mod
+        monkeypatch.setattr(
+            subprocess_mod, "run",
+            lambda *a, **k: pytest.fail("subprocess.run was invoked"),
+        )
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text("{}", encoding="utf-8")
+        with pytest.raises(GraphClientError) as exc_info:
+            resolve_server_params(claude_json_path=claude_json)
+        assert exc_info.value.code == "DF_GRAPH_NOT_REGISTERED"
+
+    def test_nonexistent_config_does_not_invoke_subprocess(self, tmp_path, monkeypatch) -> None:
+        """With a nonexistent config file, raises without spawning a process."""
+        import subprocess as subprocess_mod
+        monkeypatch.setattr(
+            subprocess_mod, "run",
+            lambda *a, **k: pytest.fail("subprocess.run was invoked"),
+        )
+        with pytest.raises(GraphClientError) as exc_info:
+            resolve_server_params(claude_json_path=tmp_path / "nonexistent.json")
+        assert exc_info.value.code == "DF_GRAPH_NOT_REGISTERED"
+
+
+class TestMalformedConfigRejected:
+    """Type-validation rejects malformed configs with DF_GRAPH_NOT_REGISTERED."""
+
+    @pytest.mark.parametrize("bad_config", [
+        # top-level JSON is a list
+        {"_write": "[]"},
+        # mcpServers is a string
+        {"_write": '{"mcpServers": "wrong"}'},
+        # df-graph entry is a string
+        {"_write": '{"mcpServers": {"df-graph": "wrong"}}'},
+        # type missing
+        {"_write": '{"mcpServers": {"df-graph": {"command": "uv"}}}'},
+        # type is not "stdio"
+        {"_write": '{"mcpServers": {"df-graph": {"type": "http", "command": "uv"}}}'},
+        # command is empty string
+        {"_write": '{"mcpServers": {"df-graph": {"type": "stdio", "command": ""}}}'},
+        # command is a list instead of str
+        {"_write": '{"mcpServers": {"df-graph": {"type": "stdio", "command": ["uv"]}}}'},
+        # args is a string instead of list
+        {"_write": '{"mcpServers": {"df-graph": {"type": "stdio", "command": "uv", "args": "run"}}}'},
+        # args contains a non-str element
+        {"_write": '{"mcpServers": {"df-graph": {"type": "stdio", "command": "uv", "args": ["run", 1]}}}'},
+        # env is a string instead of dict
+        {"_write": '{"mcpServers": {"df-graph": {"type": "stdio", "command": "uv", "env": "x"}}}'},
+        # env value is not a string
+        {"_write": '{"mcpServers": {"df-graph": {"type": "stdio", "command": "uv", "env": {"A": 1}}}}'},
+    ], ids=[
+        "top_level_list",
+        "mcp_servers_string",
+        "df_graph_string",
+        "type_missing",
+        "type_http",
+        "command_empty",
+        "command_list",
+        "args_string",
+        "args_int_element",
+        "env_string",
+        "env_int_value",
+    ])
+    def test_malformed(self, bad_config: dict, tmp_path) -> None:
+        claude_json = tmp_path / ".claude.json"
+        claude_json.write_text(bad_config["_write"], encoding="utf-8")
+        with pytest.raises(GraphClientError) as exc_info:
+            resolve_server_params(claude_json_path=claude_json)
+        assert exc_info.value.code == "DF_GRAPH_NOT_REGISTERED"
+
+    def test_server_config_override_also_validated(self) -> None:
+        """Even the test override path validates types."""
+        with pytest.raises(GraphClientError) as exc_info:
+            resolve_server_params(server_config={"type": "stdio", "command": 42})
+        assert exc_info.value.code == "DF_GRAPH_NOT_REGISTERED"
+
+    def test_empty_server_config_override_rejected(self) -> None:
+        """An empty dict override must not fall through to ~/.claude.json."""
+        with pytest.raises(GraphClientError) as exc_info:
+            resolve_server_params(server_config={})
+        assert exc_info.value.code == "DF_GRAPH_NOT_REGISTERED"
