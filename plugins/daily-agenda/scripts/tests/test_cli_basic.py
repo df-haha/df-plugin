@@ -78,6 +78,8 @@ class TestConsentGating:
         ["chats", "list", "--days", "30"],
         ["line-detect"],
         ["trust", "probe"],
+        ["mail", "folders"],
+        ["mail", "select", "--set", "inbox"],
         ["criteria", "draft", "--days", "7"],
         ["refine", "draft"],
         ["run"],

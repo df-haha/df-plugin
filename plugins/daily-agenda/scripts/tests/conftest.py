@@ -156,26 +156,49 @@ class FakeGraph:
         self,
         *,
         mail_items: list[dict[str, Any]] | None = None,
+        mail_items_by_folder: dict[str, list[dict[str, Any]]] | None = None,
         mail_full: dict[str, dict[str, Any]] | None = None,
         calendar_items: list[dict[str, Any]] | None = None,
+        folder_tree: dict[str, list[dict[str, Any]]] | None = None,
         fail_on_mail: str | None = None,
+        fail_on_folder: dict[str, str] | None = None,
         fail_on_calendar: str | None = None,
+        fail_on_folder_list: str | None = None,
     ) -> None:
         self._mail_items = mail_items or []
+        self._mail_items_by_folder = mail_items_by_folder or {}
         self._mail_full = mail_full or {}
         self._calendar_items = calendar_items or []
+        self._folder_tree = folder_tree or {}
         self._fail_on_mail = fail_on_mail
+        self._fail_on_folder = fail_on_folder or {}
         self._fail_on_calendar = fail_on_calendar
+        self._fail_on_folder_list = fail_on_folder_list
         self.mail_list_calls = 0
         self.mail_get_calls = 0
         self.calendar_list_calls = 0
+        self.folder_list_calls = 0
 
     def mail_list(self, *, days: int, folder: str = "inbox") -> list[dict[str, Any]]:
         self.mail_list_calls += 1
+        # Per-folder failure
+        if folder in self._fail_on_folder:
+            from daily_agenda.graph_client import GraphClientError
+            raise GraphClientError(self._fail_on_folder[folder])
         if self._fail_on_mail:
             from daily_agenda.graph_client import GraphClientError
             raise GraphClientError(self._fail_on_mail)
+        # Per-folder items take precedence
+        if folder in self._mail_items_by_folder:
+            return self._mail_items_by_folder[folder]
         return self._mail_items
+
+    def folder_list(self, parent_id: str = "") -> list[dict[str, Any]]:
+        self.folder_list_calls += 1
+        if self._fail_on_folder_list:
+            from daily_agenda.graph_client import GraphClientError
+            raise GraphClientError(self._fail_on_folder_list)
+        return self._folder_tree.get(parent_id, [])
 
     def mail_get(self, message_id: str) -> dict[str, Any]:
         self.mail_get_calls += 1

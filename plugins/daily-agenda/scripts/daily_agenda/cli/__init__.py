@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
 
         # Import handlers lazily to keep startup fast.
         from . import cmd_consent, cmd_config, cmd_env, cmd_runtime, cmd_trust
-        from . import cmd_line, cmd_collect, cmd_criteria, cmd_ledger_ops
+        from . import cmd_line, cmd_collect, cmd_mail, cmd_criteria, cmd_ledger_ops
         from . import cmd_refine, cmd_schedule, cmd_uninstall, cmd_run
         from . import cmd_progress
 
@@ -69,6 +69,7 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
             "outlook-preview": cmd_collect.handle_outlook_preview,
             "chats": cmd_collect.handle_chats,
             "exclude": cmd_collect.handle_exclude,
+            "mail": cmd_mail.handle_mail,
             "ctx": cmd_collect.handle_ctx,
             "config": cmd_config.handle,
             "criteria": cmd_criteria.handle,

@@ -38,6 +38,8 @@ _MESSAGES: dict[str, str] = {
     "CLAUDE_FLAGS_MISSING": "Claude Code 版本太舊，缺少安全分析需要的功能，請更新 Claude Code。",
     "NOT_WINDOWS": "本工具目前只支援 Windows 原生 Claude Code。",
     "GRAPH_TRUNCATED": "這段期間的信件太多，超過一次可安全讀取的上限；為了不漏信，這次先不彙整信件，請把較舊的信整理或封存後再試。",
+    "MAIL_FOLDER_MISSING": "有些選取的信箱資料夾已不存在（可能被刪除或改名了），這些資料夾的信件這次沒讀到。請執行 /agenda-setup → 只改信箱資料夾 來更新。",
+    "MAIL_FOLDER_PARTIAL": "部分信箱資料夾讀取失敗，這些資料夾的信件這次沒讀到；其他資料夾照常讀取，下次會補讀。",
     "LINE_TIMEOUT": "讀取 LINE 逾時；其他來源照常彙整，下次會補讀。",
     "MULTIPLE_DATABASES_OK": "這台電腦有多份 LINE 資料都讀得到，需要你選擇最近在用的那一份。",
     # trust (D-11)

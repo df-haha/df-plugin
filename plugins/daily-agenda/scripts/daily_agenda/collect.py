@@ -10,6 +10,7 @@ Contract reference: impl-contracts.md §6.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
@@ -55,7 +56,7 @@ class CollectResult:
     tz: str
     records: list[dict[str, Any]] = field(default_factory=list)
     source_status: dict[str, dict[str, Any]] = field(default_factory=dict)
-    new_checkpoints: dict[str, str | None] = field(default_factory=dict)
+    new_checkpoints: dict[str, Any] = field(default_factory=dict)
     known_chats: list[dict[str, Any]] = field(default_factory=list)
     new_chats: list[dict[str, Any]] = field(default_factory=list)
     mail_index: dict[str, str] = field(default_factory=dict)
@@ -259,6 +260,61 @@ def _collect_line(
 # Mail collection
 # ---------------------------------------------------------------------------
 
+_MISSING_FOLDER_RE = re.compile(r"Graph 404\b")
+
+
+def _is_missing_folder(detail: str) -> bool:
+    """Detect Graph API responses meaning "folder does not exist".
+
+    Graph 404 = folder deleted/moved; 400 ErrorInvalidIdMalformed = bad id.
+    We match the structured prefix ``Graph 404`` (other 400s are not "missing") that
+    ``GraphHTTPError.__str__`` emits, plus ``ErrorItemNotFound`` /
+    ``ErrorInvalidIdMalformed`` in the body — NOT bare substrings like
+    ``"404"`` which could appear in folder ids or URLs.
+    """
+    return bool(
+        _MISSING_FOLDER_RE.match(detail)
+        or "ErrorItemNotFound" in detail
+        or "ErrorInvalidIdMalformed" in detail
+    )
+
+
+def _migrate_mail_checkpoint(
+    checkpoints: dict[str, Any],
+    folders: list[str],
+) -> dict[str, str | None]:
+    """Migrate legacy scalar ``checkpoints["mail"]`` to per-folder dict.
+
+    Legacy: ``checkpoints["mail"] = "2026-10-08T09:00:00+08:00"``
+    New:    ``checkpoints["mail"] = {"inbox": "2026-10-08T09:00:00+08:00"}``
+
+    The legacy value is attributed to ``"inbox"`` only; other folders
+    get ``None`` (initial window).
+
+    Stale keys (folders no longer in config) are **preserved** so that
+    removing then re-adding a folder resumes from checkpoint−2h instead
+    of re-reading the full initial window.
+    """
+    raw = checkpoints.get("mail")
+    if raw is None:
+        return {f: None for f in folders}
+    if isinstance(raw, str):
+        # Legacy scalar → per-folder dict
+        result: dict[str, str | None] = {f: None for f in folders}
+        if "inbox" in folders:
+            result["inbox"] = raw
+        return result
+    if isinstance(raw, dict):
+        # Already per-folder; include ALL existing keys (stale preservation)
+        # plus any newly added folders with None
+        merged: dict[str, str | None] = dict(raw)
+        for f in folders:
+            if f not in merged:
+                merged[f] = None
+        return merged
+    return {f: None for f in folders}
+
+
 def _collect_mail(
     cfg: dict[str, Any],
     state: dict[str, Any],
@@ -267,25 +323,51 @@ def _collect_mail(
     now: datetime,
     initial_days: int,
     progress: Progress = Progress(None),
-) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, str]]:
-    """Collect Outlook mail.  Returns (records, status_dict, updated_mail_index)."""
-    checkpoint = (state.get("checkpoints") or {}).get("mail")
-    from_dt = _checkpoint_from(checkpoint, now, initial_days)
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, str], dict[str, str | None]]:
+    """Collect Outlook mail.
+
+    Returns (records, status_dict, updated_mail_index, per_folder_checkpoints).
+    """
     tz = ZoneInfo(cfg.get("tz", "Asia/Taipei"))
-
-    # mail_list_recent only accepts whole days
-    delta = now - from_dt
-    days = max(1, math.ceil(delta.total_seconds() / 86400))
-
     folders = cfg.get("mail", {}).get("folders", ["inbox"])
+    folder_checkpoints = _migrate_mail_checkpoint(
+        state.get("checkpoints") or {}, folders,
+    )
+
     mail_index = dict(state.get("mail_index") or {})
     records: list[dict[str, Any]] = []
     seen_src_ids: set[str] = set()
-    from_ms = int(from_dt.timestamp() * 1000)
+    missing_folders: list[str] = []
+    failed_folders: list[str] = []
+    new_checkpoints: dict[str, str | None] = dict(folder_checkpoints)
 
     for folder_idx, folder in enumerate(folders, 1):
         progress.event("mail", i=folder_idx, n=len(folders))
-        items = graph.mail_list(days=days, folder=folder)
+
+        checkpoint = folder_checkpoints.get(folder)
+        from_dt = _checkpoint_from(checkpoint, now, initial_days)
+        from_ms = int(from_dt.timestamp() * 1000)
+
+        # mail_list_recent only accepts whole days
+        delta = now - from_dt
+        days = max(1, math.ceil(delta.total_seconds() / 86400))
+
+        try:
+            items = graph.mail_list(days=days, folder=folder)
+        except Exception as exc:
+            code = getattr(exc, "code", "")
+            detail = getattr(exc, "detail", str(exc))
+            # Fatal errors: re-raise to fail the whole mail source
+            if code in ("DF_GRAPH_AUTH", "DF_GRAPH_TOO_OLD", "GRAPH_TRUNCATED"):
+                raise
+            # Detect missing folder (Graph API 404/400 malformed id)
+            if code == "GRAPH_FAILED" and _is_missing_folder(detail):
+                missing_folders.append(folder)
+            else:
+                failed_folders.append(folder)
+            # Don't advance this folder's checkpoint
+            continue
+
         for item in items:
             msg_id = item.get("id", "")
             internet_message_id = item.get("internet_message_id", "")
@@ -336,14 +418,40 @@ def _collect_mail(
                 },
             })
 
-    status = {
-        "status": "ok",
-        "code": None,
-        "from": from_dt.astimezone(tz).isoformat(),
+        # Advance this folder's checkpoint on success
+        new_checkpoints[folder] = now.isoformat()
+
+    # Determine overall status
+    if missing_folders:
+        status_code = "MAIL_FOLDER_MISSING"
+        overall_status = "partial"
+    elif failed_folders:
+        status_code = "MAIL_FOLDER_PARTIAL"
+        overall_status = "partial"
+    else:
+        status_code = None
+        overall_status = "ok"
+
+    # Use the earliest from_dt across all folders for the status range
+    all_from = [
+        _checkpoint_from(folder_checkpoints.get(f), now, initial_days)
+        for f in folders
+    ]
+    earliest_from = min(all_from) if all_from else now
+
+    status: dict[str, Any] = {
+        "status": overall_status,
+        "code": status_code,
+        "from": earliest_from.astimezone(tz).isoformat(),
         "to": now.astimezone(tz).isoformat(),
         "messages": len(records),
     }
-    return records, status, mail_index
+    if missing_folders:
+        status["missing_folders"] = missing_folders
+    if failed_folders:
+        status["failed_folders"] = failed_folders
+
+    return records, status, mail_index, new_checkpoints
 
 
 # ---------------------------------------------------------------------------
@@ -476,14 +584,14 @@ def collect(
     mail_enabled = cfg.get("mail", {}).get("enabled", True)
     if mail_enabled and graph is not None:
         try:
-            mail_records, mail_status, mail_index = _collect_mail(
+            mail_records, mail_status, mail_index, mail_folder_cps = _collect_mail(
                 cfg, state, graph=graph, now=now, initial_days=initial_days,
                 progress=progress,
             )
             result.records.extend(mail_records)
             result.source_status["mail"] = mail_status
             result.mail_index = mail_index
-            checkpoints["mail"] = now.isoformat()
+            checkpoints["mail"] = mail_folder_cps
         except Exception as exc:
             code = getattr(exc, "code", None) or "GRAPH_FAILED"
             result.source_status["mail"] = {

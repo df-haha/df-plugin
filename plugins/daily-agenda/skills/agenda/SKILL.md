@@ -53,6 +53,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
    - 待辦數量摘要（今天要處理 N 項，其中 P0 有 X 項；可能已完成 M 項）。
    - 任何 `sources` 狀態不是 ok 的來源，轉述其 `message`（例如「LINE 這次沒讀到：請打開 LINE 視窗…；下次會補讀這段期間」）。
    - `new_chats` 不是空的（格式是 `[{ref, name}]`）→ 「本次新增的 LINE 對話：<列出 name>。要不要把其中某些設成不讀？」使用者要排除 → 用對應的 `ref` 呼叫 `DA exclude --add <ref>`。
+   - `sources.mail.code` 是 `MAIL_FOLDER_MISSING` → 「有些選取的信箱資料夾已不存在（可能被刪除或改名了），那些資料夾的信件這次沒讀到。要更新信箱資料夾設定嗎？」使用者要更新 → 引導到 `/agenda-setup` → 只改信箱資料夾。
    - `rejected_items` > 0 → 一句話：「有 N 筆 AI 結果因為引用不到原始資料而被略過。」
 4. 提供開啟方式：在 Windows 上可用 `start "" "<路徑>"` 開啟（使用者同意再開）。
 5. 若 `needs.refine: true` → 進入 C。

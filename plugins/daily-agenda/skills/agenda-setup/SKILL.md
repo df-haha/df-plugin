@@ -1,6 +1,6 @@
 ---
 name: agenda-setup
-description: daily-agenda 首次設定（第 0–8 步）：資料外送說明與同意、環境檢查、LINE 試讀、自動判定 LINE 帳號資料、串 Outlook、選擇不讀的 LINE 對話、個人資料夾索引、輸出偏好與排程、掃描過去資料建立判斷準則。也處理修改排除對話、重設、解除安裝。觸發：「/agenda-setup」「設定每日彙整」「daily agenda 設定」「改排除的 LINE 對話」「解除安裝 daily-agenda」。
+description: daily-agenda 首次設定（第 0–8 步）：資料外送說明與同意、環境檢查、LINE 試讀、自動判定 LINE 帳號資料、串 Outlook、選擇不讀的 LINE 對話、選擇信箱資料夾、個人資料夾索引、輸出偏好與排程、掃描過去資料建立判斷準則。也處理修改排除對話、修改信箱資料夾、重設、解除安裝。觸發：「/agenda-setup」「設定每日彙整」「daily agenda 設定」「改排除的 LINE 對話」「改信箱資料夾」「解除安裝 daily-agenda」。
 allowed-tools: Bash, Read, Write, AskUserQuestion, Monitor
 ---
 
@@ -16,7 +16,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 
 ## 鐵則
 
-1. **第 0 步同意之前，不得執行任何會讀取 LINE、信件、行事曆的指令**（`probe`、`outlook-preview`、`chats list`、`line-detect`、`trust probe`、`criteria draft`）。
+1. **第 0 步同意之前，不得執行任何會讀取 LINE、信件、行事曆的指令**（`probe`、`outlook-preview`、`chats list`、`line-detect`、`trust probe`、`mail folders`、`mail select`、`criteria draft`）。
 2. 使用者看不懂的技術細節不要問（例如版本雜湊、資料庫檔名）；只在真的需要使用者決定時才問。
 3. 每個 AskUserQuestion 卡片要自足：寫清楚背景、選項代表什麼、預設是哪個。
 4. 不要自己讀 `runs/` 裡的 bundle 或任何收集到的原始資料；只看指令的摘要輸出。唯一例外：`runs/progress/*.jsonl` 可透過 `DA progress show` 或 `DA progress watch` 讀取（進度檔不含原始資料）。
@@ -42,7 +42,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 
 ## 開始前
 
-先跑 `DA consent --status` 與 `DA config get`。如果已經完成過設定，問使用者要「從頭重設」「只改排除的 LINE 對話（跳到第 4 步）」「只改輸出或排程（跳到第 6 步）」「重建判斷準則（跳到第 7 步）」「解除安裝」。
+先跑 `DA consent --status` 與 `DA config get`。如果已經完成過設定，問使用者要「從頭重設」「只改排除的 LINE 對話（跳到第 4 步）」「只改信箱資料夾（跳到第 5 步）」「只改輸出或排程（跳到第 7 步）」「重建判斷準則（跳到第 8 步）」「解除安裝」。
 
 ## 第 0 步：資料外送說明與同意（US-0）
 
@@ -98,14 +98,25 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda 
 3. 對話多時，用多個 AskUserQuestion（multiSelect，每張最多 4 個選項不夠用時）——建議做法：先把清單用編號列在回覆正文，再請使用者直接打編號（例如「3, 7, 12」或「都不排除」），比卡片更快。
 4. `DA exclude --set <選到的 ref ...>`（沒選就 `DA exclude --set`）。回報「已排除 N 個對話」。
 
-## 第 5 步：個人資料夾（US-4）
+## 第 5 步：選擇信箱資料夾（US-14）
+
+1. `DA mail folders`。
+2. 用編號列出資料夾清單（顯示路徑、信件總數），標示建議選取與不建議選取的：
+   - 收件匣及其子資料夾：預設勾選（建議）
+   - 寄件備份、刪除的郵件、垃圾郵件、草稿、寄件匣：標示「通常不需要」
+   - 其他自訂資料夾：列出讓使用者判斷
+3. 告訴使用者：「以下是你的信箱資料夾。選擇要讀取的資料夾（預設只讀收件匣）。如果你用 Outlook 規則把信分到子資料夾，建議也勾選那些子資料夾，否則那些信會被漏掉。」
+4. 請使用者直接打編號（例如「1, 2, 4」或「用預設就好」），把選到的 `ref` 呼叫 `DA mail select --set <ref ...>`。
+5. 回報「會讀取 N 個信箱資料夾」。
+
+## 第 6 步：個人資料夾（US-4）
 
 AskUserQuestion：「你有沒有放個人工作背景的資料夾（例如筆記、專案說明）？有的話我會建立索引（只記錄檔名、標題、摘要，不會搬動或複製原檔），讓 AI 判斷待辦時更了解你的工作。」選項「有，我告訴你路徑」／「沒有，跳過」。
 
 - 有 → 請使用者給路徑 → `DA ctx index --dir "<路徑>"`，回報檔案數。
 - 沒有 → `DA ctx index --skip`。
 
-## 第 6 步：輸出偏好與排程（US-5）
+## 第 7 步：輸出偏好與排程（US-5）
 
 依序問（每張卡片自足）：
 
@@ -116,7 +127,7 @@ AskUserQuestion：「你有沒有放個人工作背景的資料夾（例如筆�
 
 寫入：`DA config set output.formats=<…> output.dir="<…>" refine.every_runs=<…> refine.every_days=<…>`；要排程則 `DA schedule install --time HH:MM`。
 
-## 第 7 步：建立判斷準則第一版（US-6）
+## 第 8 步：建立判斷準則第一版（US-6）
 
 1. AskUserQuestion：「要掃描多久以前的資料來建立你的判斷準則？」選項「7 天（最快）」「14 天（建議）」「30 天（LINE 一次最多可讀取的天數，較完整但較慢）」。
 2. 告訴使用者「正在掃描過去 N 天的資料，由 AI 分析並建立判斷準則。14 天大約需要 3–5 分鐘，30 天可能更久。」
@@ -129,7 +140,7 @@ AskUserQuestion：「你有沒有放個人工作背景的資料夾（例如筆�
 
 告訴使用者：
 - 「設定完成。之後每天打 `/agenda` 就會產生彙整檔，存在 <output.dir>。」
-- 「想改排除的對話、輸出位置或排程，再執行 `/agenda-setup` 即可。」
+- 「想改排除的對話、信箱資料夾、輸出位置或排程，再執行 `/agenda-setup` 即可。」
 
 ## 解除安裝
 

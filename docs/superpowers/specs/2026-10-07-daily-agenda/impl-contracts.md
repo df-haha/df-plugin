@@ -32,7 +32,8 @@ trusted_builds.json  actions/{pending,committing,done}/  runs/<run_id>/  runs/lo
   "consent": { "accepted_at": "2026-10-08T09:00:00+08:00", "text_version": 1 },
   "line": { "enabled": true, "main_database": "qw0b9...729.edb",
             "excluded_chats": [{ "ref": "chat:0123456789abcdef01234567", "name": "家人群組" }] },
-  "mail": { "enabled": true, "folders": ["inbox"] },
+  "mail": { "enabled": true, "folders": ["inbox"],
+            "folder_labels": { "inbox": "收件匣" } },
   "output": { "dir": "D:\\work\\daily-agenda", "formats": ["html"] },
   "refine": { "every_runs": 10, "every_days": 14 },
   "ctx": { "dir": null },
@@ -41,13 +42,14 @@ trusted_builds.json  actions/{pending,committing,done}/  runs/<run_id>/  runs/lo
 }
 ```
 
-`consent` 為 null 或缺 → 任何讀取指令（collect、run、chats list、setup 第 8 步）一律回 `CONSENT_REQUIRED` 並結束，**不得在檢查前讀取任何資料**。
+`consent` 為 null 或缺 → 任何讀取指令（collect、run、chats list、mail folders、mail select、setup 第 8 步）一律回 `CONSENT_REQUIRED` 並結束，**不得在檢查前讀取任何資料**。
 
 ### gen/<n>/ 世代（唯一提交點＝`CURRENT` 檔內容）
 
 ```
 state.json      { "schema_version":1, "generation":n, "created_at",
-                  "checkpoints": { "line": iso|null, "mail": iso|null },
+                  "checkpoints": { "line": iso|null,
+                                   "mail": { "<folder_ref>": iso|null, ... } },
                   "known_chats": [{ "ref","name","first_seen" }],
                   "mail_index": { "<internetMessageId>": "mail:<immutableId>" },   // 保留 60 天
                   "runs_since_refine": int, "last_refine_at": iso|null, "criteria_version": int,
@@ -87,7 +89,9 @@ def output_filename(out_dir: Path, date: str, fmt: str) -> Path   # agenda-YYYY-
 ```json
 {"kind":"meta","run_id":"20261008-0900-ab12","generated_at":"...","tz":"Asia/Taipei",
  "sources":{"line":{"status":"ok|skipped|failed","code":null,"from":"iso","to":"iso","chats":12,"messages":340},
-            "mail":{"status":"ok","code":null,"from":"iso","to":"iso","messages":31},
+            "mail":{"status":"ok|partial|failed","code":null|"MAIL_FOLDER_MISSING"|"MAIL_FOLDER_PARTIAL",
+                   "from":"iso","to":"iso","messages":31,
+                   "missing_folders":["<ref>",...], "failed_folders":["<ref>",...]},
             "calendar":{"status":"ok","code":null,"from":"iso","to":"iso","events":4}},
  "new_chats":[{"ref":"chat:…"}], "batch":{"index":1,"total":1}}
 {"kind":"criteria","version":1,"text":"…判斷準則全文…"}
@@ -199,6 +203,8 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 ```
 
 - 各來源獨立：任一來源失敗 → `status:"failed"`、`code`，不推進該來源 checkpoint，其他照常。
+- Mail checkpoint 為 per-folder dict（`{"inbox": iso|null, ...}`）；舊版 scalar 遷移時歸到 `"inbox"`，其餘 `null`（初始窗口）。已移除的 folder key 保留，重新加回時從舊 checkpoint 續讀，避免重讀 14 天。
+- Per-folder 錯誤分型：`GRAPH_TRUNCATED` / `DF_GRAPH_AUTH` / `DF_GRAPH_TOO_OLD` → 整個 mail source 失敗（re-raise）；Graph 404 / 400 ErrorInvalidIdMalformed → `MAIL_FOLDER_MISSING`（`status:"partial"`）；其他 → `MAIL_FOLDER_PARTIAL`（`status:"partial"`）。partial 時其他 folder 照常讀取，只有失敗 folder 的 checkpoint 不推進。
 - 讀取起點 = checkpoint − 2 小時（無 checkpoint 時用 setup 選的天數）；LINE 單次 ≤31 天，超過切段；依 `src_id` 去重。
 - 信件一律 `immutable_ids=True`；以 `mail_index[internetMessageId]` 正規化 src_id（SC-11）。
 - 行事曆每次重抓今天＋3 天，不用 checkpoint。
@@ -222,6 +228,8 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 | ★`outlook-preview` | setup 第 4 步 | 最近 3 封信主旨＋寄件者、今天行程（給使用者確認） |
 | ★`chats list --days 30` | setup 第 5 步 | `[{ref,name,type,last_at,excluded}]` |
 | `exclude --set REF...｜--add REF｜--remove REF` | setup 第 5 步／之後修改 | excluded 數量 |
+| ★`mail folders` | setup 第 5 步 | `[{ref,path,total,unread,well_known,skip_recommended,selected}]` |
+| ★`mail select --set REF...｜--add REF｜--remove REF` | setup 第 5 步／之後修改 | selected 數量；自動寫入 `mail.folder_labels` |
 | `ctx index --dir D｜--skip` | setup 第 6 步 | 檔案數 |
 | `config get`／`config set KEY=VALUE...` | setup 第 7 步（output.dir、output.formats、refine.every_runs、refine.every_days、analysis.model） | 設定摘要 |
 | `criteria draft --days 7｜14｜30` | setup 第 8 步：收集 N 天＋無工具分析 → 草稿檔 | `draft_path` |
