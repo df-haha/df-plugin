@@ -127,9 +127,10 @@ def calendar_get(event_id: str, tz: str = "") -> str:
 
 def calendar_create(subject: str, start_iso: str, end_iso: str,
                     body: str = "", location: str = "", attendees: str = "",
-                    online_meeting: bool = False) -> str:
+                    online_meeting: bool = False, transaction_id: str = "") -> str:
     """建立行事曆事件/會議。start_iso/end_iso 為 UTC ISO-8601（如 2026-06-04T09:00:00）。
-    attendees 逗號分隔地址。online_meeting=True 會自動產生 Teams 連結並於回傳附 join_url。"""
+    attendees 逗號分隔地址。online_meeting=True 會自動產生 Teams 連結並於回傳附 join_url。
+    transaction_id：Graph event 的官方重試去重欄位，有值時帶入請求；重送同一值 Graph 不會重複建立。"""
     # 去尾 Z：dateTimeTimeZone.dateTime 不可含時區標記（與 find_times/get_schedule 一致）
     s_iso, e_iso = _strip_z(start_iso), _strip_z(end_iso)
     sdt, edt = _iso_dt(s_iso), _iso_dt(e_iso)
@@ -149,6 +150,8 @@ def calendar_create(subject: str, start_iso: str, end_iso: str,
     if online_meeting:
         ev["isOnlineMeeting"] = True
         ev["onlineMeetingProvider"] = "teamsForBusiness"
+    if transaction_id:
+        ev["transactionId"] = transaction_id
     d = _req("POST", f"{GRAPH}/me/events", body=ev)
     result = {"id": d.get("id"), "subject": d.get("subject")}
     if online_meeting:

@@ -1,0 +1,56 @@
+# 每日彙整 {{ v.date }}
+
+**報表代碼** {{ v.report_code }}
+**產生時間** {{ v.generated_at }}
+
+## 來源狀態
+
+{% for s in v.sources %}- {{ s.name|md }}：{{ s.message|md }}{% if s.coverage %} （{{ s.coverage|md }}）{% endif %}
+{% endfor %}
+{% if v.coverage.batched %}
+> 本次資料分 {{ v.coverage.batches }} 批處理。
+
+{% endif %}
+{% for n in v.notices %}> {{ n|md }}
+{% endfor %}
+{% if v.new_chats %}
+**本次新增的 LINE 對話：**{% for name in v.new_chats %} {{ name|md }}{% if not loop.last %}、{% endif %}{% endfor %}
+
+{% endif %}
+## 今天要處理
+
+{% if v.today %}| # | 優先 | 待辦 | 期限 | 延續 | 來源 |
+|---|---|---|---|---|---|
+{% for item in v.today %}| {{ item.no }} | {{ item.priority|md }} | {{ item.title|md }} ({{ item.todo_id|md }}) | {{ item.due|md if item.due else "—" }} | {% if item.carry_days > 0 %}{{ item.carry_days }} 天{% else %}新{% endif %} | {% for s in item.sources %}{% if s.href %}[{{ s.label|md }}]({{ s.href|md_href }}){% else %}{{ s.label|md }}{% endif %}{% if not loop.last %}、{% endif %}{% endfor %} |
+{% endfor %}
+{% else %}目前沒有待辦事項。
+{% endif %}
+{% if v.maybe_done %}
+## 可能已完成
+
+| # | 待辦 | 判斷理由 | 來源 |
+|---|---|---|---|
+{% for item in v.maybe_done %}| {{ item.no }} | {{ item.title|md }} ({{ item.todo_id|md }}) | {{ item.reason|md }} | {% for s in item.sources %}{% if s.href %}[{{ s.label|md }}]({{ s.href|md_href }}){% else %}{{ s.label|md }}{% endif %}{% if not loop.last %}、{% endif %}{% endfor %} |
+{% endfor %}
+確認完成請說「{{ v.report_code|md }} 的 N 做完了」或「T-xxxx 做完了」。7 天未確認將自動摺疊。
+{% endif %}
+{% if v.collapsed %}
+## 已摺疊（超過 7 天未確認，{{ v.collapsed|length }} 項）
+
+{% for item in v.collapsed %}- {{ item.title|md }} ({{ item.todo_id|md }})：{{ item.reason|md }}
+{% endfor %}
+要恢復請說「恢復 T-xxxx」。
+{% endif %}
+{% if v.events %}
+## 行程（今天＋未來 3 天）
+
+| 時間 | 主旨 | 地點 |
+|---|---|---|
+{% for ev in v.events %}| {{ ev.start|md }} – {{ ev.end|md }} | {% if ev.href %}[{{ ev.subject|md }}]({{ ev.href|md_href }}){% else %}{{ ev.subject|md }}{% endif %} | {{ ev.location|md }} |
+{% endfor %}
+{% endif %}
+{% if v.skipped %}
+## 已略過（依準則）
+
+{% for sk in v.skipped %}- {{ sk.summary|md }}{% for s in sk.sources %} {% if s.href %}[{{ s.label|md }}]({{ s.href|md_href }}){% else %}{{ s.label|md }}{% endif %}{% endfor %}
+{% endfor %}{% endif %}

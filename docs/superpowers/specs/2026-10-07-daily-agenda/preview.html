@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>daily-agenda 流程預覽</title>
+<style>
+:root {
+  --bg: #f6f5f2; --panel: #ffffff; --ink: #1f2328; --muted: #6b7078; --line: #e3e1db;
+  --accent: #1f6f5c; --accent-soft: #e3f1ec; --warn: #a15c00; --warn-soft: #fbf0df;
+  --danger: #b42318; --danger-soft: #fdecea; --term-bg: #16191d; --term-ink: #d7dde4;
+  --term-dim: #8b95a1; --term-user: #f2c46d; --term-ok: #6fcf97; --term-ask: #7cc4ff;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121416; --panel: #1b1e22; --ink: #e6e8eb; --muted: #9aa1aa; --line: #2c3036;
+    --accent: #5cc3a5; --accent-soft: #17312a; --warn: #f0b45c; --warn-soft: #33270f;
+    --danger: #ff8a7a; --danger-soft: #3a1a17;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.65 "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif; }
+header { padding: 28px 16px 8px; max-width: 980px; margin: 0 auto; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0; }
+.badge { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px;
+  background: var(--warn-soft); color: var(--warn); margin-left: 6px; vertical-align: 2px; }
+nav { max-width: 980px; margin: 16px auto 0; padding: 0 16px; display: flex; gap: 6px; flex-wrap: wrap; }
+nav button { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  padding: 8px 14px; border-radius: 8px; cursor: pointer; font: inherit; }
+nav button[aria-selected="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+main { max-width: 980px; margin: 0 auto; padding: 16px; }
+section[role="tabpanel"] { display: none; }
+section[role="tabpanel"].active { display: block; }
+.note { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+  border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; color: var(--muted); }
+.note b { color: var(--ink); }
+.term { background: var(--term-bg); color: var(--term-ink); border-radius: 10px; padding: 18px 18px 10px;
+  font: 13.5px/1.7 "Cascadia Mono", Consolas, ui-monospace, monospace; overflow-x: auto; }
+.term .step { color: var(--term-ask); font-weight: 600; margin-top: 14px; }
+.term .step:first-child { margin-top: 0; }
+.term .dim { color: var(--term-dim); }
+.term .ok { color: var(--term-ok); }
+.term .user { color: var(--term-user); }
+.term .warn { color: #f0b45c; }
+.term pre { margin: 0; white-space: pre-wrap; font: inherit; }
+.doc { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 22px 24px; }
+.doc h2 { font-size: 19px; margin: 0 0 2px; }
+.doc h3 { font-size: 16px; margin: 22px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.meta { color: var(--muted); font-size: 13px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 13px; }
+.p { display: inline-block; min-width: 26px; text-align: center; border-radius: 6px; font-size: 12px; font-weight: 600; padding: 1px 6px; }
+.p0 { background: var(--danger-soft); color: var(--danger); }
+.p1 { background: var(--warn-soft); color: var(--warn); }
+.p2 { background: var(--accent-soft); color: var(--accent); }
+.src { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.tok { font-family: Consolas, monospace; font-size: 12.5px; background: var(--accent-soft); color: var(--accent); padding: 0 4px; border-radius: 4px; }
+.timeline div { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.timeline .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+.table-wrap { overflow-x: auto; }
+footer { max-width: 980px; margin: 0 auto; padding: 8px 16px 32px; color: var(--muted); font-size: 13px; }
+@media (max-width: 600px) { .doc { padding: 16px; } .timeline div { grid-template-columns: 84px 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>daily-agenda 流程預覽 <span class="badge">假資料・不接任何真實系統</span></h1>
+  <p class="sub">用來確認操作順序與輸出長相。人名、公司、訊息內容全部是虛構的。</p>
+</header>
+<nav role="tablist">
+  <button role="tab" aria-selected="true" data-tab="setup">① 首次設定 /agenda-setup</button>
+  <button role="tab" aria-selected="false" data-tab="daily">② 每日彙整 /agenda</button>
+  <button role="tab" aria-selected="false" data-tab="reply">③ 回 LINE 確認</button>
+  <button role="tab" aria-selected="false" data-tab="refine">④ 修正判斷準則</button>
+</nav>
+<main>
+
+<section role="tabpanel" id="setup" class="active">
+  <div class="note"><b>這頁看什麼：</b>同事第一次裝好 plugin 後打 <code>/agenda-setup</code>，Claude 依序引導的對話。黃字是使用者輸入。</div>
+  <div class="term"><pre>
+<span class="step">[0/8] 開始前先說明</span>
+  這個工具會把你的 Outlook 信件、行事曆、LINE 訊息原樣送到 Claude 分析（包含客戶名稱與業務內容），整理成待辦清單。
+    • 等一下可以選擇不讀哪些 LINE 對話，被排除的對話完全不會被讀
+    • 不同意就結束，不會讀取任何資料
+    • 能不能在公司使用，請依公司採用的 AI 方案條款確認
+  同意並繼續嗎？(Y/n) <span class="user">Enter</span>
+
+<span class="step">[1/8] 檢查環境</span>
+  <span class="ok">✓</span> Node.js v24.11.1
+  <span class="ok">✓</span> Python 3.12 x64（裝在 plugin 自己的資料夾，不動系統）
+  <span class="ok">✓</span> 解密元件 SQLite3MC 2.5.1（指紋核對通過）
+  <span class="ok">✓</span> LINE Desktop 正在執行
+
+<span class="step">[2/8] LINE 版本</span>
+  LINE 版本 26.5.0.3975。要試讀一次，確認讀得到嗎？(Y/n) <span class="user">Enter</span>
+  <span class="ok">✓</span> 試讀成功
+
+<span class="step">[3/8] 找出目前登入的 LINE 帳號</span>
+  找到 2 份 LINE 資料庫，逐一試解中…
+    資料庫 A　最後使用 今天 10:14　93 MB　<span class="ok">✓ 解得開（目前登入的帳號）</span>
+    資料庫 B　最後使用 7/8　　　　 34 MB　<span class="dim">✗ 解不開（舊帳號，略過）</span>
+  <span class="ok">✓</span> 已設定讀取資料庫 A（不用你選）
+
+<span class="step">[4/8] 串接 Outlook（df-graph）</span>
+  <span class="dim">→ 呼叫 /df-graph-setup，瀏覽器會開登入頁，登入一次即可</span>
+  <span class="ok">✓</span> 登入成功：<span class="tok">&lt;你的信箱&gt;</span>
+  試讀最近 3 封信：
+    10/07 09:12  林雅婷　「Q4 採購單確認」
+    10/06 17:40  系統通知　「會議室預約成功」
+    10/06 15:03  陳志豪　「回覆：場勘時間」
+  今天的行事曆：10:00 週會、14:30 供應商來訪
+  這些看起來對嗎？(Y/n) <span class="user">Enter</span>
+  <span class="dim">說明：Outlook 登入會取得讀信、寄信、改行事曆的權限；本工具只在你確認後才寄信或建事件。</span>
+
+<span class="step">[5/8] 有哪些 LINE 對話不要讀？</span>
+  最近 30 天有訊息的對話共 47 個：
+     1. 營運部　　　　　　 2. 採購組　　　　　 3. 陳志豪
+     4. 家人群組　　　　　 5. 大學同學會　　　 6. 宏遠精密專案群
+     …（共 47 個，輸入 all 看完整清單）
+  輸入不想被讀的編號（例：4,5），或按 Enter 全部都讀：<span class="user">4,5</span>
+  <span class="ok">✓</span> 已排除 2 個對話。之後出現的新對話會預設讀取，並在彙整檔開頭告訴你。
+
+<span class="step">[6/8] 個人背景資料（ctx）</span>
+  你有整理過自己的工作背景資料嗎？（負責專案、常往來的人、職稱…）
+  輸入資料夾路徑，或按 Enter 跳過：<span class="user">D:\notes\me</span>
+  <span class="ok">✓</span> 找到 14 個檔案，已建立索引（只存檔名、標題、摘要；原檔不搬動）
+
+<span class="step">[7/8] 輸出設定</span>
+  彙整檔格式？ 1) md　2) html　3) 兩種都要　　<span class="user">2</span>
+  存放資料夾？（預設：目前資料夾下新增 daily-agenda，即 D:\work\daily-agenda）　<span class="user">Enter</span>
+  <span class="dim">判斷準則＝我用來決定「哪些訊息算待辦、誰的事比較急、哪些可以略過」的規則，
+  第 8 步會先幫你產出第一版，之後依你的使用情況調整。</span>
+  多久問你一次「要不要調整判斷準則」？（預設 每 10 次或 14 天）　<span class="user">Enter</span>
+  要設定每天自動跑嗎？（需要 LINE 開著）
+    1) 不要，我自己打 /agenda　2) 每個工作日 08:30　　<span class="user">1</span>
+
+<span class="step">[8/8] 初次分析，建立判斷準則</span>
+  要掃描多久的資料？ 1) 7 天　2) 14 天　3) 30 天（LINE 一次最多可讀取的天數）　　<span class="user">2</span>
+  讀取中… LINE 31 個對話 / 412 則｜信件 186 封｜行事曆 22 個事件
+  分析完成。判斷準則草稿：
+
+    【一定列為待辦】
+      • 主管 <span class="tok">黃經理</span> 或「營運部」群組裡 @你 的訊息
+      • 信件主旨含「請於」「截止」「確認」且寄給你（非副本）
+    【提高優先】
+      • 提到具體日期且在 3 天內
+      • 客戶來信（網域不是公司網域），特別是宏遠精密
+    【通常忽略】
+      • 系統通知、電子報、「XX 社區」群組的閒聊
+      • 你只是副本收件人的信
+
+  要修改嗎？直接說哪裡不對，或輸入 ok 存檔：<span class="user">ok</span>
+  <span class="ok">✓ 設定完成。之後每天打 /agenda 就會產出彙整。</span>
+</pre></div>
+</section>
+
+<section role="tabpanel" id="daily">
+  <div class="note"><b>這頁看什麼：</b>打 <code>/agenda</code> 後存出來的彙整檔長相（這裡示範 html 版；md 版內容相同、樣式較陽春）。每一項都標出來源，點了可回原信／原對話。</div>
+  <div class="doc">
+    <h2>待辦與行程彙整・2026-10-07（二）<span class="meta" style="font-weight:400">　報表代碼 R-7K2</span></h2>
+    <div class="meta">LINE ✓ 10/06 08:41 起 18 個對話 / 96 則・信件 ✓ 27 封・行事曆 ✓ 9 個事件｜資料完整讀取，未分批</div>
+    <div class="meta" style="margin-top:6px">🆕 本次新增的對話：「Q4 展覽籌備」群組（已讀取；不想讀的話說「排除 Q4 展覽籌備」）</div>
+
+    <h3>今天要處理（7）</h3>
+    <div class="table-wrap"><table>
+      <tr><th>#</th><th>優先</th><th>事項</th><th>期限</th><th>來源</th></tr>
+      <tr><td>1</td><td><span class="p p0">P0</span></td><td>回覆黃經理：Q4 預算表第 3 頁數字要更新後再寄一次</td><td>今天 12:00</td><td class="src">LINE・營運部群組</td></tr>
+      <tr><td>2</td><td><span class="p p0">P0</span></td><td>確認宏遠精密採購單數量（對方問 200 還是 250 箱）</td><td>今天</td><td class="src">Outlook・Q4 採購單確認</td></tr>
+      <tr><td>3</td><td><span class="p p1">P1</span></td><td>陳志豪問週四場勘能不能改 14:00 → 需要回覆 <b>（已擬好 LINE 草稿）</b></td><td>明天前</td><td class="src">LINE・陳志豪</td></tr>
+      <tr><td>4</td><td><span class="p p1">P1</span></td><td>補交 9 月出差報帳單據</td><td>10/09</td><td class="src">Outlook・行政部通知</td></tr>
+      <tr><td>7</td><td><span class="p p1">P1</span></td><td>更新供應商聯絡清單 <span class="src">（延續第 3 天）</span></td><td>10/08</td><td class="src">LINE・採購組</td></tr>
+      <tr><td>5</td><td><span class="p p2">P2</span></td><td>看林雅婷分享的新版 SOP，週五會議前給意見</td><td>10/10</td><td class="src">Outlook・SOP 草案 v3</td></tr>
+      <tr><td>6</td><td><span class="p p2">P2</span></td><td>回覆供應商報價（不急，對方說月底前都可以）</td><td>10/31</td><td class="src">Outlook・報價單</td></tr>
+    </table></div>
+
+    <h3>可能已完成（2）——你確認後才會移除</h3>
+    <div class="table-wrap"><table>
+      <tr><th>#</th><th>事項</th><th>判斷依據</th></tr>
+      <tr><td>A</td><td>寄 9 月報表給財務</td><td class="src">你 10/06 16:20 寄出「9 月報表」給財務部</td></tr>
+      <tr><td>B</td><td>確認展覽攤位尺寸</td><td class="src">對方 10/06 在 LINE 回「尺寸 OK 了」</td></tr>
+    </table></div>
+    <div class="meta">確認方式：在對話中說「R-7K2 的 A、B 做完了」或「R-7K2 的 3、5 做完了」。7 天沒確認會自動摺疊到下方，不會刪除。</div>
+    <details style="margin-top:10px"><summary class="meta" style="cursor:pointer">▸ 已摺疊（1）——7 天沒確認的「可能已完成」，點開查看；說「恢復 T-3307」可移回待辦</summary>
+      <div class="table-wrap"><table>
+        <tr><th>代碼</th><th>事項</th><th>摺疊日</th></tr>
+        <tr><td>T-3307</td><td>回覆會計師事務所年度查核時程</td><td class="src">10/05</td></tr>
+      </table></div>
+    </details>
+
+    <h3>行程（今天＋未來 3 天）</h3>
+    <div class="timeline">
+      <div><span class="t">10/07 10:00</span><span>週會（會議室 A）・<span class="src">行事曆</span></span></div>
+      <div><span class="t">10/07 14:30</span><span>供應商來訪・<span class="src">行事曆</span>　<span class="p p1">提醒</span> 對方信裡說會帶樣品，需要借推車</span></div>
+      <div><span class="t">10/08 全天</span><span>黃經理請假・<span class="src">LINE・營運部群組</span>（不在行事曆上，從訊息推得）</span></div>
+      <div><span class="t">10/09 14:00</span><span>場勘（時間待確認，見上方 P1）・<span class="src">LINE・陳志豪</span></span></div>
+      <div><span class="t">10/10 09:30</span><span>SOP 審查會議・<span class="src">行事曆</span></span></div>
+    </div>
+
+    <h3>已略過（12）</h3>
+    <div class="meta">系統通知 5・電子報 4・社區群組閒聊 3 —— 依你的判斷準則略過。覺得有誤判，下次修正準則時告訴我。</div>
+  </div>
+</section>
+
+<section role="tabpanel" id="reply">
+  <div class="note"><b>這頁看什麼：</b>彙整裡標「已擬好 LINE 草稿」的項目，使用者說要回時的確認流程。<b>沒按 y 就不會送出任何東西。</b></div>
+  <div class="term"><pre>
+<span class="user">&gt; 幫我回陳志豪，說週四 14:00 可以，順便說宏遠精密的樣品會一起帶</span>
+
+  待送出（確認碼 10 分鐘內有效，內容改了就要重新確認）：
+  ┌─────────────────────────────────────────
+  │ 收件對話：陳志豪（一對一）
+  │ 內容：
+  │   志豪你好，週四（10/9）14:00 場勘沒問題，
+  │   宏遠精密的樣品我會一起帶過去，當天現場會合，謝謝！
+  └─────────────────────────────────────────
+  <span class="dim">已核對：這個對話名稱只對應到一個聯絡人；送出前會再確認 LINE 視窗開的是同一個對話。</span>
+
+  要送出嗎？ y＝送出 / e＝修改 / n＝取消　<span class="user">y</span>
+  <span class="dim">（Claude Code 會再跳一次系統確認視窗，按允許才會真的送出）</span>
+  <span class="ok">✓ 已送出</span>（10/07 09:58）
+
+  要順便在行事曆建立事件嗎？
+  ┌─────────────────────────────────────────
+  │ 主旨：場勘（陳志豪）
+  │ 時間：10/9（四）14:00–15:00
+  │ <span class="dim">已檢查：當天這個時段沒有相似的事件</span>
+  └─────────────────────────────────────────
+  建立嗎？(y/n)　<span class="user">y</span>
+  <span class="ok">✓ 已建立</span>
+</pre></div>
+</section>
+
+<section role="tabpanel" id="refine">
+  <div class="note"><b>這頁看什麼：</b>每跑 10 次或過了 14 天（先到先算），彙整完會多問一次。使用者可以選「先講一段話」或「讓它先整理」。</div>
+  <div class="term"><pre>
+  📋 已彙整 10 次，要調整判斷準則嗎？
+    1) 我先說哪裡不對
+    2) 你先整理這段期間的模式給我看
+    3) 這次跳過
+  選擇：<span class="user">2</span>
+
+  這 14 天我觀察到：
+    • 「採購組」群組的訊息你有 9 次都在 1 小時內回覆，但目前準則沒把它列為重要 → 建議加入「提高優先」
+    • 你標記「這不重要」的 4 項都是 <span class="tok">行政部</span> 的全公司公告 → 建議加入「通常忽略」
+    • 有 2 次漏抓：對方寫「麻煩看一下」沒寫期限，被我判成 P2，但你當天就處理了 → 建議「主管說『麻煩』也算 P1」
+
+  套用哪幾條？（例：1,3 或 all 或 none）　<span class="user">1,3</span>
+  <span class="ok">✓ 判斷準則已更新（第 2 版，舊版有留存，可以還原）</span>
+</pre></div>
+</section>
+
+</main>
+<footer>拋棄式預覽，確認流程用；正式版會依核准後的流程重新實作。</footer>
+<script>
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav button').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
+    document.querySelectorAll('section[role="tabpanel"]').forEach(s => s.classList.toggle('active', s.id === btn.dataset.tab));
+  });
+});
+</script>
+</body>
+</html>
