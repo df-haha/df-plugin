@@ -453,7 +453,7 @@ class TestM4FolderWalkCompleteness:
         assert obj["code"] == "MAIL_FOLDERS_INCOMPLETE"
 
     def test_select_allow_incomplete_override(self, tmp_path: Path, capsys: Any) -> None:
-        """--allow-incomplete forces acceptance even with incomplete inventory."""
+        """--allow-incomplete stores the ref as-is when inventory is incomplete."""
         state.accept_consent(tmp_path, NOW)
 
         class PartialGraph:
@@ -463,13 +463,45 @@ class TestM4FolderWalkCompleteness:
                 return [_make_folder("f1", "收件匣", child_count=1)]
 
         deps = _deps(tmp_path, graph_factory=lambda: PartialGraph())
-        # With --allow-incomplete, unknown ref on incomplete inventory
-        # falls through to the normal ARG_ERROR (ref genuinely not found)
         code, obj = _run_cli(
             ["mail", "select", "--set", "inbox", "unknown-ref", "--allow-incomplete"],
             deps, capsys,
         )
-        # Should be ARG_ERROR (ref not found) not MAIL_FOLDERS_INCOMPLETE
+        # With --allow-incomplete the ref is accepted (user confirmed it exists)
+        assert obj["ok"] is True
+        assert obj["selected_count"] == 2
+        assert "unknown-ref" in obj["folders"]
+
+    def test_allow_incomplete_not_in_refs(self, tmp_path: Path, capsys: Any) -> None:
+        """--allow-incomplete must not leak into the stored refs list."""
+        state.accept_consent(tmp_path, NOW)
+
+        class PartialGraph:
+            def folder_list(self, parent_id: str) -> list[dict[str, Any]]:
+                if parent_id == "f1":
+                    raise RuntimeError("subtree fail")
+                return [_make_folder("f1", "收件匣", child_count=1)]
+
+        deps = _deps(tmp_path, graph_factory=lambda: PartialGraph())
+        code, obj = _run_cli(
+            ["mail", "select", "--set", "inbox", "deep-id", "--allow-incomplete"],
+            deps, capsys,
+        )
+        assert obj["ok"] is True
+        assert "--allow-incomplete" not in obj["folders"]
+
+    def test_allow_incomplete_on_complete_inventory_still_rejects(self, tmp_path: Path, capsys: Any) -> None:
+        """When inventory IS complete, a missing ref is ARG_ERROR regardless of flag."""
+        from tests.conftest import FakeGraph
+        state.accept_consent(tmp_path, NOW)
+        tree = {"": [_make_folder("f1", "收件匣")]}
+        graph = FakeGraph(folder_tree=tree)
+        deps = _deps(tmp_path, graph_factory=lambda: graph)
+        code, obj = _run_cli(
+            ["mail", "select", "--set", "inbox", "nonexistent", "--allow-incomplete"],
+            deps, capsys,
+        )
+        assert obj["ok"] is False
         assert obj["code"] == "ARG_ERROR"
 
 

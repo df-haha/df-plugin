@@ -8,7 +8,8 @@ import {
   canonicalize, checkBashTaint, checkReadTaint, checkTaintedAllow,
   checkTaintedBash, checkTaintedWrite, checkMonitorCommand,
   sanitizeSessionId, hasShellMetachars, markerPath, loadRegistry,
-  shellTokenize, _isAllowedProjectPath,
+  shellTokenize, _isAllowedProjectPath, _isProgressFilePath,
+  _isDraftFilePath, _parseCanonicalDA,
 } from './lock-core.mjs';
 
 const __test_dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,7 +18,7 @@ const REAL_SCRIPTS = resolve(__test_dirname, '..', 'scripts');
 const DA_HOME = '/home/test/.daily-agenda';
 const CTX = { daHome: DA_HOME };
 const da = (sub, args = '') =>
-  `uv run --quiet --project "\${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda ${sub}${args ? ' ' + args : ''}`;
+  `uv run --quiet --project "\${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m daily_agenda ${sub}${args ? ' ' + args : ''}`;
 const pf = `"${DA_HOME}/runs/progress/x.jsonl"`;
 const draft = `${DA_HOME}/runs/20261015-0900-abc1/criteria-draft.md`;
 const profileDraft = `${DA_HOME}/runs/20261015-0900-abc1/profile-draft.md`;
@@ -300,15 +301,21 @@ describe('checkMonitorCommand', () => {
   }, CTX).allow));
   it('denies no command', () => assert.ok(!checkMonitorCommand({}, CTX).allow));
   it('denies non-DA', () => assert.ok(!checkMonitorCommand({ command: 'tail -f x' }, CTX).allow));
-  it('H2: denies progress watch without -P', () => {
+  it('denies progress watch without -I -X utf8 (bare python -m)', () => {
     const r = checkMonitorCommand({
       command: `uv run --quiet --project "\${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda progress watch --file ${pf}`,
     }, CTX);
-    assert.ok(!r.allow, 'Monitor without -P must be denied');
+    assert.ok(!r.allow, 'Monitor without -I -X utf8 must be denied');
+  });
+  it('denies progress watch with -P only (not -I)', () => {
+    const r = checkMonitorCommand({
+      command: `uv run --quiet --project "\${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda progress watch --file ${pf}`,
+    }, CTX);
+    assert.ok(!r.allow, 'Monitor with -P only (not -I -X utf8) must be denied');
   });
   it('H2: denies progress watch with fake suffix path', () => {
     const r = checkMonitorCommand({
-      command: `uv run --quiet --project "/tmp/plugins/daily-agenda/scripts" python -P -m daily_agenda progress watch --file ${pf}`,
+      command: `uv run --quiet --project "/tmp/plugins/daily-agenda/scripts" python -I -X utf8 -m daily_agenda progress watch --file ${pf}`,
     }, CTX);
     assert.ok(!r.allow, 'Monitor with fake suffix path must be denied');
   });
@@ -395,7 +402,7 @@ describe('item1: canonical DA with --progress-file must NOT taint (Linux)', () =
 
 describe('item1: Monitor progress watch must NOT taint (Linux)', () => {
   it('progress watch --file under runs/progress/', () => {
-    const cmd = `uv run --quiet --project "\${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda progress watch --file "${DA_HOME}/runs/progress/20261016-0900-ab12.jsonl"`;
+    const cmd = `uv run --quiet --project "\${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m daily_agenda progress watch --file "${DA_HOME}/runs/progress/20261016-0900-ab12.jsonl"`;
     assert.ok(!checkBashTaint(cmd, CTX).taint, 'Monitor progress watch with valid file must not taint');
   });
 });
@@ -410,7 +417,7 @@ describe('item1: canonical DA with --progress-file must NOT taint (Windows)', ()
     assert.ok(!checkBashTaint(cmd, WIN_CTX).taint);
   });
   it('progress watch --file under runs/progress/ (Monitor)', () => {
-    const cmd = `uv run --quiet --project "\${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda progress watch --file "${WIN_HOME}\\runs\\progress\\x.jsonl"`;
+    const cmd = `uv run --quiet --project "\${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m daily_agenda progress watch --file "${WIN_HOME}\\runs\\progress\\x.jsonl"`;
     assert.ok(!checkBashTaint(cmd, WIN_CTX).taint, 'Windows: Monitor progress watch must not taint');
   });
   it('criteria save --file draft under runs/', () => {
@@ -440,12 +447,16 @@ describe('item1: negative cases — must still taint', () => {
     assert.ok(checkBashTaint(cmd, CTX).taint, 'duplicate progress-file must taint');
   });
   it('non-canonical project path with valid progress-file still taints', () => {
-    const cmd = `uv run --quiet --project "/tmp/evil/scripts" python -P -m daily_agenda run --progress-file "${DA_HOME}/runs/progress/x.jsonl"`;
+    const cmd = `uv run --quiet --project "/tmp/evil/scripts" python -I -X utf8 -m daily_agenda run --progress-file "${DA_HOME}/runs/progress/x.jsonl"`;
     assert.ok(checkBashTaint(cmd, CTX).taint, 'non-canonical project with valid pf must taint');
   });
-  it('non -P form with valid progress-file still taints', () => {
+  it('non-isolated form (bare -m) with valid progress-file still taints', () => {
     const cmd = `uv run --quiet --project "\${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda run --progress-file "${DA_HOME}/runs/progress/x.jsonl"`;
-    assert.ok(checkBashTaint(cmd, CTX).taint, 'non-P form with valid pf must taint');
+    assert.ok(checkBashTaint(cmd, CTX).taint, 'bare python -m with valid pf must taint');
+  });
+  it('-P only form (not -I) with valid progress-file still taints', () => {
+    const cmd = `uv run --quiet --project "\${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda run --progress-file "${DA_HOME}/runs/progress/x.jsonl"`;
+    assert.ok(checkBashTaint(cmd, CTX).taint, '-P only form with valid pf must taint');
   });
   it('registry subcmd taints even with valid progress-file', () => {
     const cmd = da('chats', `list --days 30 --progress-file "${DA_HOME}/runs/progress/x.jsonl"`);
@@ -454,7 +465,87 @@ describe('item1: negative cases — must still taint', () => {
 });
 
 // ============================================================================
-// Item 2: anchor bypass forms must taint
+// Item 2 (R3): subcommand-bound exemption — cross-subcommand mismatches taint
+// ============================================================================
+
+describe('item2-subcmd: subcommand-bound file exemption', () => {
+  // progress show --file: progress path ONLY
+  it('progress show --file progress path → no taint', () => {
+    const cmd = da('progress', `show --file "${DA_HOME}/runs/progress/x.jsonl"`);
+    assert.ok(!checkBashTaint(cmd, CTX).taint);
+  });
+  it('progress show --file draft path → taint', () => {
+    const cmd = da('progress', `show --file "${DA_HOME}/runs/20261015/criteria-draft.md"`);
+    assert.ok(checkBashTaint(cmd, CTX).taint, 'progress show + draft path must taint');
+  });
+
+  // criteria save --file: criteria-draft.md ONLY
+  it('criteria save --file criteria-draft.md → no taint', () => {
+    const cmd = da('criteria', `save --file "${DA_HOME}/runs/20261015-0900-abc1/criteria-draft.md"`);
+    assert.ok(!checkBashTaint(cmd, CTX).taint);
+  });
+  it('criteria save --file profile-draft.md → taint', () => {
+    const cmd = da('criteria', `save --file "${DA_HOME}/runs/20261015-0900-abc1/profile-draft.md"`);
+    assert.ok(checkBashTaint(cmd, CTX).taint, 'criteria save + profile-draft must taint');
+  });
+
+  // refine apply --file: criteria-draft.md ONLY
+  it('refine apply --file criteria-draft.md → no taint', () => {
+    const cmd = da('refine', `apply --file "${DA_HOME}/runs/20261015-0900-abc1/criteria-draft.md"`);
+    assert.ok(!checkBashTaint(cmd, CTX).taint);
+  });
+  it('refine apply --file coverage-draft.json → taint', () => {
+    const cmd = da('refine', `apply --file "${DA_HOME}/runs/20261015-0900-abc1/coverage-draft.json"`);
+    assert.ok(checkBashTaint(cmd, CTX).taint, 'refine apply + coverage-draft must taint');
+  });
+
+  // profile save --file: profile-draft.md ONLY
+  it('profile save --file profile-draft.md → no taint', () => {
+    const cmd = da('profile', `save --file "${DA_HOME}/runs/20261015-0900-abc1/profile-draft.md"`);
+    assert.ok(!checkBashTaint(cmd, CTX).taint);
+  });
+  it('profile save --file criteria-draft.md → taint', () => {
+    const cmd = da('profile', `save --file "${DA_HOME}/runs/20261015-0900-abc1/criteria-draft.md"`);
+    assert.ok(checkBashTaint(cmd, CTX).taint, 'profile save + criteria-draft must taint');
+  });
+
+  // profile coverage save --file: coverage-draft.json ONLY
+  it('profile coverage save --file coverage-draft.json → no taint', () => {
+    const cmd = da('profile', `coverage save --file "${DA_HOME}/runs/20261015-0900-abc1/coverage-draft.json"`);
+    assert.ok(!checkBashTaint(cmd, CTX).taint);
+  });
+  it('profile coverage save --file profile-draft.md → taint', () => {
+    const cmd = da('profile', `coverage save --file "${DA_HOME}/runs/20261015-0900-abc1/profile-draft.md"`);
+    assert.ok(checkBashTaint(cmd, CTX).taint, 'profile coverage save + profile-draft must taint');
+  });
+
+  // draft show --file: any of the three basenames
+  it('draft show --file criteria-draft.md → no taint', () => {
+    const cmd = da('draft', `show --file "${DA_HOME}/runs/drafts/x/criteria-draft.md"`);
+    assert.ok(!checkBashTaint(cmd, CTX).taint);
+  });
+  it('draft show --file profile-draft.md → no taint', () => {
+    const cmd = da('draft', `show --file "${DA_HOME}/runs/drafts/x/profile-draft.md"`);
+    assert.ok(!checkBashTaint(cmd, CTX).taint);
+  });
+  it('draft show --file coverage-draft.json → no taint', () => {
+    const cmd = da('draft', `show --file "${DA_HOME}/runs/20261015/coverage-draft.json"`);
+    assert.ok(!checkBashTaint(cmd, CTX).taint);
+  });
+  it('draft show --file bundle.jsonl → taint', () => {
+    const cmd = da('draft', `show --file "${DA_HOME}/runs/20261015/bundle.jsonl"`);
+    assert.ok(checkBashTaint(cmd, CTX).taint, 'draft show + non-draft file must taint');
+  });
+
+  // Unknown subcommand with --file: no exemption
+  it('unknown-cmd --file draft path → taint', () => {
+    const cmd = da('show', `--file "${DA_HOME}/runs/20261015/criteria-draft.md"`);
+    assert.ok(checkBashTaint(cmd, CTX).taint, 'unknown subcmd + --file gets no exemption');
+  });
+});
+
+// ============================================================================
+// Item 2 (R2): anchor bypass forms must taint
 // ============================================================================
 
 describe('item2: interpreter variant bypasses must taint', () => {
@@ -466,16 +557,16 @@ describe('item2: interpreter variant bypasses must taint', () => {
     assert.ok(checkBashTaint('python3.13 -m daily_agenda outlook-preview').taint,
       'python3.13 must be recognized');
   });
-  it('python -P -m daily_agenda.__main__ outlook-preview', () => {
-    assert.ok(checkBashTaint('python -P -m daily_agenda.__main__ outlook-preview').taint,
+  it('python -I -X utf8 -m daily_agenda.__main__ outlook-preview', () => {
+    assert.ok(checkBashTaint('python -I -X utf8 -m daily_agenda.__main__ outlook-preview').taint,
       'daily_agenda.__main__ is non-canonical module');
   });
   it('outlook\\-preview (unquoted backslash escape)', () => {
-    assert.ok(checkBashTaint('uv run --quiet --project "/p/s" python -P -m daily_agenda outlook\\-preview').taint,
+    assert.ok(checkBashTaint('uv run --quiet --project "/p/s" python -I -X utf8 -m daily_agenda outlook\\-preview').taint,
       'bash unquoted backslash must be stripped');
   });
   it('$SUB variable expansion after -m daily_agenda', () => {
-    assert.ok(checkBashTaint('SUB=outlook-preview; uv run --quiet --project "/p/s" python -P -m daily_agenda $SUB').taint,
+    assert.ok(checkBashTaint('SUB=outlook-preview; uv run --quiet --project "/p/s" python -I -X utf8 -m daily_agenda $SUB').taint,
       'unexpanded $VAR must taint');
   });
   it('python -c with runpy daily_agenda', () => {
@@ -544,13 +635,13 @@ describe('H1a: unknown root flag in _checkRegistryInvocation', () => {
     const r = checkBashTaint('uv run --quiet --project "/p/s" python -m daily_agenda --progress-file /tmp/x chats');
     assert.ok(r.taint, '--progress-file is known, chats IS a raw subcmd');
   });
-  it('-P flag between python and -m still detects taint', () => {
-    const r = checkBashTaint('uv run --quiet --project "/p/s" python -P -m daily_agenda chats list');
-    assert.ok(r.taint, '-P form must still detect raw subcommands');
+  it('-I -X utf8 flags between python and -m still detects taint', () => {
+    const r = checkBashTaint('uv run --quiet --project "/p/s" python -I -X utf8 -m daily_agenda chats list');
+    assert.ok(r.taint, '-I -X utf8 form must still detect raw subcommands');
   });
-  it('-P flag between python and -m does not taint safe subcmd', () => {
-    const r = checkBashTaint('uv run --quiet --project "/p/s" python -P -m daily_agenda run');
-    assert.ok(!r.taint, '-P form with safe subcmd must not taint');
+  it('-I -X utf8 flags between python and -m does not taint safe subcmd', () => {
+    const r = checkBashTaint('uv run --quiet --project "/p/s" python -I -X utf8 -m daily_agenda run');
+    assert.ok(!r.taint, '-I -X utf8 form with safe subcmd must not taint');
   });
 });
 
@@ -635,7 +726,7 @@ describe('H2: _isAllowedProjectPath', () => {
   });
   it('accepts real abs path via checkTaintedBash', () => {
     const r = checkTaintedBash({
-      command: `uv run --quiet --project "${REAL_SCRIPTS}" python -P -m daily_agenda run`,
+      command: `uv run --quiet --project "${REAL_SCRIPTS}" python -I -X utf8 -m daily_agenda run`,
     }, CTX);
     assert.ok(r.allow, 'Real scripts dir should be allowed in tainted Bash');
   });
@@ -652,23 +743,29 @@ describe('H2: _isAllowedProjectPath', () => {
 });
 
 // ============================================================================
-// H2: tainted Bash rejects non-P forms and fake paths
+// H2: tainted Bash rejects non-canonical forms and fake paths
 // ============================================================================
 
-describe('H2: tainted Bash -P requirement', () => {
-  it('denies python -m without -P in locked session', () => {
+describe('H2: tainted Bash isolation requirement', () => {
+  it('denies bare python -m (no flags) in locked session', () => {
     const r = checkTaintedBash({
       command: 'uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda run',
     }, CTX);
-    assert.ok(!r.allow, 'python -m without -P must be denied in tainted state');
+    assert.ok(!r.allow, 'bare python -m must be denied in tainted state');
   });
-  it('allows python -P -m in locked session', () => {
+  it('denies python -P -m (no -I) in locked session', () => {
+    const r = checkTaintedBash({
+      command: 'uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda run',
+    }, CTX);
+    assert.ok(!r.allow, 'python -P without -I -X utf8 must be denied');
+  });
+  it('allows python -I -X utf8 -m in locked session', () => {
     const r = checkTaintedBash({ command: da('run') }, CTX);
-    assert.ok(r.allow, 'python -P -m must be allowed');
+    assert.ok(r.allow, 'python -I -X utf8 -m must be allowed');
   });
   it('denies fake suffix path in locked session', () => {
     const r = checkTaintedBash({
-      command: 'uv run --quiet --project "/tmp/plugins/daily-agenda/scripts" python -P -m daily_agenda run',
+      command: 'uv run --quiet --project "/tmp/plugins/daily-agenda/scripts" python -I -X utf8 -m daily_agenda run',
     }, CTX);
     assert.ok(!r.allow, 'Fake suffix path must be denied');
   });

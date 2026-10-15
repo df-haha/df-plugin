@@ -87,7 +87,7 @@ export const loadRegistry = () => {
 // ---------------------------------------------------------------------------
 
 /**
- * N5-safe registry check: match `python [-P] -m daily_agenda <subcommand>`
+ * N5-safe registry check: match `python [...] -m daily_agenda <subcommand>`
  * where <subcommand> is a registry token. Tolerates the known root flag
  * --progress-file between daily_agenda and the subcommand; unknown flags
  * trigger taint (fail closed).
@@ -247,11 +247,15 @@ const _checkRegistryInvocation = (command) => {
 /**
  * Parse a canonical DA invocation from a Bash command.
  * Returns {ok, projectPath, subcommand, argsStr} or {ok:false}.
- * This is the SAME shape the tainted allowlist checks (python -P -m, strict
- * regex, template/realpath project path).  Used in both tainted and untainted
- * paths so the two cannot drift.
+ * This is the ONLY canonical-form regex in lock-core.mjs.  Used by both
+ * tainted allowlist (checkTaintedBash) and untainted exemption (checkBashTaint),
+ * and by checkMonitorCommand, so they cannot drift.
+ *
+ * Canonical form: `uv run --quiet --project "..." python -I -X utf8 -m daily_agenda <sub> ...`
+ * `-I` = isolated mode (ignores PYTHONPATH, cwd, user site-packages).
+ * `-X utf8` = UTF-8 mode (all streams default to UTF-8, replacing PYTHONIOENCODING).
  */
-const _parseCanonicalDA = (command) => {
+export const _parseCanonicalDA = (command) => {
   // Pre-checks: sanitize ${CLAUDE_PLUGIN_ROOT}; reject metachar / $ / multiline
   const sanitized = command.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, '__PLUGIN_ROOT__');
   if (/[;|&`><()\n\r{}*?~]/.test(sanitized)) return { ok: false };
@@ -259,7 +263,7 @@ const _parseCanonicalDA = (command) => {
   if (command.includes('\n') || command.includes('\r')) return { ok: false };
 
   const m = command.match(
-    /^uv\s+run\s+--quiet\s+--project\s+"([^"]+)"\s+python\s+-P\s+-m\s+daily_agenda\s+([a-z][-a-z0-9]*)((?:\s+.*)?)$/
+    /^uv\s+run\s+--quiet\s+--project\s+"([^"]+)"\s+python\s+-I\s+-X\s+utf8\s+-m\s+daily_agenda\s+([a-z][-a-z0-9]*)((?:\s+.*)?)$/
   );
   if (!m) return { ok: false };
 
@@ -317,6 +321,111 @@ export const _isDraftFilePath = (filePath, ctx) => {
   return true;
 };
 
+/**
+ * Subcommand → allowed --file draft basename(s).  Subcommands not listed here
+ * get no --file exemption in mechanism 2.
+ *
+ * `draft show` accepts any of the three draft basenames.
+ * `criteria save` and `refine apply` accept only criteria-draft.md.
+ * `profile save` accepts only profile-draft.md.
+ * `profile coverage save` accepts only coverage-draft.json.
+ */
+const _SUBCMD_DRAFT_MAP = {
+  'draft show':             DRAFT_BASENAMES,
+  'criteria save':          new Set(['criteria-draft.md']),
+  'refine apply':           new Set(['criteria-draft.md']),
+  'profile save':           new Set(['profile-draft.md']),
+  'profile coverage save':  new Set(['coverage-draft.json']),
+};
+
+/**
+ * Like _isDraftFilePath but restricted to basenames allowed for a specific
+ * subcommand + sub-args combination.
+ */
+const _isDraftFileForSubcommand = (filePath, ctx, subcommand, argsStr) => {
+  if (!ctx?.daHome) return false;
+  const normFile = canonicalize(filePath);
+  const normHome = canonicalize(ctx.daHome);
+  if (!normFile || !normHome) return false;
+  if (!normFile.startsWith(normHome + '/runs/')) return false;
+
+  const basename = normFile.split('/').pop();
+
+  // Build lookup key from subcommand + leading sub-args word(s)
+  // e.g. subcommand='criteria', argsStr='save --file ...' → 'criteria save'
+  //      subcommand='profile', argsStr='coverage save --file ...' → 'profile coverage save'
+  const subArgWords = argsStr.split(/\s+/);
+  let key = subcommand;
+  // Try longest match first: "profile coverage save", "profile save", "profile"
+  for (let n = Math.min(subArgWords.length, 3); n >= 1; n--) {
+    const candidate = subcommand + ' ' + subArgWords.slice(0, n).join(' ');
+    if (_SUBCMD_DRAFT_MAP[candidate]) {
+      key = candidate;
+      break;
+    }
+  }
+
+  const allowed = _SUBCMD_DRAFT_MAP[key];
+  if (!allowed || !allowed.has(basename)) return false;
+
+  // Reject if any segment is 'raw'
+  const relative = normFile.slice((normHome + '/runs/').length);
+  const segments = relative.split('/');
+  if (segments.some(s => s === 'raw')) return false;
+  return true;
+};
+
+/**
+ * Build the set of canonicalized paths exempt from mechanism 2 taint, based
+ * on the canonical DA invocation's subcommand and flag values.
+ *
+ * Exemption rules (subcommand-bound):
+ * - --progress-file (root flag, any subcommand): progress path only
+ * - progress show|watch --file: progress path only
+ * - draft show --file: any draft basename
+ * - criteria save / refine apply --file: criteria-draft.md only
+ * - profile save --file: profile-draft.md only
+ * - profile coverage save --file: coverage-draft.json only
+ * - All other subcommand --file: no exemption
+ */
+const _buildExemptSet = (command, ctx) => {
+  const exempt = new Set();
+  const canonical = _parseCanonicalDA(command);
+  if (!canonical.ok || !ctx?.daHome) return exempt;
+
+  const { subcommand, argsStr } = canonical;
+
+  // 1. --progress-file (root flag, any subcommand): progress path only
+  if (!argsStr.includes('--progress-file=')) {
+    const pfVals = _extractAllFlag(argsStr, '--progress-file');
+    if (pfVals.length === 1 && _isProgressFilePath(pfVals[0], ctx)) {
+      exempt.add(canonicalize(pfVals[0]));
+    }
+  }
+
+  // 2. --file: meaning depends on subcommand
+  if (!argsStr.includes('--file=')) {
+    const fVals = _extractAllFlag(argsStr, '--file');
+    if (fVals.length === 1) {
+      const isProgressSub = subcommand === 'progress' &&
+        (/^show\b/.test(argsStr) || /^watch\b/.test(argsStr));
+
+      if (isProgressSub) {
+        // progress show|watch --file → progress path only
+        if (_isProgressFilePath(fVals[0], ctx)) {
+          exempt.add(canonicalize(fVals[0]));
+        }
+      } else if (_isDraftFileForSubcommand(fVals[0], ctx, subcommand, argsStr)) {
+        // Subcommand-specific draft file
+        exempt.add(canonicalize(fVals[0]));
+      }
+      // else: no exemption (e.g. unknown subcommand or wrong basename)
+    }
+  }
+
+  return exempt;
+};
+
 // ---------------------------------------------------------------------------
 // Taint detection — mechanism 2 path-reference check
 // ---------------------------------------------------------------------------
@@ -350,30 +459,9 @@ export const checkBashTaint = (command, ctx) => {
     const normHome = canonicalize(ctx.daHome);
     if (!normHome) return { taint: false };
 
-    // Build exempt set: canonicalized paths from canonical DA flag values
-    const exempt = new Set();
-    const canonical = _parseCanonicalDA(command);
-    if (canonical.ok) {
-      const isWatch = canonical.subcommand === 'progress' &&
-                      /^watch\b/.test(canonical.argsStr);
-
-      // Extract --progress-file (for non-watch) or --file (for watch)
-      const pfFlag = isWatch ? '--file' : '--progress-file';
-      if (!canonical.argsStr.includes(pfFlag + '=')) {
-        const pfVals = _extractAllFlag(canonical.argsStr, pfFlag);
-        if (pfVals.length === 1 && _isProgressFilePath(pfVals[0], ctx)) {
-          exempt.add(canonicalize(pfVals[0]));
-        }
-      }
-
-      // Extract --file for non-watch commands (draft files)
-      if (!isWatch && !canonical.argsStr.includes('--file=')) {
-        const fVals = _extractAllFlag(canonical.argsStr, '--file');
-        if (fVals.length === 1 && _isDraftFilePath(fVals[0], ctx)) {
-          exempt.add(canonicalize(fVals[0]));
-        }
-      }
-    }
+    // Build exempt set: canonicalized paths from canonical DA flag values,
+    // bound to subcommand semantics (item 2).
+    const exempt = _buildExemptSet(command, ctx);
 
     const taintDirs = [
       normHome + '/runs', normHome + '/gen', normHome + '/output',
@@ -760,23 +848,18 @@ export const checkMonitorCommand = (toolInput, ctx) => {
   if (typeof command !== 'string' || command.length === 0) {
     return deny('（Monitor：需要指定 daily-agenda 進度追蹤指令）');
   }
-  if (command.includes('\n') || command.includes('\r')) return deny('（Monitor：不允許多行指令）');
 
-  const sanitized = command.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, '__PLUGIN_ROOT__');
-  if (/[;|&`><()\n\r{}*?~]/.test(sanitized)) return deny('（Monitor：不允許 shell 特殊字元）');
-  if (/\$/.test(sanitized)) return deny('（Monitor：不允許變數展開，$CLAUDE_PLUGIN_ROOT 除外）');
+  // Use the shared canonical parser (item 3: single canonical-form regex)
+  const canonical = _parseCanonicalDA(command);
+  if (!canonical.ok) return deny('（Monitor：只能追蹤 daily-agenda 進度）');
 
-  // Require python -P -m (safe-path: cwd not prepended to sys.path)
-  const daMatch = command.match(
-    /^uv\s+run\s+--quiet\s+--project\s+"([^"]+)"\s+python\s+-P\s+-m\s+daily_agenda\s+progress\s+watch\b/
-  );
-  if (!daMatch) return deny('（Monitor：只能追蹤 daily-agenda 進度）');
+  // Must be `progress watch`
+  if (canonical.subcommand !== 'progress' || !/^watch\b/.test(canonical.argsStr)) {
+    return deny('（Monitor：只能追蹤 daily-agenda 進度）');
+  }
 
-  const projectPath = daMatch[1];
-  if (!_isAllowedProjectPath(projectPath)) return deny('（Monitor：只允許 daily-agenda 進度指令）');
-
-  // Validate --file in progress watch
-  const argsAfterWatch = command.slice(command.indexOf('watch') + 5).trim();
+  // Validate --file in progress watch args
+  const argsAfterWatch = canonical.argsStr.slice(5).trim(); // skip "watch"
   const pfResult = _validateFlagOccurrences(argsAfterWatch, '--file', ctx, true);
   if (pfResult) return pfResult;
 

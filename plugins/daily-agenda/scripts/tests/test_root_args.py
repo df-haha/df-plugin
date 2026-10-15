@@ -79,35 +79,58 @@ class TestUnknownRootFlags:
         assert "ARG_ERROR" not in r.stdout
 
 
-class TestCwdShadowing:
-    """H2b: python -P prevents cwd module shadowing."""
+class TestIsolation:
+    """python -I -X utf8 prevents cwd and PYTHONPATH module shadowing."""
 
-    def test_safe_path_prevents_cwd_shadow(self, tmp_path: Path):
-        """With -P, a fake daily_agenda package in cwd does not execute."""
-        # Create a fake daily_agenda package that prints a sentinel
+    def _make_fake_pkg(self, tmp_path: Path) -> Path:
+        """Create a fake daily_agenda package that prints a sentinel."""
         fake_pkg = tmp_path / "daily_agenda"
-        fake_pkg.mkdir()
+        fake_pkg.mkdir(exist_ok=True)
         (fake_pkg / "__init__.py").write_text("")
         (fake_pkg / "__main__.py").write_text(
             'import sys; sys.stdout.write("SHADOW_SENTINEL"); sys.exit(99)\n'
         )
+        return fake_pkg
 
-        # With -P: real CLI runs, no sentinel
+    def test_isolated_mode_prevents_cwd_shadow(self, tmp_path: Path):
+        """With -I, a fake daily_agenda package in cwd does not execute."""
+        self._make_fake_pkg(tmp_path)
         r_safe = subprocess.run(
-            [sys.executable, "-P", "-m", "daily_agenda", "envcheck"],
+            [sys.executable, "-I", "-X", "utf8", "-m", "daily_agenda", "envcheck"],
             capture_output=True, text=True, cwd=str(tmp_path), timeout=10,
         )
         assert "SHADOW_SENTINEL" not in r_safe.stdout, \
-            "-P should prevent cwd shadow"
+            "-I should prevent cwd shadow"
+
+    def test_isolated_mode_prevents_pythonpath_shadow(self, tmp_path: Path):
+        """With -I, PYTHONPATH-planted fake daily_agenda does not execute."""
+        shadow = tmp_path / "shadow"
+        shadow.mkdir()
+        self._make_fake_pkg(shadow)
+        env = {**os.environ, "PYTHONPATH": str(shadow)}
+        r_safe = subprocess.run(
+            [sys.executable, "-I", "-X", "utf8", "-m", "daily_agenda", "envcheck"],
+            capture_output=True, text=True, cwd=str(SCRIPTS), env=env, timeout=10,
+        )
+        assert "SHADOW_SENTINEL" not in r_safe.stdout, \
+            "-I should prevent PYTHONPATH shadow"
+
+    def test_p_flag_alone_does_not_block_pythonpath(self, tmp_path: Path):
+        """With -P only, PYTHONPATH shadow DOES execute (proves -I is needed)."""
+        shadow = tmp_path / "shadow"
+        shadow.mkdir()
+        self._make_fake_pkg(shadow)
+        env = {**os.environ, "PYTHONPATH": str(shadow)}
+        r_unsafe = subprocess.run(
+            [sys.executable, "-P", "-m", "daily_agenda", "envcheck"],
+            capture_output=True, text=True, cwd=str(SCRIPTS), env=env, timeout=10,
+        )
+        assert "SHADOW_SENTINEL" in r_unsafe.stdout, \
+            "-P alone should NOT block PYTHONPATH shadow (proves -I is needed)"
 
     def test_without_safe_path_cwd_shadows(self, tmp_path: Path):
-        """Without -P, a fake daily_agenda package in cwd DOES execute (proves test is live)."""
-        fake_pkg = tmp_path / "daily_agenda"
-        fake_pkg.mkdir()
-        (fake_pkg / "__init__.py").write_text("")
-        (fake_pkg / "__main__.py").write_text(
-            'import sys; sys.stdout.write("SHADOW_SENTINEL"); sys.exit(99)\n'
-        )
+        """Without -P/-I, a fake daily_agenda package in cwd DOES execute (proves test is live)."""
+        self._make_fake_pkg(tmp_path)
 
         # Without -P: fake package shadows
         r_unsafe = subprocess.run(

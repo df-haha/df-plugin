@@ -214,7 +214,7 @@ describe('lock hook integration', () => {
               result.stdout.hookSpecificOutput?.permissionDecision !== 'deny');
   });
 
-  it('allows DA run command when tainted (with -P)', async () => {
+  it('allows DA run command when tainted (with -I -X utf8)', async () => {
     const sessionId = 'sess-locked-5';
     mkdirSync(path.join(testHome, 'taint'), { recursive: true });
     writeFileSync(path.join(testHome, 'taint', sessionId), '{}');
@@ -222,7 +222,7 @@ describe('lock hook integration', () => {
     const result = await runHook(
       {
         tool_name: 'Bash',
-        tool_input: { command: 'uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -P -m daily_agenda run' },
+        tool_input: { command: 'uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m daily_agenda run' },
         session_id: sessionId,
       },
       { DAILY_AGENDA_HOME: testHome },
@@ -232,7 +232,7 @@ describe('lock hook integration', () => {
               result.stdout.hookSpecificOutput?.permissionDecision !== 'deny');
   });
 
-  it('denies DA run command without -P when tainted (H2)', async () => {
+  it('denies DA run command without -I when tainted', async () => {
     const sessionId = 'sess-locked-5b';
     mkdirSync(path.join(testHome, 'taint'), { recursive: true });
     writeFileSync(path.join(testHome, 'taint', sessionId), '{}');

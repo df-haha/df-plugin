@@ -15,6 +15,7 @@ from pathlib import Path
 
 from daily_agenda import criteria, state
 from daily_agenda.fence import fence_untrusted
+from daily_agenda.fsutil import atomic_write_text
 from ._common import Deps, emit, require_consent, validate_file_flag
 
 # Allowed draft filenames — must match lock-core hook's checkTaintedWrite allowlist.
@@ -84,7 +85,7 @@ def _handle_new(argv: list[str], deps: Deps) -> int:
     elif kind == "coverage":
         seed = "{}"
 
-    draft_path.write_text(seed, encoding="utf-8")
+    atomic_write_text(draft_path, seed)
 
     return emit({
         "ok": True, "code": None,

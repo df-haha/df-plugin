@@ -110,6 +110,9 @@ def _handle_select(argv: list[str], deps: Deps) -> int:
 
     mode: str = ""
     refs_to_validate: list[str] = []
+    allow_incomplete: bool = "--allow-incomplete" in argv
+    # Strip the flag so it doesn't leak into refs
+    argv = [a for a in argv if a != "--allow-incomplete"]
 
     if "--set" in argv:
         mode = "set"
@@ -153,19 +156,24 @@ def _handle_select(argv: list[str], deps: Deps) -> int:
             if folder_map is not None:
                 bad = [r for r in unknown if r not in folder_map]
                 if bad:
-                    if not inventory_complete and "--allow-incomplete" not in argv:
+                    if not inventory_complete:
+                        if not allow_incomplete:
+                            return emit(
+                                {"ok": False, "code": "MAIL_FOLDERS_INCOMPLETE",
+                                 "message": "信箱資料夾清單不完整（部分子資料夾讀取失敗或已截斷），"
+                                            "無法確認這些 ref 是否存在。"
+                                            "加上 --allow-incomplete 可強制接受。",
+                                 "detail": f"unverifiable refs: {', '.join(bad)}"},
+                            )
+                        # --allow-incomplete: user confirmed the refs exist;
+                        # store them as-is (they may be in a subtree we
+                        # couldn't list).
+                    else:
                         return emit(
-                            {"ok": False, "code": "MAIL_FOLDERS_INCOMPLETE",
-                             "message": "信箱資料夾清單不完整（部分子資料夾讀取失敗或已截斷），"
-                                        "無法確認這些 ref 是否存在。"
-                                        "加上 --allow-incomplete 可強制接受。",
-                             "detail": f"unverifiable refs: {', '.join(bad)}"},
+                            {"ok": False, "code": "ARG_ERROR",
+                             "detail": f"找不到這些信箱資料夾 ref：{', '.join(bad)}"},
+                            exit_code=2,
                         )
-                    return emit(
-                        {"ok": False, "code": "ARG_ERROR",
-                         "detail": f"找不到這些信箱資料夾 ref：{', '.join(bad)}"},
-                        exit_code=2,
-                    )
             else:
                 # Graph unavailable and we have non-well-known refs — refuse
                 # because we can't validate them; storing a bad ref silently
