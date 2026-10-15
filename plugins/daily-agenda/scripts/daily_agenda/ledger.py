@@ -88,8 +88,12 @@ def _transition_by(from_status: str, to_status: str) -> str:
     return _TRANSITIONS[(from_status, to_status)]
 
 
-def _history_entry(*, at: str, from_status: str, to_status: str, by: str) -> dict:
-    return {"at": at, "from": from_status, "to": to_status, "by": by}
+def _history_entry(*, at: str, from_status: str, to_status: str, by: str,
+                   reason: str | None = None) -> dict:
+    entry: dict = {"at": at, "from": from_status, "to": to_status, "by": by}
+    if reason is not None:
+        entry["reason"] = reason
+    return entry
 
 
 def _change_status(
@@ -104,10 +108,15 @@ def _change_status(
     t = copy.deepcopy(todo)
     from_status = t["status"]
     iso = now.isoformat()
+
+    # Capture outgoing maybe_done_reason on the history entry before it gets cleared.
+    outgoing_reason = t.get("maybe_done_reason") if from_status in ("maybe_done", "collapsed") else None
+
     t["status"] = to_status
     t["updated_at"] = iso
     t["history"] = t.get("history", []) + [
-        _history_entry(at=iso, from_status=from_status, to_status=to_status, by=by),
+        _history_entry(at=iso, from_status=from_status, to_status=to_status, by=by,
+                       reason=outgoing_reason),
     ]
     if extra:
         t.update(extra)
@@ -325,3 +334,108 @@ def restore(ledger: list[dict], todo_id: str, *, now: datetime) -> list[dict]:
             )
             return result
     raise KeyError(f"todo {todo_id!r} not found")
+
+
+# ---------------------------------------------------------------------------
+# feedback_signals — extract user/system feedback for criteria refinement
+# ---------------------------------------------------------------------------
+
+# (from, to, by) → signal kind
+_SIGNAL_MAP: dict[tuple[str, str, str], str] = {
+    ("open", "done", "user"): "user_done_direct",
+    ("collapsed", "done", "user"): "user_confirmed_done",
+    ("maybe_done", "done", "user"): "user_confirmed_done",
+    ("open", "dismissed", "user"): "user_dismissed",
+    ("maybe_done", "open", "user"): "user_rejected_maybe_done",
+    ("collapsed", "open", "user"): "user_restored",
+    ("maybe_done", "collapsed", "system"): "system_collapsed",
+}
+
+
+def _source_kind(src_ids: list[str]) -> str:
+    """Derive source kind from the first src_id prefix."""
+    if not src_ids:
+        return "unknown"
+    first = src_ids[0]
+    if first.startswith("mail:"):
+        return "mail"
+    if first.startswith("line:"):
+        return "line"
+    if first.startswith("event:"):
+        return "event"
+    return "unknown"
+
+
+def feedback_signals(
+    ledger: list[dict],
+    *,
+    since: str | None,
+    now: datetime,
+) -> list[dict]:
+    """Extract feedback signals from ledger history for criteria refinement.
+
+    Returns a list of signal dicts, each containing trusted metadata and an
+    ``untrusted`` sub-dict for content derived from user messages.
+
+    Parameters
+    ----------
+    since:
+        ISO timestamp; history entries with ``at`` at or before this are
+        excluded.  ``None`` includes all history.  Naive timestamps are
+        assumed to be in ``now``'s timezone.  Unparseable strings are treated
+        as ``None`` (include all).
+    now:
+        Current time for carry_days calculation.
+    """
+    since_dt: datetime | None = None
+    if since is not None:
+        try:
+            since_dt = datetime.fromisoformat(since)
+            # Naive → assume now's timezone
+            if since_dt.tzinfo is None and now.tzinfo is not None:
+                since_dt = since_dt.replace(tzinfo=now.tzinfo)
+        except (ValueError, TypeError):
+            since_dt = None  # unparseable → include all
+
+    signals: list[dict] = []
+    for todo in ledger:
+        history = todo.get("history", [])
+        for entry in history:
+            at_str = entry.get("at", "")
+            if not at_str:
+                continue
+
+            # Filter by since
+            if since_dt is not None:
+                try:
+                    entry_dt = datetime.fromisoformat(at_str)
+                    if entry_dt <= since_dt:
+                        continue
+                except (ValueError, TypeError):
+                    continue
+
+            from_s = entry.get("from", "")
+            to_s = entry.get("to", "")
+            by = entry.get("by", "")
+            kind = _SIGNAL_MAP.get((from_s, to_s, by))
+            if kind is None:
+                continue
+
+            # Prefer the reason recorded on the history entry (survives field clearing);
+            # fall back to the current todo field for pre-upgrade entries without the key.
+            entry_reason = entry.get("reason", todo.get("maybe_done_reason"))
+
+            signals.append({
+                "todo_id": todo["id"],
+                "kind": kind,
+                "at": at_str,
+                "priority": todo.get("priority", "P2"),
+                "source_kind": _source_kind(todo.get("src_ids", [])),
+                "carry_days": carry_days(todo, now=now),
+                "untrusted": {
+                    "title": todo.get("title", ""),
+                    "maybe_done_reason": entry_reason,
+                },
+            })
+
+    return signals

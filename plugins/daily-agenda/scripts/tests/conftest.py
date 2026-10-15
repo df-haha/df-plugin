@@ -73,6 +73,7 @@ def fake_state(
         "mail_index": mail_index or {},
         "runs_since_refine": 0,
         "last_refine_at": None,
+        "last_refine_applied_at": None,
         "criteria_version": 1,
         "report_code": None,
     }

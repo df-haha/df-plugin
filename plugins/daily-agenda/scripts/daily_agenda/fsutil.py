@@ -34,6 +34,18 @@ def atomic_write_json(path: Path, value: Any) -> None:
     atomic_write_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
 
+def jsonl_line(obj: Any) -> str:
+    """Serialize *obj* as a single JSONL line, escaping U+2028/U+2029.
+
+    ``json.dumps(ensure_ascii=False)`` leaves U+2028 (LINE SEPARATOR) and
+    U+2029 (PARAGRAPH SEPARATOR) raw.  Since ``str.splitlines()`` and some
+    models treat them as line breaks, a raw occurrence in untrusted text would
+    create a fake JSONL record.  We escape them after serialization.
+    """
+    line = json.dumps(obj, ensure_ascii=False)
+    return line.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
+
 def read_json(path: Path, default: Any = None) -> Any:
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))

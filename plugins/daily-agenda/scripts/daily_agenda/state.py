@@ -146,6 +146,7 @@ def _initial_state() -> dict:
         "mail_index": {},
         "runs_since_refine": 0,
         "last_refine_at": None,
+        "last_refine_applied_at": None,
         "criteria_version": 0,
         "report_code": None,
         "report_index": {},

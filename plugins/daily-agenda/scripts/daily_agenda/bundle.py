@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .fsutil import atomic_write_text
+from .fsutil import atomic_write_text, jsonl_line
 
 
 def write_bundle(
@@ -49,19 +49,19 @@ def write_bundle(
         "new_chats": [{"ref": c["ref"]} for c in (result.new_chats if hasattr(result, "new_chats") else result.get("new_chats", []))],
         "batch": {"index": batch_index, "total": batch_total},
     }
-    lines.append(json.dumps(meta, ensure_ascii=False))
+    lines.append(jsonl_line(meta))
 
     # -- criteria --
     if criteria:
-        lines.append(json.dumps({
+        lines.append(jsonl_line({
             "kind": "criteria",
             "version": result.criteria_version if hasattr(result, "criteria_version") else result.get("criteria_version", 1),
             "text": criteria,
-        }, ensure_ascii=False))
+        }))
 
     # -- open todos --
     for todo in open_todos:
-        lines.append(json.dumps({
+        lines.append(jsonl_line({
             "kind": "open_todo",
             "todo_id": todo.get("id", ""),
             "status": todo.get("status", "open"),
@@ -70,23 +70,23 @@ def write_bundle(
             "created_at": todo.get("created_at", ""),
             "src_ids": todo.get("src_ids", []),
             "untrusted": {"title": todo.get("title", "")},
-        }, ensure_ascii=False))
+        }))
 
     # -- records --
     records = result.records if hasattr(result, "records") else result.get("records", [])
     for rec in records:
-        lines.append(json.dumps(rec, ensure_ascii=False))
+        lines.append(jsonl_line(rec))
 
     # -- ctx --
     for entry in ctx:
-        lines.append(json.dumps({
+        lines.append(jsonl_line({
             "kind": "ctx",
             "path": entry.get("path", ""),
             "untrusted": {
                 "title": entry.get("title", ""),
                 "summary": entry.get("summary", ""),
             },
-        }, ensure_ascii=False))
+        }))
 
     atomic_write_text(path, "\n".join(lines) + "\n")
 

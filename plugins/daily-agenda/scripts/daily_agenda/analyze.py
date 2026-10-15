@@ -33,7 +33,7 @@ ISOLATION_FLAGS: tuple[str, ...] = (
     "--verbose",
 )
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
-PROMPT_FILES = {"agenda": "analyze-prompt.md", "criteria": "criteria-prompt.md"}
+PROMPT_FILES = {"agenda": "analyze-prompt.md", "criteria": "criteria-prompt.md", "refine": "refine-prompt.md"}
 _FENCE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 
 Runner = Callable[..., subprocess.CompletedProcess]

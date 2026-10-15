@@ -79,6 +79,7 @@ class TestConsentGating:
         ["line-detect"],
         ["trust", "probe"],
         ["criteria", "draft", "--days", "7"],
+        ["refine", "draft"],
         ["run"],
     ]
 

@@ -215,3 +215,70 @@ def validate_criteria_draft(obj: dict) -> str:
         )
 
     return text
+
+
+_MAX_REFINE_CHANGES: int = 10
+_MAX_CHANGE_SUMMARY: int = 200
+_MAX_CHANGE_REASON: int = 200
+
+
+def validate_refine_draft(obj: dict) -> tuple[str, list[dict]]:
+    """Validate refine-draft model output.
+
+    Returns ``(criteria_markdown, changes)`` on success; raises
+    :class:`ModelOutputInvalid` on structural or content failure.
+    """
+    if not isinstance(obj, dict):
+        raise ModelOutputInvalid("refine output is not an object")
+
+    if obj.get("schema_version") != 1:
+        raise ModelOutputInvalid("missing or unsupported schema_version")
+
+    allowed_keys = {"schema_version", "criteria_markdown", "changes"}
+    if set(obj.keys()) - allowed_keys:
+        raise ModelOutputInvalid("unknown fields in refine output")
+
+    # criteria_markdown
+    text = obj.get("criteria_markdown")
+    if not isinstance(text, str) or not text.strip():
+        raise ModelOutputInvalid("criteria_markdown is empty or missing")
+
+    if len(text) > _MAX_CRITERIA_LEN:
+        raise ModelOutputInvalid(
+            f"criteria_markdown exceeds {_MAX_CRITERIA_LEN} characters"
+        )
+
+    # changes (required)
+    changes_raw = obj.get("changes")
+    if changes_raw is None:
+        raise ModelOutputInvalid("missing 'changes' field")
+    if not isinstance(changes_raw, list):
+        raise ModelOutputInvalid("'changes' must be a list")
+    if len(changes_raw) > _MAX_REFINE_CHANGES:
+        raise ModelOutputInvalid(
+            f"too many changes ({len(changes_raw)} > {_MAX_REFINE_CHANGES})"
+        )
+
+    changes: list[dict] = []
+    allowed_change_keys = {"summary", "reason"}
+    for i, ch in enumerate(changes_raw):
+        if not isinstance(ch, dict):
+            raise ModelOutputInvalid(f"changes[{i}] is not an object")
+        if set(ch.keys()) != allowed_change_keys:
+            raise ModelOutputInvalid(f"changes[{i}] has invalid keys")
+
+        summary = ch.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            raise ModelOutputInvalid(f"changes[{i}].summary is empty or missing")
+        if len(summary) > _MAX_CHANGE_SUMMARY:
+            raise ModelOutputInvalid(f"changes[{i}].summary too long")
+
+        reason = ch.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ModelOutputInvalid(f"changes[{i}].reason is empty or missing")
+        if len(reason) > _MAX_CHANGE_REASON:
+            raise ModelOutputInvalid(f"changes[{i}].reason too long")
+
+        changes.append({"summary": summary, "reason": reason})
+
+    return text, changes
