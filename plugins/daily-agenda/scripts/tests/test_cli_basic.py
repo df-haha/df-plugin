@@ -219,7 +219,9 @@ class TestCriteria:
         runs_dir.mkdir(parents=True)
         d1 = runs_dir / "criteria-draft.md"
         d1.write_text("Version 1", encoding="utf-8")
-        d2 = runs_dir / "criteria-draft-v2.md"
+        runs_dir2 = tmp_path / "runs" / "test-run-2"
+        runs_dir2.mkdir(parents=True)
+        d2 = runs_dir2 / "criteria-draft.md"
         d2.write_text("Version 2", encoding="utf-8")
 
         _run_cli(["criteria", "save", "--file", str(d1)], deps, capsys)

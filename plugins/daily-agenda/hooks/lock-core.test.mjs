@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import {
   canonicalize, checkBashTaint, checkReadTaint, checkTaintedAllow,
   checkTaintedBash, checkTaintedWrite, checkMonitorCommand,
-  sanitizeSessionId, hasShellMetachars, markerPath, loadRegistry,
+  checkMonitorPreTaint, sanitizeSessionId, hasShellMetachars,
+  markerPath, loadRegistry, loadDraftPolicy,
   shellTokenize, _isAllowedProjectPath, _isProgressFilePath,
   _isDraftFilePath, _parseCanonicalDA,
 } from './lock-core.mjs';
@@ -829,5 +830,98 @@ describe('H2: tainted Bash isolation requirement', () => {
       command: 'uv run --quiet --project "/tmp/plugins/daily-agenda/scripts" python -I -X utf8 -m daily_agenda run',
     }, CTX);
     assert.ok(!r.allow, 'Fake suffix path must be denied');
+  });
+});
+
+// ============================================================================
+// R6-2: Monitor pre-taint (checkMonitorPreTaint)
+// ============================================================================
+
+describe('R6-2: checkMonitorPreTaint', () => {
+  it("daily''_agenda chats list in Monitor → taint", () => {
+    const r = checkMonitorPreTaint("daily''_agenda chats list", CTX);
+    assert.ok(r.taint, "Monitor with obfuscated daily_agenda must taint");
+  });
+  it('canonical progress watch → no taint', () => {
+    const cmd = da('progress', `watch --file "${DA_HOME}/runs/progress/x.jsonl"`);
+    const r = checkMonitorPreTaint(cmd, CTX);
+    assert.ok(!r.taint, 'Canonical progress watch must pass');
+  });
+  it('unrelated Monitor (tail -f) → no taint', () => {
+    const r = checkMonitorPreTaint('tail -f /var/log/syslog | grep ERROR', CTX);
+    assert.ok(!r.taint, 'Unrelated Monitor must not taint');
+  });
+  it('non-canonical DA Monitor → taint', () => {
+    const r = checkMonitorPreTaint('python -I -X utf8 -m daily_agenda chats list', CTX);
+    assert.ok(r.taint, 'Non-canonical DA invocation in Monitor must taint');
+  });
+  it('mentions .daily-agenda but not canonical → taint', () => {
+    const r = checkMonitorPreTaint('tail -f /home/test/.daily-agenda/runs/x', CTX);
+    assert.ok(r.taint, 'Monitor mentioning data home must taint unless canonical');
+  });
+});
+
+// ============================================================================
+// R6-4: locked CLI save with non-draft file → deny
+// ============================================================================
+
+describe('R6-4: locked save enforces draft policy', () => {
+  it('criteria save --file records.jsonl → deny', () => {
+    const r = checkTaintedBash({
+      command: da('criteria', `save --file "${DA_HOME}/runs/20261015/records.jsonl"`),
+    }, CTX);
+    assert.ok(!r.allow, 'criteria save with non-draft file must be denied');
+  });
+  it('criteria save --file criteria-draft.md → allow', () => {
+    const r = checkTaintedBash({
+      command: da('criteria', `save --file "${DA_HOME}/runs/20261015-0900-abc1/criteria-draft.md"`),
+    }, CTX);
+    assert.ok(r.allow);
+  });
+  it('criteria save --file profile-draft.md → deny (wrong basename for criteria)', () => {
+    const r = checkTaintedBash({
+      command: da('criteria', `save --file "${DA_HOME}/runs/20261015-0900-abc1/profile-draft.md"`),
+    }, CTX);
+    assert.ok(!r.allow, 'criteria save with profile-draft must be denied');
+  });
+  it('refine apply --file records.jsonl → deny', () => {
+    const r = checkTaintedBash({
+      command: da('refine', `apply --file "${DA_HOME}/runs/20261015/records.jsonl"`),
+    }, CTX);
+    assert.ok(!r.allow);
+  });
+  it('profile save --file profile-draft.md → allow', () => {
+    const r = checkTaintedBash({
+      command: da('profile', `save --file "${DA_HOME}/runs/20261015-0900-abc1/profile-draft.md"`),
+    }, CTX);
+    assert.ok(r.allow);
+  });
+  it('profile save --file records.jsonl → deny', () => {
+    const r = checkTaintedBash({
+      command: da('profile', `save --file "${DA_HOME}/runs/20261015/records.jsonl"`),
+    }, CTX);
+    assert.ok(!r.allow);
+  });
+  it('criteria save --file raw/criteria-draft.md → deny (raw segment)', () => {
+    const r = checkTaintedBash({
+      command: da('criteria', `save --file "${DA_HOME}/runs/20261015/raw/criteria-draft.md"`),
+    }, CTX);
+    assert.ok(!r.allow, 'File under raw/ must be denied');
+  });
+});
+
+// ============================================================================
+// R6-4: loadDraftPolicy consistency
+// ============================================================================
+
+describe('R6-4: loadDraftPolicy', () => {
+  it('loads draft_policy from raw-commands.json', () => {
+    const policy = loadDraftPolicy();
+    assert.ok(policy['criteria save']);
+    assert.ok(policy['criteria save'].has('criteria-draft.md'));
+    assert.ok(!policy['criteria save'].has('profile-draft.md'));
+    assert.ok(policy['draft show'].has('criteria-draft.md'));
+    assert.ok(policy['draft show'].has('profile-draft.md'));
+    assert.ok(policy['draft show'].has('coverage-draft.json'));
   });
 });

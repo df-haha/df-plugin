@@ -47,6 +47,30 @@ RAW_EMITTING_COMMANDS: frozenset[str] = frozenset({
     "scan",
 })
 
+# Subcommand → allowed --file draft basenames.
+# Single source of truth: raw-commands.json::draft_policy.
+# test_fence.py::test_draft_policy_matches_json enforces sync.
+DRAFT_POLICY: dict[str, frozenset[str]] = {
+    "draft show": frozenset({"criteria-draft.md", "profile-draft.md", "coverage-draft.json"}),
+    "criteria save": frozenset({"criteria-draft.md"}),
+    "refine apply": frozenset({"criteria-draft.md"}),
+    "profile save": frozenset({"profile-draft.md"}),
+    "profile coverage save": frozenset({"coverage-draft.json"}),
+}
+
+
+def load_draft_policy(plugin_root: Path | None = None) -> dict[str, frozenset[str]]:
+    """Load draft_policy from raw-commands.json (single source of truth)."""
+    if plugin_root is None:
+        plugin_root = Path(__file__).resolve().parents[2]
+    registry_path = plugin_root / "hooks" / "raw-commands.json"
+    try:
+        data = json.loads(registry_path.read_text(encoding="utf-8"))
+        raw = data.get("draft_policy", {})
+        return {k: frozenset(v) for k, v in raw.items()}
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        return DRAFT_POLICY
+
 # F6: match any case of UNTRUSTED- token, any run of 3+ angle brackets,
 # and fullwidth variants.
 _UNTRUSTED_TOKEN_RE = re.compile(r"untrusted-", re.IGNORECASE)

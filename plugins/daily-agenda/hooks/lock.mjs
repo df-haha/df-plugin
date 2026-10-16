@@ -13,6 +13,7 @@ import {
   checkBashTaint,
   checkReadTaint,
   checkTaintedAllow,
+  checkMonitorPreTaint,
   sanitizeSessionId,
   canonicalize,
 } from './lock-core.mjs';
@@ -84,8 +85,15 @@ try {
     } else if (toolName === 'Monitor') {
       const monCmd = toolInput?.command;
       if (typeof monCmd === 'string') {
+        // Layer 1: command-form + path-reference check
         const monCheck = checkBashTaint(monCmd, taintCtx);
         if (monCheck.taint) { shouldTaint = true; taintReason = monCheck.reason; }
+        // Item 2: Monitor streams lines before PostToolUse; pre-taint if
+        // the command mentions DA-sensitive terms and isn't canonical progress watch
+        if (!shouldTaint) {
+          const preCheck = checkMonitorPreTaint(monCmd, taintCtx);
+          if (preCheck.taint) { shouldTaint = true; taintReason = preCheck.reason; }
+        }
       }
     } else if (toolName === 'Read' || toolName === 'Grep') {
       const pathToCheck = toolInput?.file_path || toolInput?.path || '';
@@ -114,7 +122,10 @@ try {
   if (result.allow) {
     // Draft laundering prevention: record draft paths written during tainted sessions
     if ((toolName === 'Write' || toolName === 'Edit') && toolInput?.file_path) {
-      appendTaintedDraft(daHome, toolInput.file_path);
+      if (!appendTaintedDraft(daHome, toolInput.file_path)) {
+        outputDeny('（Write/Edit：無法記錄草稿路徑到鎖定記錄，為安全起見拒絕寫入。請檢查 .daily-agenda/taint/ 目錄權限。）');
+        process.exit(0);
+      }
     }
     outputAllow();
   } else {

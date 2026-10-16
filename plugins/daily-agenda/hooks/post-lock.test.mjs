@@ -280,8 +280,7 @@ describe('PostToolUse sentinel detection', () => {
 
   it('run summary JSON (simulated) does not trigger taint', async () => {
     const sessionId = 'sess-post-run-clean';
-    // Simulates the output of `daily_agenda run` — counts, refs, no sentinel
-    const runOutput = '{"ok":true,"code":null,"report_code":"R-7K2","sources":{"line":{"status":"ok","messages":340}},"counts":{"new":3,"updated":1},"new_chats":["<<<UNTRUSTED-aabbccdd11223344\\nchat name\\nUNTRUSTED-aabbccdd11223344>>>>"]}';
+    const runOutput = '{"ok":true,"code":null,"report_code":"R-7K2","sources":{"line":{"status":"ok","messages":340}},"counts":{"new":3,"updated":1},"new_chats_count":2,"new_chat_refs":["chat:abc","chat:def"]}';
     await runHook(
       {
         tool_name: 'Bash',
@@ -291,6 +290,139 @@ describe('PostToolUse sentinel detection', () => {
       { DAILY_AGENDA_HOME: testHome },
     );
     assert.ok(!existsSync(path.join(testHome, 'taint', sessionId)),
-      'run output (model-derived fenced names, no sentinel) must NOT taint');
+      'run output must NOT taint');
+  });
+
+  // ── Item 1: PostToolUseFailure (failed Bash) ──
+
+  it('R6-1: taints on PostToolUseFailure with sentinel in error', async () => {
+    const sessionId = 'sess-post-failure-1';
+    await runHook(
+      {
+        hook_event_name: 'PostToolUseFailure',
+        tool_name: 'Bash',
+        tool_input: { command: "uv run ... daily''_agenda chats list; false" },
+        error: `Exit code 1\n{"ok":true,"chats":[{"name":"<<<UNTRUSTED-aabb ${SENTINEL}\\nchat\\n${SENTINEL} UNTRUSTED-aabb>>>>"}]}`,
+        session_id: sessionId,
+        transcript_path: '/tmp/transcript.jsonl',
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(existsSync(path.join(testHome, 'taint', sessionId)),
+      'PostToolUseFailure with sentinel must taint');
+  });
+
+  it('R6-1: PostToolUseFailure without sentinel does not taint', async () => {
+    const sessionId = 'sess-post-failure-clean';
+    await runHook(
+      {
+        hook_event_name: 'PostToolUseFailure',
+        tool_name: 'Bash',
+        tool_input: { command: 'npm test' },
+        error: 'Exit code 1\nError: test failed',
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(!existsSync(path.join(testHome, 'taint', sessionId)));
+  });
+
+  // ── Item 3: protected-path detection in Grep content ──
+
+  it('R6-3: Grep content mode with gen/ path → taint', async () => {
+    const sessionId = 'sess-post-grep-path';
+    await runHook(
+      {
+        tool_name: 'Grep',
+        tool_input: { output_mode: 'content', path: '/work' },
+        tool_response: { matches: [
+          { path: `${testHome}/gen/1/agenda.html`, line: 42, content: 'event subject' },
+        ] },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(existsSync(path.join(testHome, 'taint', sessionId)),
+      'Grep content with gen/ path must taint');
+  });
+
+  it('R6-3: Grep files_with_matches mode does NOT taint', async () => {
+    const sessionId = 'sess-post-grep-fwm';
+    await runHook(
+      {
+        tool_name: 'Grep',
+        tool_input: { output_mode: 'files_with_matches', path: '/work' },
+        tool_response: { matches: [`${testHome}/gen/1/agenda.html`] },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(!existsSync(path.join(testHome, 'taint', sessionId)),
+      'Grep files_with_matches must NOT taint');
+  });
+
+  it('R6-3: Bash rg with gen/ grep-prefix → taint', async () => {
+    const sessionId = 'sess-post-rg-path';
+    const output = `${testHome}/gen/1/agenda.html:42:event subject here`;
+    await runHook(
+      {
+        tool_name: 'Bash',
+        tool_response: { stdout: output, stderr: '' },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(existsSync(path.join(testHome, 'taint', sessionId)),
+      'Bash grep output with gen/ path must taint');
+  });
+
+  it('R6-3: DA JSON output (draft_path under runs/) does NOT taint', async () => {
+    const sessionId = 'sess-post-da-json';
+    const output = `{"ok":true,"draft_path":"${testHome}/runs/drafts/abc/criteria-draft.md"}`;
+    await runHook(
+      {
+        tool_name: 'Bash',
+        tool_response: { stdout: output, stderr: '' },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(!existsSync(path.join(testHome, 'taint', sessionId)),
+      'DA JSON output with runs/ path in value must NOT taint (not at line start)');
+  });
+
+  it('R6-3: progress new output does NOT taint', async () => {
+    const sessionId = 'sess-post-progress-new';
+    const output = `{"ok":true,"progress_file":"${testHome}/runs/progress/20261016.jsonl"}`;
+    await runHook(
+      {
+        tool_name: 'Bash',
+        tool_response: { stdout: output, stderr: '' },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(!existsSync(path.join(testHome, 'taint', sessionId)));
+  });
+
+  // ── Item 5a: marker write failure → decision:block ──
+
+  it('R6-5a: outputs decision:block when marker write fails', async () => {
+    const sessionId = 'sess-post-write-fail';
+    // Use a non-existent home where taint/ can't be created
+    const badHome = '/dev/null/impossible';
+    const result = await runHook(
+      {
+        tool_name: 'Bash',
+        tool_response: { stdout: `output with ${SENTINEL}`, stderr: '' },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: badHome },
+    );
+    const hso = result.stdout?.hookSpecificOutput;
+    assert.equal(hso?.decision, 'block',
+      'Must emit decision:block when marker write fails');
+    assert.ok(hso?.reason?.includes('鎖定'),
+      'Reason must mention locking failure');
   });
 });

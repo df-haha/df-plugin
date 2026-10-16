@@ -102,7 +102,7 @@ def _handle_show(argv: list[str], deps: Deps) -> int:
     if rc is not None:
         return rc
 
-    file_path, err = validate_file_flag(argv, deps.home)
+    file_path, err = validate_file_flag(argv, deps.home, policy_key="draft show")
     if err is not None:
         return err
     if not file_path:

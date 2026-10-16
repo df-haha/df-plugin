@@ -55,7 +55,7 @@ def handle(argv: list[str], deps: Deps) -> int:
                       "text": fence_untrusted(text)})
 
     elif sub == "save":
-        file_path, err = validate_file_flag(argv, deps.home)
+        file_path, err = validate_file_flag(argv, deps.home, policy_key="profile save")
         if err is not None:
             return err
         if not file_path:
@@ -159,7 +159,7 @@ def _handle_coverage(argv: list[str], deps: Deps) -> int:
     sub = argv[0]
 
     if sub == "save":
-        file_path, err = validate_file_flag(argv, deps.home)
+        file_path, err = validate_file_flag(argv, deps.home, policy_key="profile coverage save")
         if err is not None:
             return err
         if not file_path:

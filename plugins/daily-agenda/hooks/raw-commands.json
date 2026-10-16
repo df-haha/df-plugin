@@ -1,10 +1,17 @@
 {
-  "_doc": "CLI subcommands that emit raw third-party content (chat names, senders, subjects, message text). Adding a raw command = one line here + RAW_EMITTING_COMMANDS in Python fence module + raw_sentinel in fence.RAW_SENTINEL. test_fence.py::test_registry_consistency enforces sync.",
+  "_doc": "CLI subcommands that emit raw third-party content. Adding a raw command = one line here + RAW_EMITTING_COMMANDS in Python fence module. raw_sentinel synced with fence.RAW_SENTINEL. draft_policy synced with fence.DRAFT_POLICY. test_fence.py::test_registry_consistency enforces all.",
   "commands": [
     "chats",
     "outlook-preview",
     "raw",
     "scan"
   ],
-  "raw_sentinel": "DA-RAW-3f9a"
+  "raw_sentinel": "DA-RAW-3f9a",
+  "draft_policy": {
+    "draft show": ["criteria-draft.md", "profile-draft.md", "coverage-draft.json"],
+    "criteria save": ["criteria-draft.md"],
+    "refine apply": ["criteria-draft.md"],
+    "profile save": ["profile-draft.md"],
+    "profile coverage save": ["coverage-draft.json"]
+  }
 }

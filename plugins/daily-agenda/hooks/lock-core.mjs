@@ -363,22 +363,35 @@ export const _isDraftFilePath = (filePath, ctx) => {
   return true;
 };
 
-/**
- * Subcommand → allowed --file draft basename(s).  Subcommands not listed here
- * get no --file exemption in mechanism 2.
- *
- * `draft show` accepts any of the three draft basenames.
- * `criteria save` and `refine apply` accept only criteria-draft.md.
- * `profile save` accepts only profile-draft.md.
- * `profile coverage save` accepts only coverage-draft.json.
- */
-const _SUBCMD_DRAFT_MAP = {
-  'draft show':             DRAFT_BASENAMES,
-  'criteria save':          new Set(['criteria-draft.md']),
-  'refine apply':           new Set(['criteria-draft.md']),
-  'profile save':           new Set(['profile-draft.md']),
-  'profile coverage save':  new Set(['coverage-draft.json']),
+// ---------------------------------------------------------------------------
+// Shared draft policy — loaded from raw-commands.json (single source of truth)
+// ---------------------------------------------------------------------------
+
+let _draftPolicyCache = null;
+
+export const loadDraftPolicy = () => {
+  if (_draftPolicyCache) return _draftPolicyCache;
+  try {
+    const data = JSON.parse(readFileSync(join(__dirname, 'raw-commands.json'), 'utf8'));
+    const raw = data.draft_policy || {};
+    _draftPolicyCache = {};
+    for (const [key, arr] of Object.entries(raw)) {
+      _draftPolicyCache[key] = new Set(Array.isArray(arr) ? arr : []);
+    }
+  } catch {
+    _draftPolicyCache = {
+      'draft show': new Set(['criteria-draft.md', 'profile-draft.md', 'coverage-draft.json']),
+      'criteria save': new Set(['criteria-draft.md']),
+      'refine apply': new Set(['criteria-draft.md']),
+      'profile save': new Set(['profile-draft.md']),
+      'profile coverage save': new Set(['coverage-draft.json']),
+    };
+  }
+  return _draftPolicyCache;
 };
+
+/** Lazily-loaded synonym for the old _SUBCMD_DRAFT_MAP constant. */
+const _SUBCMD_DRAFT_MAP_getter = () => loadDraftPolicy();
 
 /**
  * Like _isDraftFilePath but restricted to basenames allowed for a specific
@@ -401,13 +414,13 @@ const _isDraftFileForSubcommand = (filePath, ctx, subcommand, argsStr) => {
   // Try longest match first: "profile coverage save", "profile save", "profile"
   for (let n = Math.min(subArgWords.length, 3); n >= 1; n--) {
     const candidate = subcommand + ' ' + subArgWords.slice(0, n).join(' ');
-    if (_SUBCMD_DRAFT_MAP[candidate]) {
+    if (_SUBCMD_DRAFT_MAP_getter()[candidate]) {
       key = candidate;
       break;
     }
   }
 
-  const allowed = _SUBCMD_DRAFT_MAP[key];
+  const allowed = _SUBCMD_DRAFT_MAP_getter()[key];
   if (!allowed || !allowed.has(basename)) return false;
 
   // Reject if any segment is 'raw'
@@ -817,7 +830,7 @@ export const checkTaintedBash = (toolInput, ctx) => {
   if (subcommand === 'criteria') {
     if (argsStr.startsWith('show') || argsStr === '') return { allow: true };
     if (argsStr.startsWith('draft')) return { allow: true };
-    if (argsStr.startsWith('save')) return _requireFileUnderRuns(argsStr, 'criteria', ctx);
+    if (argsStr.startsWith('save')) return _requireDraftFile(argsStr, 'criteria save', ctx);
     if (argsStr.startsWith('restore')) return { allow: true };
     return deny('（Bash：不允許修改判斷準則）');
   }
@@ -826,7 +839,7 @@ export const checkTaintedBash = (toolInput, ctx) => {
     if (['status', 'draft', 'skip'].some(s => argsStr.startsWith(s)) || argsStr === '') {
       return { allow: true };
     }
-    if (argsStr.startsWith('apply')) return _requireFileUnderRuns(argsStr, 'refine apply', ctx);
+    if (argsStr.startsWith('apply')) return _requireDraftFile(argsStr, 'refine apply', ctx);
     return deny('（Bash：不允許此 refine 操作）');
   }
 
@@ -836,8 +849,8 @@ export const checkTaintedBash = (toolInput, ctx) => {
     }
     if (argsStr.startsWith('restore')) return { allow: true };
     if (argsStr.startsWith('cadence')) return { allow: true };
-    if (argsStr.startsWith('save')) return _requireFileUnderRuns(argsStr, 'profile save', ctx);
-    if (argsStr.startsWith('coverage save')) return _requireFileUnderRuns(argsStr, 'profile coverage save', ctx);
+    if (argsStr.startsWith('save')) return _requireDraftFile(argsStr, 'profile save', ctx);
+    if (argsStr.startsWith('coverage save')) return _requireDraftFile(argsStr, 'profile coverage save', ctx);
     if (argsStr.startsWith('coverage')) return { allow: true }; // coverage (read) without save
     return deny('（Bash：不允許此 profile 操作）');
   }
@@ -904,13 +917,19 @@ const _validateFlagOccurrences = (argsStr, flagName, ctx, isProgressFile) => {
 };
 
 /**
- * Require --file to be present and under <home>/runs/.
+ * Require --file to be present, under <home>/runs/, with correct draft
+ * basename per the shared draft_policy, no 'raw' segment.
+ * Item 4: closes the locked CLI save laundering.
  */
-const _requireFileUnderRuns = (argsStr, label, ctx) => {
-  // Check =form is already rejected by _validateFlagOccurrences
+const _requireDraftFile = (argsStr, subcommand, ctx) => {
   const values = _extractAllFlag(argsStr, '--file');
-  if (values.length === 0) return deny(`（Bash ${label}：需要 --file 參數）`);
-  // Validation already done by _validateFlagOccurrences; just allow
+  if (values.length === 0) return deny(`（Bash ${subcommand}：需要 --file 參數）`);
+  // _validateFlagOccurrences already checked under runs/ and no duplicates.
+  // Now enforce draft policy basename + no 'raw' segment.
+  const filePath = values[0];
+  if (!_isDraftFileForSubcommand(filePath, ctx, subcommand.split(' ')[0], argsStr)) {
+    return deny(`（Bash ${subcommand}：--file 必須是對應的草稿檔案，且不能在 raw/ 下）`);
+  }
   return { allow: true };
 };
 
@@ -939,6 +958,56 @@ export const checkMonitorCommand = (toolInput, ctx) => {
   if (pfResult) return pfResult;
 
   return { allow: true };
+};
+
+/**
+ * Pre-execution taint check for Monitor commands in UNTAINTED sessions.
+ *
+ * Monitor streams lines into the model in real time before PostToolUse fires,
+ * so we must taint BEFORE execution if the command could produce raw content.
+ *
+ * Rule: if the command (after shell normalization) mentions daily_agenda,
+ * daily-agenda, the data home, output.dir, or config.json, it must parse
+ * as canonical `progress watch --file <runs/progress/*.jsonl>`.  Otherwise
+ * taint (not deny — consistent with Bash).
+ *
+ * Unrelated Monitor commands (tail -f /var/log/x) pass through untouched.
+ */
+export const checkMonitorPreTaint = (command, ctx) => {
+  if (typeof command !== 'string') return { taint: false };
+
+  // Normalize: collapse quotes and backslash escapes
+  const normalized = shellTokenize(command).join(' ').toLowerCase();
+
+  // Build set of sensitive terms
+  const sensitive = ['daily_agenda', 'daily-agenda'];
+  if (ctx?.daHome) {
+    const normHome = canonicalize(ctx.daHome);
+    if (normHome) {
+      const homeParts = normHome.split('/');
+      const homeBase = homeParts[homeParts.length - 1]; // e.g. '.daily-agenda'
+      if (homeBase) sensitive.push(homeBase);
+    }
+  }
+  if (Array.isArray(ctx?.extraPrefixes)) {
+    for (const ep of ctx.extraPrefixes) {
+      if (typeof ep === 'string' && ep.length > 0) {
+        sensitive.push(canonicalize(ep).split('/').pop());
+      }
+    }
+  }
+
+  // Check if command mentions anything sensitive
+  const isSensitive = sensitive.some(term => term && normalized.includes(term));
+  if (!isSensitive) return { taint: false }; // Unrelated → pass through
+
+  // Sensitive command must be canonical progress watch
+  const canonical = _parseCanonicalDA(command);
+  if (canonical.ok && canonical.subcommand === 'progress' && /^watch\b/.test(canonical.argsStr)) {
+    return { taint: false }; // Canonical progress watch → safe
+  }
+
+  return { taint: true, reason: `Monitor command mentions DA-sensitive term and is not canonical progress watch` };
 };
 
 // ---------------------------------------------------------------------------

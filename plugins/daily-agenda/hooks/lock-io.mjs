@@ -8,6 +8,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync,
          readdirSync, unlinkSync, renameSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { markerPath, draftKeys } from './lock-core.mjs';
@@ -148,17 +149,22 @@ export const loadTaintedDrafts = (daHome) => {
 
 /**
  * Record a draft path written during a tainted session.
- * Atomic: re-reads + merges + writes to tmp then renames.
+ * Atomic: re-reads + merges + writes to unique tmp then renames.
+ * Returns true on success, false on failure.
  */
 export const appendTaintedDraft = (daHome, canonicalPath) => {
   try {
-    // Re-read to handle concurrent writes
+    // Re-read right before write to handle concurrent sessions
     const existing = loadTaintedDrafts(daHome);
     for (const k of draftKeys(canonicalPath)) existing.add(k);
     mkdirSync(join(daHome, 'taint'), { recursive: true });
     const listPath = join(daHome, DRAFTS_LIST_PATH);
-    const tmpPath = listPath + '.tmp';
+    const suffix = `${process.pid}.${randomBytes(4).toString('hex')}`;
+    const tmpPath = `${listPath}.${suffix}.tmp`;
     writeFileSync(tmpPath, JSON.stringify([...existing]), 'utf8');
     renameSync(tmpPath, listPath);
-  } catch { /* fail silently — draft laundering is defense-in-depth */ }
+    return true;
+  } catch {
+    return false;
+  }
 };

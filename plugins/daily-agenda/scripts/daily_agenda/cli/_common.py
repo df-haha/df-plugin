@@ -257,12 +257,23 @@ def parse_root_args(argv: list[str]) -> tuple[argparse.Namespace, list[str]]:
     return ns, remaining
 
 
-def validate_file_flag(argv: list[str], home: Path) -> tuple[str | None, int | None]:
-    """Extract and validate a single ``--file`` argument (item 3).
+def validate_file_flag(
+    argv: list[str],
+    home: Path,
+    policy_key: str | None = None,
+) -> tuple[str | None, int | None]:
+    """Extract and validate a single ``--file`` argument.
+
+    When *policy_key* is given (e.g. ``"criteria save"``), the file's
+    basename must be in the ``DRAFT_POLICY[policy_key]`` set, the path
+    must not contain a ``raw`` segment, and the file content must not
+    contain the raw sentinel.
 
     Returns ``(path, None)`` on success or ``(None, exit_code)`` on error
     (error already emitted).
     """
+    from daily_agenda.fence import DRAFT_POLICY, RAW_SENTINEL
+
     # Reject =form
     for arg in argv:
         if arg.startswith("--file="):
@@ -308,6 +319,30 @@ def validate_file_flag(argv: list[str], home: Path) -> tuple[str | None, int | N
         emit({"ok": False, "code": "ARG_ERROR",
               "detail": f"--file must point to a file under {allowed}"}, exit_code=2)
         return None, 2
+
+    # Draft policy enforcement (Item 4)
+    if policy_key:
+        allowed_basenames = DRAFT_POLICY.get(policy_key)
+        if allowed_basenames:
+            if resolved.name not in allowed_basenames:
+                emit({"ok": False, "code": "ARG_ERROR",
+                      "detail": f"--file basename must be one of: {', '.join(sorted(allowed_basenames))}"}, exit_code=2)
+                return None, 2
+            # Reject if any path segment is 'raw'
+            if "raw" in resolved.parts:
+                emit({"ok": False, "code": "ARG_ERROR",
+                      "detail": "--file path must not contain a 'raw' segment"}, exit_code=2)
+                return None, 2
+            # Reject if file content contains the raw sentinel
+            if resolved.exists():
+                try:
+                    content = resolved.read_text(encoding="utf-8")
+                    if RAW_SENTINEL in content:
+                        emit({"ok": False, "code": "RAW_CONTENT",
+                              "detail": "file contains raw content marker — cannot use as a draft"}, exit_code=2)
+                        return None, 2
+                except OSError:
+                    pass  # file unreadable — let downstream handle
 
     return file_path, None
 

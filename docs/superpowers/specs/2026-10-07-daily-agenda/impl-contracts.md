@@ -245,7 +245,19 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 
 **Accepted residuals（content-marker 的設計邊界，不追）**：(1) `$(printf ...)` / `eval` / heredoc 展開後的路徑（shell AST 解析成本不對等）；(2) `jq -r .untrusted.text` / `cut` / `awk` 等 field-extraction transforms 從 JSONL 抽出 raw text 但不攜帶 sentinel（sentinel 在 `_raw` field，不在 `untrusted.text` 裡；Layer 2 的 PostToolUse 在 tool output 中偵測 sentinel，但如果 transform 只輸出 `.untrusted.text` 則 sentinel 不在輸出裡）。這兩類需要對 tool output 做語意分析才能攔截，超出 content-marker 設計範圍。
 
-**PostToolUse schema（evidence）**：`tool_response` 欄位包含工具的結構化輸出——Bash: `{stdout, stderr, interrupted, isImage}`，Read: raw string，Grep: structured object。來源：code.claude.com/docs/en/hooks（2026-10-16 fetch，PostToolUse section offset 100000）。`updatedToolOutput` 可替換 Claude 看到的輸出但不影響已執行的操作。大型 Bash 輸出可能被 Claude Code 截斷為 preview（per-line sentinel 印記確保截斷片段仍含 sentinel）。
+**PostToolUseFailure**：hooks.json 同時註冊 `PostToolUseFailure`（matcher `Bash|Read|Grep|Monitor`）。失敗事件的 raw 輸出在頂層 `error` 欄位（string，`Exit code N\n<stdout+stderr interleaved>`），不在 `tool_response`。`post-lock.mjs` 依 `hook_event_name` 分支讀取。evidence: code.claude.com/docs/en/hooks#posttoolusefailure（2026-10-16 fetch）。
+
+**Protected-path detection in output（item 3）**：Layer 2 額外檢查 Grep content mode 和 Bash grep-style 輸出中的受保護路徑（`<home>/runs|gen|output`、`output.dir`、`<home>/config.json`）。Grep `files_with_matches`/`count` 模式不 taint（無 content）。Bash 用行首 grep-prefix 啟發式（`<path><rest>:<content>`），排除 JSON value 中的路徑（不在行首）。
+
+**Monitor realtime stream**：Monitor 逐行送入 Claude，PostToolUse 要等 Monitor 完成後才觸發。因此 untainted session 中的 Monitor 在 PreToolUse 階段做 `checkMonitorPreTaint`：shell-normalize 後若提及 `daily_agenda`/`daily-agenda`/data home basename/`output.dir`，必須解析為 canonical `progress watch --file <runs/progress/*.jsonl>`；否則 taint（不 deny）。$(printf)/eval/variable 展開仍是 accepted residual。
+
+**Locked CLI save policy（item 4）**：locked allowlist 和 Python CLI 共用 `raw-commands.json::draft_policy` 的 subcommand→basenames 對應表。`criteria save --file` 只接受 `criteria-draft.md`，`profile save` 只接受 `profile-draft.md`，以此類推。Python 額外檢查：拒絕含 `raw` 路徑段的檔案，拒絕 file content 含 `RAW_SENTINEL`（code `RAW_CONTENT`）。
+
+**Marker write failure（item 5）**：post-lock.mjs `markSessionTainted` 失敗 → 輸出 `hookSpecificOutput.decision: "block"`（預設結束 turn）。`appendTaintedDraft` 失敗 → deny Write/Edit。tmp file 使用 `pid.random` 唯一名稱避免並行衝突。evidence: code.claude.com/docs/en/hooks § PostToolUse decision control — `decision: "block"` 預設結束 turn。PostToolUseFailure 無 decision control，僅 `additionalContext`。
+
+**`run` 不帶 sentinel（fact correction）**：`run` stdout 回傳 `new_chats_count` + `new_chat_refs`（只有 ref，不含名稱），不呼叫 `fence_untrusted`。
+
+**PostToolUse schema（evidence）**：`tool_response` 欄位包含工具的結構化輸出——Bash: `{stdout, stderr, interrupted, isImage}`，Read: raw string 或 structured object，Grep: structured object，Monitor: structured object。PostToolUseFailure: `error` (string)。來源：code.claude.com/docs/en/hooks（2026-10-16 fetch）。
 
 | 指令 | 用途 | 輸出重點 |
 |---|---|---|

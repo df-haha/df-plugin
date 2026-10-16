@@ -316,7 +316,8 @@ class TestM3DraftNewShow:
         bad_file.write_text("{}", encoding="utf-8")
         code, obj = _run_cli(["draft", "show", "--file", str(bad_file)], deps, capsys)
         assert obj["ok"] is False
-        assert "known draft filename" in obj.get("detail", "")
+        detail = obj.get("detail", "")
+        assert "known draft filename" in detail or "basename must be one of" in detail
 
     def test_draft_show_missing_file(self, tmp_path: Path, capsys: Any) -> None:
         h = _setup_home(tmp_path)

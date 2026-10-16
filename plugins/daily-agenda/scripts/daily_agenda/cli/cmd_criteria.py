@@ -49,7 +49,7 @@ def handle(argv: list[str], deps: Deps) -> int:
         return emit({"ok": True, "code": None, "version": version, "text": fence_untrusted(text)})
 
     elif sub == "save":
-        file_path, err = validate_file_flag(argv, deps.home)
+        file_path, err = validate_file_flag(argv, deps.home, policy_key="criteria save")
         if err is not None:
             return err
         if not file_path:

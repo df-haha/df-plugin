@@ -8,9 +8,11 @@ from pathlib import Path
 import pytest
 
 from daily_agenda.fence import (
+    DRAFT_POLICY,
     RAW_EMITTING_COMMANDS,
     RAW_SENTINEL,
     fence_untrusted,
+    load_draft_policy,
     load_registry,
 )
 
@@ -218,6 +220,15 @@ class TestRegistryConsistency:
         assert data["raw_sentinel"] == RAW_SENTINEL, (
             f"Sentinel drift: JSON has {data['raw_sentinel']!r}, "
             f"Python has {RAW_SENTINEL!r}"
+        )
+
+    def test_draft_policy_matches_json(self) -> None:
+        """raw-commands.json draft_policy == fence.DRAFT_POLICY."""
+        plugin_root = Path(__file__).resolve().parents[2]
+        loaded = load_draft_policy(plugin_root)
+        assert loaded == DRAFT_POLICY, (
+            f"Draft policy drift: JSON has {loaded}, "
+            f"Python has {DRAFT_POLICY}"
         )
 
     def test_all_registry_entries_are_strings(self) -> None:

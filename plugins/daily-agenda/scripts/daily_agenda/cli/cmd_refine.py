@@ -186,7 +186,7 @@ def handle(argv: list[str], deps: Deps) -> int:
         })
 
     elif sub == "apply":
-        file_path, err = validate_file_flag(argv, h)
+        file_path, err = validate_file_flag(argv, h, policy_key="refine apply")
         if err is not None:
             return err
         if not file_path:
