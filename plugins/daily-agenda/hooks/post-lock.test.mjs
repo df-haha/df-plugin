@@ -1,5 +1,6 @@
 /**
- * Integration tests for post-lock.mjs (PostToolUse sentinel detection).
+ * Integration tests for post-lock.mjs (PostToolUse sentinel detection)
+ * + unit tests for post-lock-core.mjs (path detection with Windows forms).
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -9,10 +10,119 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
+import {
+  checkProtectedPaths, buildProtectedPrefixes,
+  normForComparison, resolveAgainstCwd,
+} from './post-lock-core.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SENTINEL = 'DA-RAW-3f9a';
 const TEST_BASE = path.join(tmpdir(), `post-lock-test-${Date.now()}-${process.pid}`);
+
+// ============================================================================
+// Unit tests for post-lock-core.mjs (can use Windows-form paths on Linux)
+// ============================================================================
+
+describe('normForComparison', () => {
+  it('collapses double backslash→double slash→single slash', () => {
+    // JSON.stringify of C:\Users → C:\\Users; after replace(\\,/) → C://Users
+    // normForComparison must collapse // to /
+    assert.equal(normForComparison('C:\\\\Users\\\\Alice'), 'c:/users/alice');
+  });
+  it('handles MSYS form', () => {
+    assert.equal(normForComparison('/c/Users/Alice'), 'c:/users/alice');
+  });
+  it('lowercases', () => {
+    assert.equal(normForComparison('C:\\Users\\Alice'), 'c:/users/alice');
+  });
+});
+
+describe('resolveAgainstCwd', () => {
+  it('resolves relative path with ./ segments', () => {
+    const r = resolveAgainstCwd('./.daily-agenda/gen/1/agenda.md', '/home/alice');
+    assert.equal(r, '/home/alice/.daily-agenda/gen/1/agenda.md');
+  });
+  it('resolves plain relative path', () => {
+    const r = resolveAgainstCwd('.daily-agenda/gen/1/agenda.md', '/home/alice');
+    assert.equal(r, '/home/alice/.daily-agenda/gen/1/agenda.md');
+  });
+  it('leaves absolute path unchanged', () => {
+    const r = resolveAgainstCwd('/home/alice/.daily-agenda/gen/1/x', '/tmp');
+    assert.equal(r, '/home/alice/.daily-agenda/gen/1/x');
+  });
+  it('handles MSYS cwd', () => {
+    const r = resolveAgainstCwd('.daily-agenda/gen/1/x', '/c/Users/Alice');
+    assert.equal(r, 'c:/users/alice/.daily-agenda/gen/1/x');
+  });
+});
+
+describe('checkProtectedPaths (unit, Windows forms)', () => {
+  const WIN_HOME = 'C:\\Users\\Alice\\.daily-agenda';
+  const winPrefixes = buildProtectedPrefixes(WIN_HOME, []);
+
+  it('H2 probe 1: Windows backslash in Grep structured output → taint', () => {
+    const hookData = {
+      tool_name: 'Grep',
+      tool_input: { output_mode: 'content', path: 'C:\\work' },
+      tool_response: { matches: [
+        { path: 'C:\\Users\\Alice\\.daily-agenda\\gen\\1\\agenda.html', line: 42, content: 'event subject' },
+      ] },
+    };
+    assert.ok(checkProtectedPaths(hookData, 'unused', winPrefixes),
+      'Windows backslash path in Grep structured output must taint');
+  });
+
+  it('H2 probe 2: MSYS form in Bash stdout → taint', () => {
+    const hookData = {
+      tool_name: 'Bash',
+      tool_response: { stdout: '/c/Users/Alice/.daily-agenda/gen/1/agenda.html:42:event subject' },
+    };
+    const text = '/c/Users/Alice/.daily-agenda/gen/1/agenda.html:42:event subject';
+    assert.ok(checkProtectedPaths(hookData, text, winPrefixes),
+      'MSYS path form in Bash stdout must taint');
+  });
+
+  it('H2 probe 3: relative prefix with cwd → taint', () => {
+    const hookData = {
+      tool_name: 'Bash',
+      cwd: '/home/alice',
+    };
+    const text = '.daily-agenda/gen/1/agenda.md:1:third-party calendar subject';
+    const linuxHome = '/home/alice/.daily-agenda';
+    const linuxPrefixes = buildProtectedPrefixes(linuxHome, []);
+    assert.ok(checkProtectedPaths(hookData, text, linuxPrefixes),
+      'Relative path prefix resolved against cwd must taint');
+  });
+
+  it('H2 probe 3b: ./ prefix with cwd → taint', () => {
+    const hookData = {
+      tool_name: 'Bash',
+      cwd: '/home/alice',
+    };
+    const text = './.daily-agenda/gen/1/agenda.md:12:event data';
+    const linuxHome = '/home/alice/.daily-agenda';
+    const linuxPrefixes = buildProtectedPrefixes(linuxHome, []);
+    assert.ok(checkProtectedPaths(hookData, text, linuxPrefixes),
+      './ prefix resolved against cwd must taint');
+  });
+
+  it('M: Grep with no output_mode → no taint', () => {
+    const hookData = {
+      tool_name: 'Grep',
+      tool_input: { path: '/work' },
+      tool_response: { matches: ['C:\\Users\\Alice\\.daily-agenda\\gen\\1\\agenda.html'] },
+    };
+    assert.ok(!checkProtectedPaths(hookData, 'unused', winPrefixes),
+      'Grep with missing output_mode must be treated as files_with_matches');
+  });
+
+  it('DA JSON output (path in value, not at line start) → no taint', () => {
+    const hookData = { tool_name: 'Bash' };
+    const text = '{"ok":true,"draft_path":"C:\\Users\\Alice\\.daily-agenda\\runs\\drafts\\abc\\criteria-draft.md"}';
+    assert.ok(!checkProtectedPaths(hookData, text, winPrefixes),
+      'Path inside JSON value must NOT taint');
+  });
+});
 
 const runHook = (input, env = {}) => new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [path.join(__dirname, 'post-lock.mjs')], {
@@ -407,9 +517,10 @@ describe('PostToolUse sentinel detection', () => {
 
   // ── Item 5a: marker write failure → decision:block ──
 
-  it('R6-5a: outputs decision:block when marker write fails', async () => {
+  // ── H3: marker write failure → continue:false (universal hard stop) ──
+
+  it('H3: outputs continue:false when PostToolUse marker write fails', async () => {
     const sessionId = 'sess-post-write-fail';
-    // Use a non-existent home where taint/ can't be created
     const badHome = '/dev/null/impossible';
     const result = await runHook(
       {
@@ -419,10 +530,122 @@ describe('PostToolUse sentinel detection', () => {
       },
       { DAILY_AGENDA_HOME: badHome },
     );
-    const hso = result.stdout?.hookSpecificOutput;
-    assert.equal(hso?.decision, 'block',
-      'Must emit decision:block when marker write fails');
-    assert.ok(hso?.reason?.includes('鎖定'),
-      'Reason must mention locking failure');
+    assert.strictEqual(result.stdout?.continue, false,
+      'Must emit continue:false when marker write fails');
+    assert.ok(typeof result.stdout?.stopReason === 'string',
+      'Must include a stopReason');
+    assert.ok(result.stdout.stopReason.includes('安全'),
+      'stopReason must mention safety');
+  });
+
+  it('H3: outputs continue:false when PostToolUseFailure marker write fails', async () => {
+    const sessionId = 'sess-post-failure-write-fail';
+    const badHome = '/dev/null/impossible';
+    const result = await runHook(
+      {
+        hook_event_name: 'PostToolUseFailure',
+        tool_name: 'Bash',
+        error: `Exit code 1\n${SENTINEL} leaked data`,
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: badHome },
+    );
+    assert.strictEqual(result.stdout?.continue, false,
+      'PostToolUseFailure must also emit continue:false on marker failure');
+    assert.ok(typeof result.stdout?.stopReason === 'string');
+  });
+
+  // ── H2: Windows backslash in structured Grep output → taint ──
+
+  it('H2: Grep structured output with Windows backslash path → taint', async () => {
+    const sessionId = 'sess-h2-win-backslash';
+    await runHook(
+      {
+        tool_name: 'Grep',
+        tool_input: { output_mode: 'content', path: 'C:\\work' },
+        tool_response: { matches: [
+          { path: `${testHome}\\gen\\1\\agenda.html`, line: 42, content: 'event subject' },
+        ] },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(existsSync(path.join(testHome, 'taint', sessionId)),
+      'Windows backslash path in Grep structured output must taint');
+  });
+
+  // ── H2: MSYS form in Bash stdout → taint ──
+
+  it('H2: Bash stdout with MSYS path form → taint', async () => {
+    const sessionId = 'sess-h2-msys';
+    // Simulate MSYS form: /c/Users/Alice/.daily-agenda/gen/1/agenda.html
+    const msysHome = testHome.replace(/^([a-zA-Z]):/, (_, d) => `/${d.toLowerCase()}`);
+    const output = `${msysHome}/gen/1/agenda.html:42:event subject`;
+    await runHook(
+      {
+        tool_name: 'Bash',
+        tool_response: { stdout: output, stderr: '' },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(existsSync(path.join(testHome, 'taint', sessionId)),
+      'MSYS path form in Bash stdout must taint');
+  });
+
+  // ── H2: relative path prefix with cwd → taint ──
+
+  it('H2: relative grep prefix resolved against cwd → taint', async () => {
+    const sessionId = 'sess-h2-relative';
+    // Simulate: .daily-agenda/gen/1/agenda.md:1:third-party calendar subject
+    // with cwd resolving to testHome's parent
+    const parentDir = path.dirname(testHome);
+    const baseName = path.basename(testHome);
+    const output = `${baseName}/gen/1/agenda.md:1:third-party calendar subject`;
+    await runHook(
+      {
+        tool_name: 'Bash',
+        tool_response: { stdout: output, stderr: '' },
+        session_id: sessionId,
+        cwd: parentDir,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(existsSync(path.join(testHome, 'taint', sessionId)),
+      'Relative path prefix resolved against cwd must taint');
+  });
+
+  // ── M: Grep with no output_mode (default = files_with_matches) → no taint ──
+
+  it('M: Grep with no output_mode does NOT taint (default=files_with_matches)', async () => {
+    const sessionId = 'sess-m-grep-default';
+    await runHook(
+      {
+        tool_name: 'Grep',
+        tool_input: { path: '/work' },
+        tool_response: { matches: [`${testHome}/gen/1/agenda.html`] },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(!existsSync(path.join(testHome, 'taint', sessionId)),
+      'Grep with no output_mode must be treated as files_with_matches (no content taint)');
+  });
+
+  // ── Existing non-taint cases still work ──
+
+  it('DA JSON output with runs/ path still does NOT taint', async () => {
+    const sessionId = 'sess-still-no-taint-json';
+    const output = `{"ok":true,"draft_path":"${testHome}/runs/drafts/abc/criteria-draft.md"}`;
+    await runHook(
+      {
+        tool_name: 'Bash',
+        tool_response: { stdout: output, stderr: '' },
+        session_id: sessionId,
+      },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+    assert.ok(!existsSync(path.join(testHome, 'taint', sessionId)),
+      'DA JSON value paths must NOT taint');
   });
 });

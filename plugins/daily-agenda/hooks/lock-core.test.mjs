@@ -925,3 +925,174 @@ describe('R6-4: loadDraftPolicy', () => {
     assert.ok(policy['draft show'].has('coverage-draft.json'));
   });
 });
+
+// ============================================================================
+// H4/L: runs/progress boundary — rejects progress-evil prefix
+// ============================================================================
+
+describe('L: runs/progress boundary', () => {
+  it('rejects runs/progress-evil via checkBashTaint (untainted)', () => {
+    const cmd = da('run', `--progress-file "${DA_HOME}/runs/progress-evil/x.jsonl"`);
+    assert.ok(checkBashTaint(cmd, CTX).taint,
+      'runs/progress-evil must not match runs/progress');
+  });
+  it('accepts runs/progress/x.jsonl via checkBashTaint', () => {
+    const cmd = da('run', `--progress-file "${DA_HOME}/runs/progress/x.jsonl"`);
+    assert.ok(!checkBashTaint(cmd, CTX).taint);
+  });
+  it('rejects runs/progress-evil via checkTaintedBash', () => {
+    const cmd = da('run', `--progress-file "${DA_HOME}/runs/progress-evil/x.jsonl"`);
+    const r = checkTaintedBash({ command: cmd }, CTX);
+    assert.ok(!r.allow,
+      'tainted bash must reject runs/progress-evil');
+  });
+  it('rejects runs/progress-evil via checkMonitorCommand', () => {
+    const cmd = da('progress', `watch --file "${DA_HOME}/runs/progress-evil/x.jsonl"`);
+    const r = checkMonitorCommand({ command: cmd }, CTX);
+    assert.ok(!r.allow,
+      'Monitor must reject runs/progress-evil');
+  });
+});
+
+// ============================================================================
+// L: Monitor progress watch requires --file
+// ============================================================================
+
+describe('L: Monitor progress watch requires --file', () => {
+  it('denies progress watch without --file', () => {
+    const cmd = da('progress', 'watch');
+    const r = checkMonitorCommand({ command: cmd }, CTX);
+    assert.ok(!r.allow, 'progress watch without --file must be denied');
+  });
+  it('allows progress watch with valid --file', () => {
+    const cmd = da('progress', `watch --file ${pf}`);
+    const r = checkMonitorCommand({ command: cmd }, CTX);
+    assert.ok(r.allow);
+  });
+});
+
+// ============================================================================
+// H4: Monitor pre-taint substring false positive
+// ============================================================================
+
+describe('H4: checkMonitorPreTaint no false positives', () => {
+  it('H4 probe: output.dir=DA does not taint unrelated Monitor', () => {
+    const ctx = {
+      daHome: 'C:/Users/Alice/.daily-agenda',
+      extraPrefixes: ['C:/Users/Alice/Documents/DA'],
+    };
+    const r = checkMonitorPreTaint('tail -f /srv/data/jobs.log', ctx);
+    assert.ok(!r.taint,
+      'output.dir basename "DA" must not substring-match "data"');
+  });
+  it('unrelated tail -f with --line-buffered grep', () => {
+    const r = checkMonitorPreTaint(
+      'tail -f /var/log/app.log | grep --line-buffered ERROR', CTX);
+    assert.ok(!r.taint, 'Completely unrelated piped Monitor must not taint');
+  });
+  it('npm run dev does not taint', () => {
+    const r = checkMonitorPreTaint('npm run dev', CTX);
+    assert.ok(!r.taint);
+  });
+  it('path sharing prefix string like <home>-backup/x does not taint', () => {
+    const r = checkMonitorPreTaint(
+      'tail -f /home/test/.daily-agenda-backup/x.log', CTX);
+    assert.ok(!r.taint,
+      '.daily-agenda-backup must not match .daily-agenda');
+  });
+  it('path like C:/Users/Alice/Documents/DAta/x does not taint', () => {
+    const ctx = {
+      daHome: 'C:/Users/Alice/.daily-agenda',
+      extraPrefixes: ['C:/Users/Alice/Documents/DA'],
+    };
+    const r = checkMonitorPreTaint(
+      'tail -f C:/Users/Alice/Documents/DAta/x.log', ctx);
+    assert.ok(!r.taint, 'DAta must not match DA');
+  });
+});
+
+// ============================================================================
+// H1: ancestor recursive scan in Monitor bypasses pre-check
+// ============================================================================
+
+describe('H1: ancestor recursive scan in Monitor', () => {
+  it('H1 probe: rg searching ancestor of daHome → taint', () => {
+    const ctx = {
+      daHome: 'C:/Users/Alice/.daily-agenda',
+      cwd: '/some/other/dir',
+    };
+    const r = checkMonitorPreTaint(
+      'rg --no-heading TODO C:/Users/Alice', ctx);
+    assert.ok(r.taint,
+      'rg searching ancestor of daHome must taint');
+  });
+  it('rg searching ancestor of daHome (Linux) → taint', () => {
+    const r = checkMonitorPreTaint(
+      'rg --no-heading TODO /home/test', CTX);
+    assert.ok(r.taint,
+      'rg /home/test is ancestor of /home/test/.daily-agenda');
+  });
+  it('recursive grep -r from ancestor → taint', () => {
+    const r = checkMonitorPreTaint(
+      'grep -rn pattern /home/test', CTX);
+    assert.ok(r.taint,
+      'grep -r from ancestor of daHome must taint');
+  });
+  it('find from ancestor → taint', () => {
+    const r = checkMonitorPreTaint(
+      'find /home/test -name "*.html"', CTX);
+    assert.ok(r.taint);
+  });
+  it('rg with no path uses cwd; cwd is ancestor → taint', () => {
+    const ctx = { daHome: '/home/test/.daily-agenda', cwd: '/home/test' };
+    const r = checkMonitorPreTaint('rg TODO', ctx);
+    assert.ok(r.taint,
+      'rg with no path and cwd as ancestor must taint');
+  });
+  it('rg with no path; cwd is unrelated repo → no taint', () => {
+    const ctx = { daHome: '/home/test/.daily-agenda', cwd: '/home/test/projects/myrepo' };
+    const r = checkMonitorPreTaint('rg TODO', ctx);
+    assert.ok(!r.taint,
+      'rg with cwd not an ancestor must not taint');
+  });
+  it('tail -f ~/x.log (not ancestor, not inside) → no taint', () => {
+    const ctx = { daHome: '/home/test/.daily-agenda', cwd: '/tmp' };
+    const r = checkMonitorPreTaint('tail -f /home/test/x.log', ctx);
+    assert.ok(!r.taint);
+  });
+  it('grep -r (no explicit path) cwd is ancestor → taint', () => {
+    const ctx = { daHome: '/home/test/.daily-agenda', cwd: '/home/test' };
+    const r = checkMonitorPreTaint('grep -rn pattern', ctx);
+    assert.ok(r.taint);
+  });
+  it('grep -r (no explicit path) cwd is unrelated → no taint', () => {
+    const ctx = { daHome: '/home/test/.daily-agenda', cwd: '/other/project' };
+    const r = checkMonitorPreTaint('grep -rn pattern', ctx);
+    assert.ok(!r.taint);
+  });
+  it('fd with no path; cwd is ancestor → taint', () => {
+    const ctx = { daHome: '/home/test/.daily-agenda', cwd: '/home/test' };
+    const r = checkMonitorPreTaint('fd --extension html', ctx);
+    assert.ok(r.taint);
+  });
+  it('rg inside daHome → taint', () => {
+    const r = checkMonitorPreTaint(
+      'rg TODO /home/test/.daily-agenda/gen', CTX);
+    assert.ok(r.taint);
+  });
+  it('canonical progress watch exemption still works', () => {
+    const cmd = da('progress', `watch --file "${DA_HOME}/runs/progress/x.jsonl"`);
+    const r = checkMonitorPreTaint(cmd, CTX);
+    assert.ok(!r.taint, 'Canonical progress watch must still pass');
+  });
+  it('rg with quoted pipe pattern from ancestor → taint', () => {
+    const r = checkMonitorPreTaint(
+      'rg "subject|location" /home/test', CTX);
+    assert.ok(r.taint,
+      'rg from ancestor must taint even with quoted pipe in pattern');
+  });
+  it('tree from ancestor → taint', () => {
+    const r = checkMonitorPreTaint('tree /home/test', CTX);
+    assert.ok(r.taint);
+  });
+});

@@ -890,16 +890,8 @@ const _validateFlagOccurrences = (argsStr, flagName, ctx, isProgressFile) => {
   const filePath = values[0];
 
   if (isProgressFile) {
-    if (!filePath.endsWith('.jsonl')) {
-      return deny(`（Bash：${flagName} 必須是 .jsonl 檔）`);
-    }
-    const daHome = ctx?.daHome;
-    if (daHome) {
-      const normPf = canonicalize(filePath);
-      const normHome = canonicalize(daHome);
-      if (!normPf.startsWith(normHome + '/runs/progress')) {
-        return deny(`（Bash：${flagName} 只能指向 .daily-agenda/runs/progress/ 內）`);
-      }
+    if (!_isProgressFilePath(filePath, ctx)) {
+      return deny(`（Bash：${flagName} 必須是 .daily-agenda/runs/progress/ 內的 .jsonl 檔）`);
     }
   } else {
     // --file: validate under runs/
@@ -952,12 +944,201 @@ export const checkMonitorCommand = (toolInput, ctx) => {
     return deny('（Monitor：只能追蹤 daily-agenda 進度）');
   }
 
-  // Validate --file in progress watch args
+  // Require exactly one valid --file in progress watch args
   const argsAfterWatch = canonical.argsStr.slice(5).trim(); // skip "watch"
+  const fileValues = _extractAllFlag(argsAfterWatch, '--file');
+  if (fileValues.length !== 1) {
+    return deny('（Monitor：progress watch 必須指定一個 --file 參數）');
+  }
   const pfResult = _validateFlagOccurrences(argsAfterWatch, '--file', ctx, true);
   if (pfResult) return pfResult;
 
   return { allow: true };
+};
+
+/**
+ * Quote-aware shell segment splitter: splits a command string on unquoted
+ * pipe/semicolon/ampersand operators (|, ;, &, &&, ||) while preserving
+ * quoted strings that may contain those characters.
+ *
+ * Returns an array of segment strings.
+ */
+const _shellSegments = (command) => {
+  const segments = [];
+  let current = '';
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (inSingle) {
+      current += ch;
+      if (ch === "'") inSingle = false;
+    } else if (inDouble) {
+      if (ch === '\\' && i + 1 < command.length) {
+        const next = command[i + 1];
+        if (next === '\\' || next === '"') {
+          current += ch + next;
+          i++;
+          continue;
+        }
+      }
+      current += ch;
+      if (ch === '"') inDouble = false;
+    } else if (ch === "'") {
+      current += ch;
+      inSingle = true;
+    } else if (ch === '"') {
+      current += ch;
+      inDouble = true;
+    } else if (ch === '\\' && i + 1 < command.length) {
+      current += ch + command[i + 1];
+      i++;
+    } else if (ch === '|' || ch === ';' || ch === '&') {
+      // Consume consecutive operator characters
+      while (i + 1 < command.length && /[|;&]/.test(command[i + 1])) i++;
+      if (current.trim()) segments.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) segments.push(current.trim());
+  return segments;
+};
+
+/**
+ * Canonicalize a path token from a Monitor command, handling MSYS drive form
+ * (/c/Users → c:/Users) and tilde before calling the main canonicalize.
+ */
+const _canonMonitorToken = (token, cwd) => {
+  let t = token;
+  // MSYS drive form: /c/Users → c:/Users
+  const msys = t.match(/^\/([a-zA-Z])\//);
+  if (msys) t = msys[1].toLowerCase() + ':' + t.slice(2);
+  return canonicalize(t, cwd);
+};
+
+/**
+ * Detect whether a shell segment uses a recursive search/listing tool.
+ * Returns { recursive: boolean, tool: string|null }.
+ *
+ * Recursive tools: rg, ag, find, fd, fdfind, tree, ls -R,
+ * grep/egrep/fgrep with -r/-R/--recursive flags.
+ */
+const RECURSIVE_TOOLS = new Set(['rg', 'ag', 'find', 'fd', 'fdfind', 'tree']);
+const GREP_VARIANTS = new Set(['grep', 'egrep', 'fgrep']);
+
+const _isRecursiveSegment = (segTokens) => {
+  if (segTokens.length === 0) return { recursive: false, tool: null };
+  // Skip leading env-prefix tokens (X=Y) and wrappers
+  const WRAPPERS = new Set(['sudo', 'env', 'stdbuf', 'nice', 'time', 'nohup', 'setsid']);
+  let cmdIdx = 0;
+  while (cmdIdx < segTokens.length) {
+    const tk = segTokens[cmdIdx];
+    if (/^\w+=/.test(tk)) { cmdIdx++; continue; } // env var assignment
+    if (WRAPPERS.has(tk)) { cmdIdx++; continue; }
+    break;
+  }
+  if (cmdIdx >= segTokens.length) return { recursive: false, tool: null };
+
+  // Strip path prefix from command and .exe suffix
+  let cmd = segTokens[cmdIdx];
+  const lastSlash = Math.max(cmd.lastIndexOf('/'), cmd.lastIndexOf('\\'));
+  if (lastSlash >= 0) cmd = cmd.slice(lastSlash + 1);
+  cmd = cmd.replace(/\.exe$/i, '').toLowerCase();
+
+  if (RECURSIVE_TOOLS.has(cmd)) return { recursive: true, tool: cmd };
+
+  if (GREP_VARIANTS.has(cmd)) {
+    // Check flags for -r, -R, --recursive, or combined short flags like -rn
+    for (let i = cmdIdx + 1; i < segTokens.length; i++) {
+      const flag = segTokens[i];
+      if (flag === '--recursive') return { recursive: true, tool: cmd };
+      if (flag === '--') break;
+      if (flag.startsWith('-') && !flag.startsWith('--')) {
+        if (/[rR]/.test(flag)) return { recursive: true, tool: cmd };
+      }
+    }
+    return { recursive: false, tool: cmd };
+  }
+
+  if (cmd === 'ls') {
+    for (let i = cmdIdx + 1; i < segTokens.length; i++) {
+      const flag = segTokens[i];
+      if (flag === '--') break;
+      if (flag.startsWith('-') && !flag.startsWith('--') && flag.includes('R')) {
+        return { recursive: true, tool: cmd };
+      }
+    }
+    return { recursive: false, tool: cmd };
+  }
+
+  return { recursive: false, tool: cmd };
+};
+
+/**
+ * Extract path positional arguments from a recursive-tool segment.
+ * rg/ag/grep: first positional is the pattern (skip it unless -e present),
+ * remaining non-flag tokens are paths.
+ * find/tree/ls -R/fd: positionals before first flag-like token are paths.
+ */
+const _extractPathPositionals = (segTokens, tool) => {
+  // Find command index (skip wrappers/env)
+  const WRAPPERS = new Set(['sudo', 'env', 'stdbuf', 'nice', 'time', 'nohup', 'setsid']);
+  let cmdIdx = 0;
+  while (cmdIdx < segTokens.length) {
+    const tk = segTokens[cmdIdx];
+    if (/^\w+=/.test(tk)) { cmdIdx++; continue; }
+    if (WRAPPERS.has(tk)) { cmdIdx++; continue; }
+    break;
+  }
+
+  const args = segTokens.slice(cmdIdx + 1);
+  const paths = [];
+
+  const GREP_LIKE = new Set(['rg', 'ag', 'grep', 'egrep', 'fgrep']);
+  if (GREP_LIKE.has(tool)) {
+    // Check if -e flag is present (pattern specified via -e, not positional)
+    const hasPatternFlag = args.some(a => a === '-e' || a.startsWith('-e') || a === '--regexp');
+    // Known flags that consume the next token
+    const VALUE_FLAGS = new Set(['-e', '--regexp', '-f', '--file', '-m', '--max-count',
+      '-A', '-B', '-C', '--context', '--after-context', '--before-context',
+      '-g', '--glob', '--iglob', '-t', '--type', '-T', '--type-not',
+      '--replace', '--max-depth', '--max-filesize', '--threads', '-j',
+      '--path-separator', '--sort', '--sortr', '--color', '--colors']);
+    let patternSkipped = hasPatternFlag; // if -e present, no positional pattern to skip
+    let afterDashes = false;
+    let skipNext = false;
+    for (const a of args) {
+      if (skipNext) { skipNext = false; continue; }
+      if (afterDashes) { paths.push(a); continue; }
+      if (a === '--') { afterDashes = true; continue; }
+      if (a.startsWith('-')) {
+        // Check for value-taking flags
+        if (!a.startsWith('--') && a.length === 2 && VALUE_FLAGS.has(a)) { skipNext = true; }
+        else if (a.startsWith('--') && !a.includes('=') && VALUE_FLAGS.has(a)) { skipNext = true; }
+        continue;
+      }
+      // Positional
+      if (!patternSkipped) {
+        patternSkipped = true; // first positional is the pattern, skip it
+        continue;
+      }
+      paths.push(a);
+    }
+  } else {
+    // find, fd, tree, ls -R: positionals before first flag-like token are paths
+    // fd: first positional is the pattern, rest are paths
+    let skipPattern = (tool === 'fd' || tool === 'fdfind');
+    for (const a of args) {
+      if (a === '--') break;
+      if (a.startsWith('-')) break; // stop at first flag
+      if (skipPattern) { skipPattern = false; continue; }
+      paths.push(a);
+    }
+  }
+
+  return paths;
 };
 
 /**
@@ -966,48 +1147,108 @@ export const checkMonitorCommand = (toolInput, ctx) => {
  * Monitor streams lines into the model in real time before PostToolUse fires,
  * so we must taint BEFORE execution if the command could produce raw content.
  *
- * Rule: if the command (after shell normalization) mentions daily_agenda,
- * daily-agenda, the data home, output.dir, or config.json, it must parse
- * as canonical `progress watch --file <runs/progress/*.jsonl>`.  Otherwise
- * taint (not deny — consistent with Bash).
+ * Detection strategy (H4 + H1 fixes):
+ * 1. Module-name match: `daily_agenda` as a whole token (word-boundary) in the
+ *    normalized command. No basename/substring matching.
+ * 2. Path-token match: tokenize the command, canonicalize each path-like token
+ *    (handle ~, MSYS /c/..., backslashes, case-insensitive), and test
+ *    segment-boundary prefix relationships against the protected roots.
+ * 3. Ancestor check (H1): only for recursive search tools (rg, grep -r, find,
+ *    fd, ag, tree, ls -R). If any path positional (or cwd when no path given)
+ *    canonicalizes to an ancestor of a protected root → taint.
  *
- * Unrelated Monitor commands (tail -f /var/log/x) pass through untouched.
+ * If sensitive, command must parse as canonical `progress watch --file <...>`.
+ * Unrelated Monitor commands pass through untouched.
  */
 export const checkMonitorPreTaint = (command, ctx) => {
   if (typeof command !== 'string') return { taint: false };
 
-  // Normalize: collapse quotes and backslash escapes
-  const normalized = shellTokenize(command).join(' ').toLowerCase();
-
-  // Build set of sensitive terms
-  const sensitive = ['daily_agenda', 'daily-agenda'];
+  // Build protected roots (canonical)
+  const protectedRoots = [];
   if (ctx?.daHome) {
     const normHome = canonicalize(ctx.daHome);
-    if (normHome) {
-      const homeParts = normHome.split('/');
-      const homeBase = homeParts[homeParts.length - 1]; // e.g. '.daily-agenda'
-      if (homeBase) sensitive.push(homeBase);
-    }
+    if (normHome) protectedRoots.push(normHome);
   }
   if (Array.isArray(ctx?.extraPrefixes)) {
     for (const ep of ctx.extraPrefixes) {
       if (typeof ep === 'string' && ep.length > 0) {
-        sensitive.push(canonicalize(ep).split('/').pop());
+        const c = canonicalize(ep);
+        if (c) protectedRoots.push(c);
       }
     }
   }
 
-  // Check if command mentions anything sensitive
-  const isSensitive = sensitive.some(term => term && normalized.includes(term));
-  if (!isSensitive) return { taint: false }; // Unrelated → pass through
+  // Check 1: whole-token match for daily_agenda module name
+  const normalized = shellTokenize(command).join(' ').toLowerCase();
+  const hasModuleMention = /(?<![a-z0-9_])daily_agenda(?![a-z0-9_])/.test(normalized);
 
-  // Sensitive command must be canonical progress watch
-  const canonical = _parseCanonicalDA(command);
-  if (canonical.ok && canonical.subcommand === 'progress' && /^watch\b/.test(canonical.argsStr)) {
+  // Check 2 + 3: path-token check
+  // Split command into pipe/chain segments (quote-aware)
+  let hasPathHit = false;
+  if (protectedRoots.length > 0) {
+    const segments = _shellSegments(command);
+    for (const seg of segments) {
+      const segTokens = shellTokenize(seg);
+      const { recursive, tool } = _isRecursiveSegment(segTokens);
+
+      if (recursive) {
+        // H1: ancestor check for recursive tools
+        let pathPositionals = _extractPathPositionals(segTokens, tool);
+
+        // If no path positionals, use cwd
+        if (pathPositionals.length === 0 && ctx?.cwd) {
+          pathPositionals = [ctx.cwd];
+        }
+
+        for (const pp of pathPositionals) {
+          const normPP = _canonMonitorToken(pp, ctx?.cwd);
+          if (!normPP) continue;
+
+          for (const root of protectedRoots) {
+            // Inside or equal
+            if (normPP === root || normPP.startsWith(root + '/')) {
+              hasPathHit = true;
+              break;
+            }
+            // Ancestor: root starts with normPP + '/'
+            if (root.startsWith(normPP + '/') || root === normPP) {
+              hasPathHit = true;
+              break;
+            }
+          }
+          if (hasPathHit) break;
+        }
+      } else {
+        // Non-recursive: only check for inside/equal (not ancestor)
+        for (const token of segTokens) {
+          if (token.startsWith('-')) continue;
+          const normTk = _canonMonitorToken(token, ctx?.cwd);
+          if (!normTk) continue;
+
+          for (const root of protectedRoots) {
+            if (normTk === root || normTk.startsWith(root + '/')) {
+              hasPathHit = true;
+              break;
+            }
+          }
+          if (hasPathHit) break;
+        }
+      }
+      if (hasPathHit) break;
+    }
+  }
+
+  const isSensitive = hasModuleMention || hasPathHit;
+  if (!isSensitive) return { taint: false };
+
+  // Sensitive command must be canonical progress watch (route through checkMonitorCommand
+  // so the --file requirement is enforced)
+  const monResult = checkMonitorCommand({ command }, ctx);
+  if (monResult.allow) {
     return { taint: false }; // Canonical progress watch → safe
   }
 
-  return { taint: true, reason: `Monitor command mentions DA-sensitive term and is not canonical progress watch` };
+  return { taint: true, reason: `Monitor command is sensitive (module mention or path hit) and is not canonical progress watch` };
 };
 
 // ---------------------------------------------------------------------------

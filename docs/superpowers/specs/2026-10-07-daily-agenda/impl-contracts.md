@@ -237,7 +237,7 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 - **PostToolUse hook**：`post-lock.mjs`，註冊在 hooks.json `PostToolUse` 下，matcher `Bash|Read|Grep|Monitor`。讀 `tool_response`：Bash = `{stdout, stderr}`，Read = string 或 structured object（fallback `JSON.stringify`），Grep / Monitor = structured JSON。若 sentinel 出現 → 寫 taint marker（含 `transcript_path`）。fail-safe：parse error / exception → `{}`（不崩潰、不阻擋工具流程）。不匹配 Glob（只回傳路徑）。
 - **config.json path-taint**：`<home>/config.json` 含 `line.excluded_chats[].name`（raw chat names）。`checkReadTaint` 和 `checkBashTaint` mechanism 2 對 `<home>/config.json` 做 exact-path taint。CLI `config get` 的 `_ALLOWED_KEYS` 不含 excluded_chats，不會洩露。
 - **Mechanism-2 bash unescape**：path token 在 canonicalize 前先做 ANSI-C `$'...'` 解碼、unquoted `\x` → `x` 反轉義。關閉 `ru\ns` 和 `$'runs'` bypass。
-- **`run` 不帶 sentinel**：`run` 的 CLI 輸出不呼叫 `fence_untrusted(raw=True)`（只有 counts/refs/fenced new_chat names with `raw=False`），因此 PostToolUse 不會 taint。`chats list` 同樣的 chat names 帶 `raw=True` → 會 taint。這是刻意的不對稱（使用者決定 `run` 不鎖定）。
+- **`run` 不帶 sentinel**：`run` 的 CLI stdout 回傳 `new_chats_count`（int）+ `new_chat_refs`（ref 字串陣列，不含名稱），不呼叫 `fence_untrusted(raw=True)`，因此 PostToolUse 不會 taint。`chats list` 同樣的 chat names 帶 `raw=True` → 會 taint。這是刻意的不對稱（使用者決定 `run` 不鎖定）。
 
 **Draft laundering prevention**：PreToolUse 在 tainted session 中允許 Write/Edit draft 路徑後，將該路徑記錄到 `<daHome>/taint/tainted-drafts.json`（atomic write）。untainted session 中 `_buildExemptSet` 建立的 exempt path 若出現在 tainted-drafts list → 立即 taint（不豁免）。`checkReadTaint` 同理：Read tainted draft → taint。這堵住「tainted session 把 raw content 寫進 draft，untainted session 用 `draft show` 讀回」的漏洞。
 
@@ -247,15 +247,15 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 
 **PostToolUseFailure**：hooks.json 同時註冊 `PostToolUseFailure`（matcher `Bash|Read|Grep|Monitor`）。失敗事件的 raw 輸出在頂層 `error` 欄位（string，`Exit code N\n<stdout+stderr interleaved>`），不在 `tool_response`。`post-lock.mjs` 依 `hook_event_name` 分支讀取。evidence: code.claude.com/docs/en/hooks#posttoolusefailure（2026-10-16 fetch）。
 
-**Protected-path detection in output（item 3）**：Layer 2 額外檢查 Grep content mode 和 Bash grep-style 輸出中的受保護路徑（`<home>/runs|gen|output`、`output.dir`、`<home>/config.json`）。Grep `files_with_matches`/`count` 模式不 taint（無 content）。Bash 用行首 grep-prefix 啟發式（`<path><rest>:<content>`），排除 JSON value 中的路徑（不在行首）。
+**Protected-path detection in output（item 3）**：Layer 2 額外檢查 Grep content mode 和 Bash grep-style 輸出中的受保護路徑（`<home>/runs|gen|output`、`output.dir`、`<home>/config.json`）。Grep 僅 explicit `output_mode: 'content'` 觸發 taint（未指定 output_mode 視為 Grep 預設 `files_with_matches`，不含 content，不 taint）。Grep structured response 以 string-leaf walking（遍歷所有字串葉節點）取代 `JSON.stringify`，避免 Windows `\` 被雙重跳脫為 `\\` 後 normalize 產生 `C://Users/...` 無法匹配。Bash 用行首 grep-prefix 啟發式（`<path><rest>:<content>`），並將相對路徑（如 `.daily-agenda/gen/1/agenda.md:1:...`）根據 `hookData.cwd` 解析為絕對路徑後再比對。所有路徑 normalize 時 collapse repeated `/`、處理 MSYS `/c/...` → `c:/...`、大小寫不敏感。排除 JSON value 中的路徑（不在行首）。
 
-**Monitor realtime stream**：Monitor 逐行送入 Claude，PostToolUse 要等 Monitor 完成後才觸發。因此 untainted session 中的 Monitor 在 PreToolUse 階段做 `checkMonitorPreTaint`：shell-normalize 後若提及 `daily_agenda`/`daily-agenda`/data home basename/`output.dir`，必須解析為 canonical `progress watch --file <runs/progress/*.jsonl>`；否則 taint（不 deny）。$(printf)/eval/variable 展開仍是 accepted residual。
+**Monitor realtime stream**：Monitor 逐行送入 Claude，PostToolUse 要等 Monitor 完成後才觸發。因此 untainted session 中的 Monitor 在 PreToolUse 階段做 `checkMonitorPreTaint`，採用三層偵測——(1) 模組名稱：`daily_agenda` 作為 whole-token（word-boundary）比對，不做 basename/substring 比對；(2) path-token 比對：tokenize 後 canonicalize 每個 path-like token（含 MSYS `/c/...`、`~`、反斜線、大小寫不敏感），檢查是否在 protected root 內部或等於 protected root；(3) ancestor 偵測（僅限 recursive search 工具：rg/grep -r/find/fd/ag/tree/ls -R）：若任何 path positional（或無 path 時的 cwd）canonicalize 後是 protected root 的上層目錄 → taint。若偵測為 sensitive，必須解析為 canonical `progress watch --file <runs/progress/*.jsonl>`；否則 taint（不 deny）。$(printf)/eval/variable 展開仍是 accepted residual。
 
 **Locked CLI save policy（item 4）**：locked allowlist 和 Python CLI 共用 `raw-commands.json::draft_policy` 的 subcommand→basenames 對應表。`criteria save --file` 只接受 `criteria-draft.md`，`profile save` 只接受 `profile-draft.md`，以此類推。Python 額外檢查：拒絕含 `raw` 路徑段的檔案，拒絕 file content 含 `RAW_SENTINEL`（code `RAW_CONTENT`）。
 
-**Marker write failure（item 5）**：post-lock.mjs `markSessionTainted` 失敗 → 輸出 `hookSpecificOutput.decision: "block"`（預設結束 turn）。`appendTaintedDraft` 失敗 → deny Write/Edit。tmp file 使用 `pid.random` 唯一名稱避免並行衝突。evidence: code.claude.com/docs/en/hooks § PostToolUse decision control — `decision: "block"` 預設結束 turn。PostToolUseFailure 無 decision control，僅 `additionalContext`。
+**Marker write failure（item 5）**：post-lock.mjs `markSessionTainted` 失敗 → 輸出 `{"continue": false, "stopReason": "..."}` 停止整個 session（通用 hook 停止訊號，適用於所有 hook event 包含 PostToolUse 與 PostToolUseFailure）。`appendTaintedDraft` 失敗 → deny Write/Edit。tmp file 使用 `pid.random` 唯一名稱避免並行衝突。evidence: code.claude.com/docs/en/hooks § JSON output — `continue` 是 universal field，"Every event accepts them"、"Takes precedence over any event-specific decision fields"（2026-10-16 fetch）。
 
-**`run` 不帶 sentinel（fact correction）**：`run` stdout 回傳 `new_chats_count` + `new_chat_refs`（只有 ref，不含名稱），不呼叫 `fence_untrusted`。
+**`run` 不帶 sentinel（fact correction）**：`run` stdout 回傳 `new_chats_count`（int）+ `new_chat_refs`（ref 字串陣列，不含名稱），不呼叫 `fence_untrusted`。新 chat 名稱儲存在 state 供 `chats new` 查詢，不透過 `run` stdout 洩露。
 
 **PostToolUse schema（evidence）**：`tool_response` 欄位包含工具的結構化輸出——Bash: `{stdout, stderr, interrupted, isImage}`，Read: raw string 或 structured object，Grep: structured object，Monitor: structured object。PostToolUseFailure: `error` (string)。來源：code.claude.com/docs/en/hooks（2026-10-16 fetch）。
 
@@ -286,7 +286,7 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 | `draft new --kind criteria｜profile｜coverage` | 在 `<home>/runs/drafts/<ts-hex>/` 建立空白（或以目前版本為種子的）草稿檔，回傳 `draft_path`。供 Claude Write 後再 save/apply。檔名必須是 `criteria-draft.md`/`profile-draft.md`/`coverage-draft.json`（符合 lock-core hook allowlist） | `draft_path`、`kind`、`seeded` |
 | `draft show --file F` | 回傳 fenced 草稿文字，Claude 不需直接 Read runs/ 下的檔案。`--file` 限制為 runs/ 下的已知草稿檔名 | `text`（fenced）、`draft_path` |
 | ★`criteria show [--version N]`／`criteria save --file F`／`criteria list`／`criteria restore --version N` | 準則管理 | `version` |
-| `run [--noninteractive]` | `/agenda` 全流程（補發檢查→鎖→收集→分析→驗證→登記簿→輸出→提交→發布） | `report_code`、`outputs[]`、`sources{}`、`counts{}`、`new_chats`（名稱★）、`needs{line_trust,refine,runtime_sync}`、`rejected_items` 數 |
+| `run [--noninteractive]` | `/agenda` 全流程（補發檢查→鎖→收集→分析→驗證→登記簿→輸出→提交→發布） | `report_code`、`outputs[]`、`sources{}`、`counts{}`、`new_chats_count`（int）、`new_chat_refs`（ref 陣列，不含名稱）、`needs{line_trust,refine,runtime_sync}`、`rejected_items` 數 |
 | ★`show --report R --items 3,5｜--todo T-1,T-2` | 標記前重新列出確認 | 項目標題 |
 | `mark-done --report R --items 3,5｜--todo T-1` | US-13；`maybe_done` 項目確認移除也用它 | 成功／`STALE_REPORT` |
 | `reject-done --todo T-1` | 可能已完成→其實沒做完 | |
