@@ -6,6 +6,7 @@ import copy
 from pathlib import Path
 
 from daily_agenda import ledger, state
+from daily_agenda.fence import fence_untrusted
 from ._common import Deps, emit, require_consent
 
 
@@ -84,10 +85,10 @@ def handle_show(argv: list[str], deps: Deps) -> int:
     for tid in todo_ids:
         for t in ldg:
             if t["id"] == tid:
-                # ★ — show title (untrusted content, but consent is checked)
+                # F4c: fence model-derived titles (originally from third-party)
                 results.append({
                     "todo_id": t["id"],
-                    "title": t.get("title", ""),
+                    "title": fence_untrusted(t.get("title", "")),
                     "priority": t.get("priority", ""),
                     "status": t["status"],
                 })

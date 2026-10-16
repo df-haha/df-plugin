@@ -20,7 +20,8 @@
 
 ```
 config.json  CURRENT  gen/<n>/  gen/<n>.staging/  criteria/v<N>.md  ctx-index.jsonl
-trusted_builds.json  actions/{pending,committing,done}/  runs/<run_id>/  runs/lock  runtime/
+profile/v<N>.md  profile/coverage.json  profile/cadence.json  profile/questions.json
+docs-cache/<batch-id>/  trusted_builds.json  actions/{pending,committing,done}/  runs/<run_id>/  runs/lock  runtime/
 ```
 
 ### config.json（schema_version 1）
@@ -32,7 +33,8 @@ trusted_builds.json  actions/{pending,committing,done}/  runs/<run_id>/  runs/lo
   "consent": { "accepted_at": "2026-10-08T09:00:00+08:00", "text_version": 1 },
   "line": { "enabled": true, "main_database": "qw0b9...729.edb",
             "excluded_chats": [{ "ref": "chat:0123456789abcdef01234567", "name": "家人群組" }] },
-  "mail": { "enabled": true, "folders": ["inbox"] },
+  "mail": { "enabled": true, "folders": ["inbox"],
+            "folder_labels": { "inbox": "收件匣" } },
   "output": { "dir": "D:\\work\\daily-agenda", "formats": ["html"] },
   "refine": { "every_runs": 10, "every_days": 14 },
   "ctx": { "dir": null },
@@ -41,13 +43,14 @@ trusted_builds.json  actions/{pending,committing,done}/  runs/<run_id>/  runs/lo
 }
 ```
 
-`consent` 為 null 或缺 → 任何讀取指令（collect、run、chats list、setup 第 8 步）一律回 `CONSENT_REQUIRED` 並結束，**不得在檢查前讀取任何資料**。
+`consent` 為 null 或缺 → 任何讀取指令（collect、run、chats list、mail folders、mail select、setup 第 8 步）一律回 `CONSENT_REQUIRED` 並結束，**不得在檢查前讀取任何資料**。
 
 ### gen/<n>/ 世代（唯一提交點＝`CURRENT` 檔內容）
 
 ```
 state.json      { "schema_version":1, "generation":n, "created_at",
-                  "checkpoints": { "line": iso|null, "mail": iso|null },
+                  "checkpoints": { "line": iso|null,
+                                   "mail": { "<folder_ref>": iso|null, ... } },
                   "known_chats": [{ "ref","name","first_seen" }],
                   "mail_index": { "<internetMessageId>": "mail:<immutableId>" },   // 保留 60 天
                   "runs_since_refine": int, "last_refine_at": iso|null, "criteria_version": int,
@@ -87,7 +90,9 @@ def output_filename(out_dir: Path, date: str, fmt: str) -> Path   # agenda-YYYY-
 ```json
 {"kind":"meta","run_id":"20261008-0900-ab12","generated_at":"...","tz":"Asia/Taipei",
  "sources":{"line":{"status":"ok|skipped|failed","code":null,"from":"iso","to":"iso","chats":12,"messages":340},
-            "mail":{"status":"ok","code":null,"from":"iso","to":"iso","messages":31},
+            "mail":{"status":"ok|partial|failed","code":null|"MAIL_FOLDER_MISSING"|"MAIL_FOLDER_PARTIAL",
+                   "from":"iso","to":"iso","messages":31,
+                   "missing_folders":["<ref>",...], "failed_folders":["<ref>",...]},
             "calendar":{"status":"ok","code":null,"from":"iso","to":"iso","events":4}},
  "new_chats":[{"ref":"chat:…"}], "batch":{"index":1,"total":1}}
 {"kind":"criteria","version":1,"text":"…判斷準則全文…"}
@@ -100,8 +105,12 @@ def output_filename(out_dir: Path, date: str, fmt: str) -> Path   # agenda-YYYY-
  "untrusted":{"from":"…","to":"…","subject":"…","body":"…"}}
 {"kind":"event","src_id":"event:<id>","start":"iso","end":"iso","all_day":false,"web_link":"https://…",
  "untrusted":{"subject":"…","location":"…","organizer":"…","preview":"…"}}
+{"kind":"profile","untrusted":{"text":"…個人工作檔案全文…"}}
 {"kind":"ctx","path":"relative/path.md","untrusted":{"title":"…","summary":"…"}}
 ```
+
+- `profile`：使用者的個人工作檔案。放在 `untrusted` 裡，因為可能包含推斷出的第三方名稱。分析程序用它判斷 Q1–Q5（是不是找我、誰找我多重要、多急、做完沒、不用看）。
+- **Taint registry 注意事項**：`scan` 和 `raw` 作為 raw-commands.json 的 first-token，任何未來新增的 `scan <x>` 或 `raw <x>` 子命令也會觸發 taint。新增良性子命令時需將其排除或使用不同的頂層命令名稱。
 
 - `src_id` 是全域唯一、穩定的來源 ID；validate.py 以 bundle 內出現過的 `src_id` 集合驗證模型輸出。
 - 排除的對話：在呼叫 LINE 讀取**之前**就過濾（不讀它的訊息）；bundle 中不得出現其 `chat_ref`、名稱、任何訊息（SC-3 測試以此檢查）。
@@ -199,16 +208,56 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 ```
 
 - 各來源獨立：任一來源失敗 → `status:"failed"`、`code`，不推進該來源 checkpoint，其他照常。
+- Mail checkpoint 為 per-folder dict（`{"inbox": iso|null, ...}`）；舊版 scalar 遷移時歸到 `"inbox"`，其餘 `null`（初始窗口）。已移除的 folder key 保留，重新加回時從舊 checkpoint 續讀，避免重讀 14 天。
+- Per-folder 錯誤分型：`GRAPH_TRUNCATED` / `DF_GRAPH_AUTH` / `DF_GRAPH_TOO_OLD` → 整個 mail source 失敗（re-raise）；Graph 404 / 400 ErrorInvalidIdMalformed → `MAIL_FOLDER_MISSING`（`status:"partial"`）；其他 → `MAIL_FOLDER_PARTIAL`（`status:"partial"`）。partial 時其他 folder 照常讀取，只有失敗 folder 的 checkpoint 不推進。
 - 讀取起點 = checkpoint − 2 小時（無 checkpoint 時用 setup 選的天數）；LINE 單次 ≤31 天，超過切段；依 `src_id` 去重。
 - 信件一律 `immutable_ids=True`；以 `mail_index[internetMessageId]` 正規化 src_id（SC-11）。
 - 行事曆每次重抓今天＋3 天，不用 checkpoint。
 - `line_collect.mjs`：`node line_collect.mjs --vendor <dir>`，stdin 一個 JSON 請求 `{"op":"probe"|"recentChats"|"messages", ...}`，stdout 一個 JSON 結果；只 import vendor 的唯讀 reader 函式，**不得 import 任何送出相關模組**；環境變數由 Python 端帶入（`LINE_MCP_PYTHON`、`LINE_MCP_SQLITE3MC_DLL`、`LINE_MCP_MAIN_DATABASE`、`LINE_MCP_TRUSTED_BUILDS`），**不設 `LINE_MCP_EXTENSIONS`**。
 
-## 7. CLI（`python -m daily_agenda <cmd>`）
+## 7. CLI（`python -I -X utf8 -m daily_agenda <cmd>`）
 
-呼叫方式（skill 內）：`uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda <cmd>`。
+呼叫方式（skill 內）：`uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m daily_agenda <cmd>`。`-I`（isolated mode）忽略 PYTHONPATH、cwd、user site-packages；`-X utf8`（UTF-8 mode）讓所有 text stream 預設 UTF-8（取代 `PYTHONIOENCODING` env var，而 `-I` 會忽略該 env var）。Python 3.11+。
 所有指令 stdout 輸出**一個 JSON 物件**（`{"ok":bool,"code":str|null,"message":白話,...}`），exit code 0＝ok、1＝可預期失敗、2＝參數錯。
 除了標 ★ 的指令，輸出**不得含任何原文**（只有筆數、狀態、代碼、路徑、ID）。★ 指令是 setup／互動流程中刻意顯示給使用者看的內容，只在同意之後可執行。
+
+**Root-arg rejection**：`parse_root_args` 在 command 之前只允許 `--progress-file`；任何其他 flag（如 `--bogus`、`-x`）在 command 之前出現 → `ARG_ERROR` exit 2。這堵住 hook 的 flag-swallow 漏洞（H1b）。command 之後的 flag 由各子命令 parser 處理，不受此限。
+
+**Marker lifecycle（M2）**：taint marker 在建立時記錄 `transcript_path`（來自 hook 的 `hookData.transcript_path`）。60 天清理規則：marker 超過 60 天 AND 其 `transcript_path` 指向的檔案已不存在 → 才刪除。legacy marker（無 `transcript_path`）→ 保留（fail closed），因為無法確認 session 是否仍可恢復。
+
+**Path-reference exemption（mechanism 2）**：checkBashTaint 的 mechanism 2 會對 command 中出現在 `<home>/runs|gen|output` 下的路徑觸發 taint。但 canonical DA invocation（通過 `_parseCanonicalDA` 驗證：`uv run --quiet --project ... python -I -X utf8 -m daily_agenda`、project path 為 template 或 realpath 相符）的 flag 值依 subcommand 語意豁免：`--progress-file`（任何 subcommand）和 `progress show|watch --file` → 只接受 `runs/progress/*.jsonl`；`criteria save` / `refine apply --file` → 只接受 `criteria-draft.md`；`profile save --file` → 只接受 `profile-draft.md`；`profile coverage save --file` → 只接受 `coverage-draft.json`；`draft show --file` → 接受三種 draft basename。其他 subcommand 的 `--file` 無豁免。所有 draft 路徑拒絕含 `raw` segment。非 canonical form（project path 不對、非 `-I -X utf8`、metachar、`$`）不豁免。Registry 機制仍優先：raw-emitting subcommand 即使帶合法 progress-file 也一定 taint。
+
+**Taint detection forms（PreToolUse layer 1）**：`_checkRegistryInvocation` 偵測三種 daily_agenda 執行形式——(A) `-m daily_agenda`；(B) `-c` inline code；(C) script-path。詳見 lock-core.mjs。
+
+**Content-based sentinel detection（PostToolUse layer 2，defense-in-depth backstop）**：
+- **Sentinel**：固定 ASCII 字串 `DA-RAW-3f9a`，定義在 `fence.py:RAW_SENTINEL` 與 `raw-commands.json:raw_sentinel`，`test_fence.py::test_sentinel_matches_json` 強制同步。
+- **CLI 輸出印記**：`fence_untrusted(text, raw=True)` 在每條 fence 的三行都印上 sentinel（opening/content/closing），截斷輸出仍帶 sentinel。raw-emitting subcommand（chats/outlook-preview/raw/scan）的 `fence_untrusted` 呼叫帶 `raw=True`；model-derived 文字（criteria show/draft_text/profile/refine changes/ledger titles）維持 `raw=False`，不帶 sentinel。`_neutralize` 同時清除輸入中的 sentinel（attacker text 不能偽造）。
+- **JSONL 磁碟印記**：`collect.py` 寫入的每筆含 `untrusted` 欄位的 record 加 `"_raw": "DA-RAW-3f9a"` 作為**第一個 key**（`head -c N` 截斷仍含 sentinel）。所有 reader 以 `rec.get("kind")` 存取已知 key，忽略未知欄位。`gen/`、`output/` 不印記（路徑 taint 已涵蓋；agenda HTML 印 sentinel 會影響使用者體驗）。`docs-cache/` 不印記（使用者文件，非 raw）。
+- **Raw sample 磁碟印記**：`scan_raw.py:write_raw_sample` 寫的 `.md` 檔（LINE chat、mail folder）每行都前綴 `DA-RAW-3f9a `（含多行 body 拆行後逐行印記）。`stats.json` 第一個 key 為 `"_raw": "DA-RAW-3f9a"`。
+- **PostToolUse hook**：`post-lock.mjs`，註冊在 hooks.json `PostToolUse` 下，matcher `Bash|Read|Grep|Monitor`。讀 `tool_response`：Bash = `{stdout, stderr}`，Read = string 或 structured object（fallback `JSON.stringify`），Grep / Monitor = structured JSON。若 sentinel 出現 → 寫 taint marker（含 `transcript_path`）。fail-safe：parse error / exception → `{}`（不崩潰、不阻擋工具流程）。不匹配 Glob（只回傳路徑）。
+- **config.json path-taint**：`<home>/config.json` 含 `line.excluded_chats[].name`（raw chat names）。`checkReadTaint` 和 `checkBashTaint` mechanism 2 對 `<home>/config.json` 做 exact-path taint。CLI `config get` 的 `_ALLOWED_KEYS` 不含 excluded_chats，不會洩露。
+- **Mechanism-2 bash unescape**：path token 在 canonicalize 前先做 ANSI-C `$'...'` 解碼、unquoted `\x` → `x` 反轉義。關閉 `ru\ns` 和 `$'runs'` bypass。
+- **`run` 不帶 sentinel**：`run` 的 CLI stdout 回傳 `new_chats_count`（int）+ `new_chat_refs`（ref 字串陣列，不含名稱），不呼叫 `fence_untrusted(raw=True)`，因此 PostToolUse 不會 taint。`chats list` 同樣的 chat names 帶 `raw=True` → 會 taint。這是刻意的不對稱（使用者決定 `run` 不鎖定）。
+
+**Draft laundering prevention**：PreToolUse 在 tainted session 中允許 Write/Edit draft 路徑後，將該路徑記錄到 `<daHome>/taint/tainted-drafts.json`（atomic write）。untainted session 中 `_buildExemptSet` 建立的 exempt path 若出現在 tainted-drafts list → 立即 taint（不豁免）。`checkReadTaint` 同理：Read tainted draft → taint。這堵住「tainted session 把 raw content 寫進 draft，untainted session 用 `draft show` 讀回」的漏洞。
+
+**Accepted residual: save-then-show**：tainted session 中 `criteria save` / `profile save` / `refine apply` 寫入的 draft 是 model-derived（AI 從 raw 資料整理出的準則/檔案）。後續 untainted session 的 `criteria show` / `profile show` 以 `fence_untrusted(raw=False)` 回傳該內容，不帶 sentinel → 不 taint。這是 settled decision（model-derived 文字不鎖定）。Draft laundering prevention 只攔「tainted session 直接 Write 的檔案被 `draft show --file` 讀回」的路徑，不攔「CLI 子命令自己讀取已儲存的 criteria/profile」。
+
+**Accepted residuals（content-marker 的設計邊界，不追）**：(1) `$(printf ...)` / `eval` / heredoc 展開後的路徑（shell AST 解析成本不對等）；(2) `jq -r .untrusted.text` / `cut` / `awk` 等 field-extraction transforms 從 JSONL 抽出 raw text 但不攜帶 sentinel（sentinel 在 `_raw` field，不在 `untrusted.text` 裡；Layer 2 的 PostToolUse 在 tool output 中偵測 sentinel，但如果 transform 只輸出 `.untrusted.text` 則 sentinel 不在輸出裡）。這兩類需要對 tool output 做語意分析才能攔截，超出 content-marker 設計範圍。
+
+**PostToolUseFailure**：hooks.json 同時註冊 `PostToolUseFailure`（matcher `Bash|Read|Grep|Monitor`）。失敗事件的 raw 輸出在頂層 `error` 欄位（string，`Exit code N\n<stdout+stderr interleaved>`），不在 `tool_response`。`post-lock.mjs` 依 `hook_event_name` 分支讀取。evidence: code.claude.com/docs/en/hooks#posttoolusefailure（2026-10-16 fetch）。
+
+**Protected-path detection in output（item 3）**：Layer 2 額外檢查 Grep content mode 和 Bash grep-style 輸出中的受保護路徑（`<home>/runs|gen|output`、`output.dir`、`<home>/config.json`）。Grep 僅 explicit `output_mode: 'content'` 觸發 taint（未指定 output_mode 視為 Grep 預設 `files_with_matches`，不含 content，不 taint）。Grep structured response 以 string-leaf walking（遍歷所有字串葉節點）取代 `JSON.stringify`，避免 Windows `\` 被雙重跳脫為 `\\` 後 normalize 產生 `C://Users/...` 無法匹配。Bash 用行首 grep-prefix 啟發式（`<path><rest>:<content>`），並將相對路徑（如 `.daily-agenda/gen/1/agenda.md:1:...`）根據 `hookData.cwd` 解析為絕對路徑後再比對。所有路徑 normalize 時 collapse repeated `/`、處理 MSYS `/c/...` → `c:/...`、大小寫不敏感。排除 JSON value 中的路徑（不在行首）。
+
+**Monitor realtime stream**：Monitor 逐行送入 Claude，PostToolUse 要等 Monitor 完成後才觸發。因此 untainted session 中的 Monitor 在 PreToolUse 階段做 `checkMonitorPreTaint`，採用三層偵測——(1) 模組名稱：`daily_agenda` 作為 whole-token（word-boundary）比對，不做 basename/substring 比對；(2) path-token 比對：tokenize 後 canonicalize 每個 path-like token（含 MSYS `/c/...`、`~`、反斜線、大小寫不敏感），檢查是否在 protected root 內部或等於 protected root；(3) ancestor 偵測（僅限 recursive search 工具：rg/grep -r/find/fd/ag/tree/ls -R）：若任何 path positional（或無 path 時的 cwd）canonicalize 後是 protected root 的上層目錄 → taint。若偵測為 sensitive，必須解析為 canonical `progress watch --file <runs/progress/*.jsonl>`；否則 taint（不 deny）。$(printf)/eval/variable 展開仍是 accepted residual。
+
+**Locked CLI save policy（item 4）**：locked allowlist 和 Python CLI 共用 `raw-commands.json::draft_policy` 的 subcommand→basenames 對應表。`criteria save --file` 只接受 `criteria-draft.md`，`profile save` 只接受 `profile-draft.md`，以此類推。Python 額外檢查：拒絕含 `raw` 路徑段的檔案，拒絕 file content 含 `RAW_SENTINEL`（code `RAW_CONTENT`）。
+
+**Marker write failure（item 5）**：post-lock.mjs `markSessionTainted` 失敗 → 輸出 `{"continue": false, "stopReason": "..."}` 停止整個 session（通用 hook 停止訊號，適用於所有 hook event 包含 PostToolUse 與 PostToolUseFailure）。`appendTaintedDraft` 失敗 → deny Write/Edit。tmp file 使用 `pid.random` 唯一名稱避免並行衝突。evidence: code.claude.com/docs/en/hooks § JSON output — `continue` 是 universal field，"Every event accepts them"、"Takes precedence over any event-specific decision fields"（2026-10-16 fetch）。
+
+**`run` 不帶 sentinel（fact correction）**：`run` stdout 回傳 `new_chats_count`（int）+ `new_chat_refs`（ref 字串陣列，不含名稱），不呼叫 `fence_untrusted`。新 chat 名稱儲存在 state 供 `chats new` 查詢，不透過 `run` stdout 洩露。
+
+**PostToolUse schema（evidence）**：`tool_response` 欄位包含工具的結構化輸出——Bash: `{stdout, stderr, interrupted, isImage}`，Read: raw string 或 structured object，Grep: structured object，Monitor: structured object。PostToolUseFailure: `error` (string)。來源：code.claude.com/docs/en/hooks（2026-10-16 fetch）。
 
 | 指令 | 用途 | 輸出重點 |
 |---|---|---|
@@ -222,17 +271,28 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 | ★`outlook-preview` | setup 第 4 步 | 最近 3 封信主旨＋寄件者、今天行程（給使用者確認） |
 | ★`chats list --days 30` | setup 第 5 步 | `[{ref,name,type,last_at,excluded}]` |
 | `exclude --set REF...｜--add REF｜--remove REF` | setup 第 5 步／之後修改 | excluded 數量 |
-| `ctx index --dir D｜--skip` | setup 第 6 步 | 檔案數 |
+| ★`mail folders` | setup 第 5 步 | `folders[{ref,path,total,unread,well_known,skip_recommended,selected}]`、`complete`（bool）、`skipped[{path,reason}]`（失敗的子資料夾）、`truncated`（截斷原因字串或 null） |
+| ★`mail select --set REF...｜--add REF｜--remove REF [--allow-incomplete]` | setup 第 5 步／之後修改。`--set`/`--add` 對非 well-known ref 做 inventory 驗證；inventory 完整且 ref 不在清單中 → `ARG_ERROR`；inventory 不完整且 ref 不在清單中 → `MAIL_FOLDERS_INCOMPLETE`（加 `--allow-incomplete` → 視使用者已確認該 ref 存在，直接儲存） | selected 數量；自動寫入 `mail.folder_labels` |
+| `ctx index --dir D｜--skip` | setup 第 6 步（**已棄用**，改用 profile） | 檔案數 |
+| `docs convert --path "<p>" [--path ...]` | setup 新步驟：轉換使用者文件 | `files[]`、`skipped_count` |
+| `scan raw --days N` | setup 第 8 步：掃描原始訊息樣本；同時儲存 records.jsonl + source-status.json 供 criteria draft --from-run 重用 | `run_id`、`raw_dir`、`files[]`、`total_chars`、`source_status` |
+| `raw show --todo <id>` | `/agenda` 中查看原始訊息 | `records[]`（fenced）、`missing[]` |
+| `profile show [--version N]`／`profile save --file F`／`profile list`／`profile restore --version N` | 個人工作檔案管理 | `version`、`text`（fenced） |
+| `profile coverage [save --file F]` | 維度覆蓋率管理 | `coverage` |
+| `profile cadence [--set now｜agenda｜refine｜later]` | 設定補充頻率 | `cadence` |
+| `profile next-question [--context agenda｜refine]` | 取得下一個要問的維度。`--context` 只在 cadence 匹配時回傳問題。限速：同一天或同一 generation 只問一題 | `question`、`dim`、`cadence` |
 | `config get`／`config set KEY=VALUE...` | setup 第 7 步（output.dir、output.formats、refine.every_runs、refine.every_days、analysis.model） | 設定摘要 |
-| `criteria draft --days 7｜14｜30` | setup 第 8 步：收集 N 天＋無工具分析 → 草稿檔 | `draft_path` |
+| `criteria draft --days 7｜14｜30 [--from-run <run_id>]` | setup 第 9 步：分析 → 草稿檔。`--from-run` 重用 scan raw 儲存的 records（不再重新收集），包含 profile；驗證 run_id 格式（`YYYYMMDD-HHMM-XXXX`）且路徑在 `<home>/runs/` 下；LINE enabled 時要求 saved status=="ok"（skipped/failed 均拒絕）；days 從 scan-meta.json 取 | `draft_path`、`draft_text`（fenced） |
+| `draft new --kind criteria｜profile｜coverage` | 在 `<home>/runs/drafts/<ts-hex>/` 建立空白（或以目前版本為種子的）草稿檔，回傳 `draft_path`。供 Claude Write 後再 save/apply。檔名必須是 `criteria-draft.md`/`profile-draft.md`/`coverage-draft.json`（符合 lock-core hook allowlist） | `draft_path`、`kind`、`seeded` |
+| `draft show --file F` | 回傳 fenced 草稿文字，Claude 不需直接 Read runs/ 下的檔案。`--file` 限制為 runs/ 下的已知草稿檔名 | `text`（fenced）、`draft_path` |
 | ★`criteria show [--version N]`／`criteria save --file F`／`criteria list`／`criteria restore --version N` | 準則管理 | `version` |
-| `run [--noninteractive]` | `/agenda` 全流程（補發檢查→鎖→收集→分析→驗證→登記簿→輸出→提交→發布） | `report_code`、`outputs[]`、`sources{}`、`counts{}`、`new_chats`（名稱★）、`needs{line_trust,refine,runtime_sync}`、`rejected_items` 數 |
+| `run [--noninteractive]` | `/agenda` 全流程（補發檢查→鎖→收集→分析→驗證→登記簿→輸出→提交→發布） | `report_code`、`outputs[]`、`sources{}`、`counts{}`、`new_chats_count`（int）、`new_chat_refs`（ref 陣列，不含名稱）、`needs{line_trust,refine,runtime_sync}`、`rejected_items` 數 |
 | ★`show --report R --items 3,5｜--todo T-1,T-2` | 標記前重新列出確認 | 項目標題 |
 | `mark-done --report R --items 3,5｜--todo T-1` | US-13；`maybe_done` 項目確認移除也用它 | 成功／`STALE_REPORT` |
 | `reject-done --todo T-1` | 可能已完成→其實沒做完 | |
 | `dismiss --todo T-1` | 不再追蹤 | |
 | `restore T-xxxx` | 摺疊→移回待辦 | |
-| `refine status`／`refine draft`／`refine apply --file F`／`refine skip` | 修正準則（US-9） | `due`、`reason`、`draft_path` |
+| `refine status`／`refine draft`／`refine apply --file F`／`refine skip` | 修正準則（US-9） | `due`、`reason`、`draft_path`、`draft_text`（fenced） |
 | `schedule install --time HH:MM｜remove｜status` | setup 第 7 步 | |
 | `uninstall [--purge]` | 回滾 | |
 

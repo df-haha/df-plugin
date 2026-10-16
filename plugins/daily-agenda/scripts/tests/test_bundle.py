@@ -85,6 +85,32 @@ class TestWriteBundle:
         assert len(ctx_lines) == 1
         assert ctx_lines[0]["path"] == "notes.md"
 
+    def test_profile_included(self, tmp_path: Path) -> None:
+        result = {
+            "run_id": "r", "generated_at": NOW_ISO, "tz": "Asia/Taipei",
+            "source_status": {}, "new_chats": [], "records": [], "criteria_version": 1,
+        }
+        path = tmp_path / "bundle.jsonl"
+        write_bundle(path, result=result, criteria=None, open_todos=[], ctx=[],
+                     profile_text="## A 我是誰\n營運部主管")
+
+        lines = path.read_text(encoding="utf-8").strip().split("\n")
+        profile_lines = [json.loads(l) for l in lines if '"kind": "profile"' in l or '"kind":"profile"' in l]
+        assert len(profile_lines) == 1
+        assert "營運部主管" in profile_lines[0]["untrusted"]["text"]
+
+    def test_profile_omitted_when_none(self, tmp_path: Path) -> None:
+        result = {
+            "run_id": "r", "generated_at": NOW_ISO, "tz": "Asia/Taipei",
+            "source_status": {}, "new_chats": [], "records": [], "criteria_version": 1,
+        }
+        path = tmp_path / "bundle.jsonl"
+        write_bundle(path, result=result, criteria=None, open_todos=[], ctx=[],
+                     profile_text=None)
+
+        text = path.read_text(encoding="utf-8")
+        assert '"kind": "profile"' not in text and '"kind":"profile"' not in text
+
 
 class TestSC3ExcludedChatZeroResidual:
     """SC-3 byte-level check: excluded chat ref, name, and messages must not

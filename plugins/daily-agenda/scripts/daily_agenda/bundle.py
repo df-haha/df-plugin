@@ -19,6 +19,7 @@ def write_bundle(
     criteria: str | None,
     open_todos: list[dict[str, Any]],
     ctx: list[dict[str, Any]],
+    profile_text: str | None = None,
     batch_index: int = 1,
     batch_total: int = 1,
 ) -> None:
@@ -57,6 +58,13 @@ def write_bundle(
             "kind": "criteria",
             "version": result.criteria_version if hasattr(result, "criteria_version") else result.get("criteria_version", 1),
             "text": criteria,
+        }))
+
+    # -- profile (untrusted: may contain inferred third-party names) --
+    if profile_text:
+        lines.append(jsonl_line({
+            "kind": "profile",
+            "untrusted": {"text": profile_text},
         }))
 
     # -- open todos --

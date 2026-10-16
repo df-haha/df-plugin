@@ -114,10 +114,11 @@ def handle(argv: list[str], deps: Deps) -> int:
                         return {"ok": False, "code": "LOCAL_READER_FAILED"}
                 return {"ok": False, "code": "LINE_RUNTIME_MISSING"}
 
-            detect_result = line_detect.detect_main_database(
-                db_dir=db_dir,
-                probe=_detect_probe,
-            )
+            with deps.progress.heartbeat():
+                detect_result = line_detect.detect_main_database(
+                    db_dir=db_dir,
+                    probe=_detect_probe,
+                )
 
         if detect_result["status"] == "ok":
             main_db = detect_result["database"]
@@ -150,12 +151,13 @@ def handle(argv: list[str], deps: Deps) -> int:
                 return {"ok": False, "code": code}
         return {"ok": False, "code": "LINE_RUNTIME_MISSING"}
 
-    result = trust.bootstrap_trust(
-        deps.home,
-        exe_info_reader=lambda _p: exe_info,  # already read
-        probe=_probe_with_db,
-        now=now,
-        noninteractive=deps.noninteractive,
-        exe=exe_path,
-    )
+    with deps.progress.heartbeat():
+        result = trust.bootstrap_trust(
+            deps.home,
+            exe_info_reader=lambda _p: exe_info,  # already read
+            probe=_probe_with_db,
+            now=now,
+            noninteractive=deps.noninteractive,
+            exe=exe_path,
+        )
     return emit(result)

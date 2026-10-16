@@ -1,5 +1,5 @@
 {
-  "description": "daily-agenda 縱深防護：攔下非代理路徑的 LINE 送出類工具。matcher 限定只對 LINE 送出類工具觸發 hook，所以 hook 壞掉只影響 LINE 送出（fail-closed），不影響其他工具（fail-open）。",
+  "description": "daily-agenda 縱深防護。(1) LINE guard。(2) PreToolUse taint lock：command-form + path-reference。(3) PostToolUse + PostToolUseFailure：sentinel + protected-path 偵測。",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,6 +8,40 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.mjs\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/lock.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Read|Grep|Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-lock.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|Read|Grep|Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-lock.mjs\"",
             "timeout": 10
           }
         ]
