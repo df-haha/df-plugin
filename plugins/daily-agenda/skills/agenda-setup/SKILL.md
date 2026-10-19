@@ -182,6 +182,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
 告訴使用者：
 - 「設定完成。之後每天打 `/agenda` 就會產生彙整檔，存在 <output.dir>。」
 - 「想改排除的對話、信箱資料夾、輸出位置或排程，再執行 `/agenda-setup` 即可。」
+- 「使用 daily-agenda 時請不要開『略過權限確認』模式（bypass permissions）。LINE 和信件內容是別人寫的，萬一裡面藏了騙 AI 的指令，Claude 要寄信、連外網時跳出的確認視窗，是你把關的最後一道防線；看到不是你要的動作就按拒絕。」
 
 ## 解除安裝
 

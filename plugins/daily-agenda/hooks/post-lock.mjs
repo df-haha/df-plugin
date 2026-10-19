@@ -3,10 +3,10 @@
 /**
  * PostToolUse + PostToolUseFailure hook: content-based taint detection.
  *
- * Layer 2 backstop — scans tool output for:
- *  (a) the raw sentinel (DA-RAW-3f9a) — makes shell-form bypasses irrelevant
- *  (b) protected-path references in Grep content / Bash grep-style output —
- *      catches ancestor Grep hitting unstamped gen/output files
+ * Layer 2 backstop — taints the session when tool output contains the raw
+ * sentinel (DA-RAW-3f9a), which makes shell-form bypasses irrelevant.
+ * (Guessing raw content from protected paths in output was removed: it
+ * missed many output shapes and tainted unrelated sessions.)
  *
  * Registered for BOTH PostToolUse and PostToolUseFailure (failed Bash exit
  * still carries stdout in the `error` field).
@@ -16,7 +16,7 @@
  * NOT matched: Glob (returns paths only).
  *
  * Fail-safe: on parse errors or any exception, output {} (no-op).
- * When markSessionTainted fails, emit decision:block to end the turn.
+ * When markSessionTainted fails, emit continue:false to stop the session.
  * Never crashes the tool flow.
  */
 
@@ -24,11 +24,9 @@ import { readFileSync } from 'node:fs';
 import { sanitizeSessionId } from './lock-core.mjs';
 import {
   resolveHome, isSessionTainted, markSessionTainted,
-  cleanupOldMarkers, loadSentinel, readExtraTaintPrefixes,
+  cleanupOldMarkers, loadSentinel,
 } from './lock-io.mjs';
-import {
-  extractText, buildProtectedPrefixes, checkProtectedPaths,
-} from './post-lock-core.mjs';
+import { extractText } from './post-lock-core.mjs';
 
 // ---------------------------------------------------------------------------
 // Output helpers
@@ -51,11 +49,6 @@ const outputStop = (stopReason) => {
     stopReason,
   }));
 };
-
-// Functions extracted to post-lock-core.mjs for testability:
-// extractText, buildProtectedPrefixes, checkProtectedPaths,
-// normForComparison, collectStringLeaves, matchesProtectedPrefix,
-// resolveAgainstCwd
 
 // ---------------------------------------------------------------------------
 // Main
@@ -89,27 +82,8 @@ try {
   // Extract text from the appropriate field based on event type
   const text = extractText(hookData);
 
-  // Check 1: sentinel detection
-  const sentinel = loadSentinel();
-  let shouldTaint = false;
-  let taintReason = '';
-
-  if (text.includes(sentinel)) {
-    shouldTaint = true;
-    taintReason = `raw sentinel detected in ${toolName} output`;
-  }
-
-  // Check 2: protected-path references in grep-style output
-  if (!shouldTaint && text) {
-    const extraPrefixes = readExtraTaintPrefixes(daHome);
-    const protectedPrefixes = buildProtectedPrefixes(daHome, extraPrefixes);
-    if (checkProtectedPaths(hookData, text, protectedPrefixes)) {
-      shouldTaint = true;
-      taintReason = `tool output references protected DA path`;
-    }
-  }
-
-  if (shouldTaint) {
+  if (text.includes(loadSentinel())) {
+    const taintReason = `raw sentinel detected in ${toolName} output`;
     const marked = markSessionTainted(daHome, sanitizedId, taintReason, transcriptPath);
     if (!marked) {
       // Item 5a: marker write failed — block the turn so raw content
