@@ -39,8 +39,7 @@ def write_launcher(h: Path, *, plugin_root: Path, uv: str) -> Path:
         "@echo off\r\n"
         "setlocal\r\n"
         "set DAILY_AGENDA_NONINTERACTIVE=1\r\n"
-        "set PYTHONIOENCODING=utf-8\r\n"
-        f'"{uv}" run --quiet --project "{scripts}" python -m daily_agenda run --noninteractive'
+        f'"{uv}" run --quiet --project "{scripts}" python -I -X utf8 -m daily_agenda run --noninteractive'
         f' > "{log}" 2>&1\r\n'
         "exit /b %ERRORLEVEL%\r\n"
     )

@@ -30,8 +30,10 @@ export const deriveDisplay = (payload) => {
  * @param {{target: {chat_ref: string, chat_name: string, chat_type: string}, content: string}} payload
  */
 const deriveLineReply = (payload) => {
-  const { chat_name, chat_type } = payload.target;
-  const targetDisplay = `LINE ${chat_type === 'group' ? '群組' : '私訊'}「${chat_name}」`;
+  const { chat_ref, chat_name, chat_type } = payload.target;
+  // F7: show both resolved name and ref for transparency
+  const refSuffix = chat_ref ? ` (${chat_ref})` : '';
+  const targetDisplay = `LINE ${chat_type === 'group' ? '群組' : '私訊'}「${chat_name}」${refSuffix}`;
   return {
     target_display: targetDisplay,
     content_display: payload.content,

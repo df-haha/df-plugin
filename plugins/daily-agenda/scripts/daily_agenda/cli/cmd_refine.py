@@ -8,9 +8,10 @@ from datetime import datetime
 from pathlib import Path
 
 from daily_agenda import analyze, criteria, state, validate
+from daily_agenda.fence import fence_untrusted
 from daily_agenda.fsutil import jsonl_line
 from daily_agenda.ledger import feedback_signals
-from ._common import Deps, emit, require_consent
+from ._common import Deps, emit, require_consent, validate_file_flag
 
 
 def _write_refine_bundle(
@@ -19,6 +20,7 @@ def _write_refine_bundle(
     criteria_text: str,
     criteria_version: int,
     signals: list[dict],
+    profile_text: str | None = None,
 ) -> None:
     """Write a feedback.jsonl bundle for the refine analyzer."""
     lines: list[str] = []
@@ -29,6 +31,13 @@ def _write_refine_bundle(
         "version": criteria_version,
         "text": criteria_text,
     }))
+
+    # profile (untrusted — may contain inferred third-party names)
+    if profile_text:
+        lines.append(jsonl_line({
+            "kind": "profile",
+            "untrusted": {"text": profile_text},
+        }))
 
     # feedback lines — untrusted text nested under "untrusted"
     for sig in signals:
@@ -114,6 +123,10 @@ def handle(argv: list[str], deps: Deps) -> int:
         runs_dir = h / "runs" / run_id
         runs_dir.mkdir(parents=True, exist_ok=True)
 
+        # Load profile for refine bundle
+        from daily_agenda import profile as _profile
+        profile_text = _profile.read_latest(h)
+
         # Write feedback bundle
         bundle_path = runs_dir / "feedback.jsonl"
         _write_refine_bundle(
@@ -121,17 +134,22 @@ def handle(argv: list[str], deps: Deps) -> int:
             criteria_text=criteria_text,
             criteria_version=base_version,
             signals=signals,
+            profile_text=profile_text,
         )
 
         # Run analyzer
+        progress = deps.progress
         try:
             prompt = analyze.load_prompt("refine")
             bundle_bytes = bundle_path.read_bytes()
-            analyzer_output = analyze.run_analyzer(
-                bundle_bytes, prompt,
-                model=cfg.get("analysis", {}).get("model"),
-                timeout_s=cfg.get("analysis", {}).get("timeout_s", 600),
-            )
+            progress.event("analyze_batch", i=1, n=1)
+            with progress.heartbeat():
+                analyzer_output = analyze.run_analyzer(
+                    bundle_bytes, prompt,
+                    model=cfg.get("analysis", {}).get("model"),
+                    timeout_s=cfg.get("analysis", {}).get("timeout_s", 600),
+                )
+            progress.event("analyze_batch_done", i=1, n=1)
             draft_text, changes = validate.validate_refine_draft(
                 analyzer_output.output,
             )
@@ -150,20 +168,27 @@ def handle(argv: list[str], deps: Deps) -> int:
             encoding="utf-8",
         )
 
+        # F4d: fence change summaries/reasons (model-derived from third-party)
+        fenced_changes = []
+        for ch in changes:
+            fenced_changes.append({
+                "summary": fence_untrusted(ch.get("summary", "")) if ch.get("summary") else "",
+                "reason": fence_untrusted(ch.get("reason", "")) if ch.get("reason") else "",
+            })
+
         return emit({
             "ok": True, "code": None,
             "draft_path": str(draft_path),
+            "draft_text": fence_untrusted(draft_text),
             "base_version": base_version,
             "feedback_count": len(signals),
-            "changes": changes,
+            "changes": fenced_changes,
         })
 
     elif sub == "apply":
-        file_path: str | None = None
-        for i, arg in enumerate(argv):
-            if arg == "--file" and i + 1 < len(argv):
-                file_path = argv[i + 1]
-
+        file_path, err = validate_file_flag(argv, h, policy_key="refine apply")
+        if err is not None:
+            return err
         if not file_path:
             return emit({"ok": False, "code": "ARG_ERROR", "detail": "usage: refine apply --file F"}, exit_code=2)
 

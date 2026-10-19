@@ -91,15 +91,121 @@ def check_line_running(runner: Runner) -> dict[str, Any]:
     return _check("line_running", running, "LINE_NOT_RUNNING")
 
 
-def check_environment(*, runner: Runner = subprocess.run, is_windows: bool | None = None) -> dict[str, Any]:
+def check_environment(
+    *,
+    runner: Runner = subprocess.run,
+    is_windows: bool | None = None,
+    plugin_root: Path | None = None,
+) -> dict[str, Any]:
     """Run every setup-step-1 check. LINE not running is reported but Outlook can continue."""
     windows = os.name == "nt" if is_windows is None else is_windows
     if not windows:
         checks = [_check("platform", False, "NOT_WINDOWS")]
         return {"ok": False, "checks": checks}
-    checks = [_check("platform", True), check_claude(runner), check_node(runner),
-              check_uv(runner), check_line_running(runner)]
+    checks = [
+        _check("platform", True),
+        check_claude(runner),
+        check_node(runner),
+        check_uv(runner),
+        check_lock_hook(runner=runner, plugin_root=plugin_root),
+        check_line_running(runner),
+    ]
     return {"ok": all(c["ok"] for c in checks), "checks": checks}
+
+
+# ---------------------------------------------------------------------------
+# F8: lock hook self-test
+# ---------------------------------------------------------------------------
+
+_LOCK_SELFTEST_TIMEOUT_S = 15
+_LOCK_SELFTEST_SESSION = "selftest-envcheck"
+
+
+def check_lock_hook(
+    *,
+    runner: Runner = subprocess.run,
+    plugin_root: Path | None = None,
+    tmp_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Run the lock hook with a tainted fixture and verify it denies.
+
+    Creates a temporary DA home with a taint marker, feeds a WebFetch
+    PreToolUse fixture on stdin, and checks for a deny response.
+    Cross-platform: only requires ``node`` on PATH (not Windows-specific).
+
+    Parameters
+    ----------
+    runner : callable
+        subprocess.run or compatible.
+    plugin_root : Path
+        The plugin root (contains hooks/lock.mjs).
+    tmp_dir : Path, optional
+        Parent directory for the temporary DA home. Cleaned up after.
+    """
+    # 1. Check node is available
+    node_exe = _which("node")
+    if not node_exe:
+        return _check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE")
+
+    # 2. Resolve hook path
+    if plugin_root is None:
+        plugin_root = Path(__file__).resolve().parents[2]
+    hook_path = plugin_root / "hooks" / "lock.mjs"
+    if not hook_path.exists():
+        return _check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE")
+
+    # 3. Create a temp DA home with a taint marker
+    import tempfile
+    base_dir = tmp_dir or Path(tempfile.gettempdir())
+    base_dir.mkdir(parents=True, exist_ok=True)
+    da_home = base_dir / f"da-selftest-{os.getpid()}"
+    taint_dir = da_home / "taint"
+    taint_dir.mkdir(parents=True, exist_ok=True)
+    marker = taint_dir / _LOCK_SELFTEST_SESSION
+    marker.write_text('{"tainted_at":"selftest"}', encoding="utf-8")
+
+    try:
+        # 4. Build the stdin fixture
+        fixture = json.dumps({
+            "tool_name": "WebFetch",
+            "tool_input": {"url": "https://selftest.invalid"},
+            "session_id": _LOCK_SELFTEST_SESSION,
+        })
+
+        # 5. Run the hook
+        env = {**os.environ, "DAILY_AGENDA_HOME": str(da_home)}
+        try:
+            proc = runner(
+                [node_exe, str(hook_path)],
+                input=fixture,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=_LOCK_SELFTEST_TIMEOUT_S,
+                env=env,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return _check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE")
+
+        # 6. Parse result
+        try:
+            result = json.loads(proc.stdout.strip())
+        except (json.JSONDecodeError, ValueError):
+            return _check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE")
+
+        decision = result.get("hookSpecificOutput", {}).get("permissionDecision")
+        if decision == "deny":
+            return _check("lock_hook", True)
+        else:
+            return _check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE")
+
+    finally:
+        # 7. Clean up
+        try:
+            shutil.rmtree(da_home)
+        except OSError:
+            pass
 
 
 def parse_org(subject: str) -> str | None:

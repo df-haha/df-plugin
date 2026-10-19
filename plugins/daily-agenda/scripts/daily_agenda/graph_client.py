@@ -207,6 +207,7 @@ class GraphSource:
         self._ready = threading.Event()
         self._stop = asyncio.Event()
         self._error: Exception | None = None
+        self._has_folder_list: bool = False
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -257,6 +258,9 @@ class GraphSource:
             props = schema.get("properties", {})
             if "immutable_ids" not in props:
                 raise GraphClientError("DF_GRAPH_TOO_OLD", f"{name} lacks immutable_ids")
+
+        # folder_list is optional (newer df-graph only); record presence
+        self._has_folder_list = "folder_list" in tool_map
 
     def _shutdown(self) -> None:
         if self._loop and not self._loop.is_closed():
@@ -326,6 +330,32 @@ class GraphSource:
         parsed = _parse_mail_get(raw)
         parsed["id"] = message_id
         return parsed
+
+    def folder_list(self, parent_id: str = "") -> list[dict[str, Any]]:
+        """List mail folders.  Returns parsed JSON list.
+
+        Raises ``DF_GRAPH_TOO_OLD`` if the server lacks ``folder_list``.
+        Unlike ``mail_list``/``calendar_list``, ``folder_list`` returns
+        bare JSON (no summary line) — we parse it with ``json.loads``
+        directly instead of ``_parse_summary_json``.
+        """
+        if not self._has_folder_list:
+            raise GraphClientError(
+                "DF_GRAPH_TOO_OLD",
+                "folder_list tool not available; update df-graph plugin",
+            )
+        args: dict[str, Any] = {"include_hidden": False}
+        if parent_id:
+            args["parent_id"] = parent_id
+        raw = self._call_tool("folder_list", args)
+        _check_error(raw)
+        try:
+            items = json.loads(raw)
+        except json.JSONDecodeError:
+            raise GraphClientError("GRAPH_FAILED", "Unexpected folder_list format")
+        if not isinstance(items, list):
+            raise GraphClientError("GRAPH_FAILED", "Unexpected folder_list format")
+        return items
 
     def calendar_list(self, *, days_ahead: int = 3, days_back: int = 1) -> list[dict[str, Any]]:
         """List calendar events.  Returns parsed JSON items."""

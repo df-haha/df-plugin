@@ -78,6 +78,8 @@ class TestConsentGating:
         ["chats", "list", "--days", "30"],
         ["line-detect"],
         ["trust", "probe"],
+        ["mail", "folders"],
+        ["mail", "select", "--set", "inbox"],
         ["criteria", "draft", "--days", "7"],
         ["refine", "draft"],
         ["run"],
@@ -196,7 +198,10 @@ class TestCriteria:
         from daily_agenda import state as _st
         _st.accept_consent(tmp_path, NOW)
 
-        draft = tmp_path / "draft.md"
+        # Item3: draft must be under runs/ for validate_file_flag
+        runs_dir = tmp_path / "runs" / "test-run"
+        runs_dir.mkdir(parents=True)
+        draft = runs_dir / "criteria-draft.md"
         draft.write_text("# My criteria\nTest content", encoding="utf-8")
 
         code, obj = _run_cli(["criteria", "save", "--file", str(draft)], deps, capsys)
@@ -210,9 +215,13 @@ class TestCriteria:
 
     def test_restore(self, tmp_path: Path, capsys: Any) -> None:
         deps = _deps(tmp_path)
-        d1 = tmp_path / "d1.md"
+        runs_dir = tmp_path / "runs" / "test-run"
+        runs_dir.mkdir(parents=True)
+        d1 = runs_dir / "criteria-draft.md"
         d1.write_text("Version 1", encoding="utf-8")
-        d2 = tmp_path / "d2.md"
+        runs_dir2 = tmp_path / "runs" / "test-run-2"
+        runs_dir2.mkdir(parents=True)
+        d2 = runs_dir2 / "criteria-draft.md"
         d2.write_text("Version 2", encoding="utf-8")
 
         _run_cli(["criteria", "save", "--file", str(d1)], deps, capsys)

@@ -1,5 +1,10 @@
 """Scan a personal context directory and produce ctx-index.jsonl.
 
+.. deprecated::
+    Use the personal work profile (``profile``) command instead.
+    This module is kept for backward compatibility but is no longer
+    used by the setup flow.  Bundles should prefer the ``profile`` record.
+
 Indexes .md, .txt, .docx files — filename + title + first-300-char summary.
 Skips symlinks, junctions, hidden files, and files > 5 MB.
 """

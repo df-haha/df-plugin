@@ -173,21 +173,31 @@ def _run_pipeline(
     try:
         result = collect.collect(
             cfg, st, now=now, line=line_src, graph=graph_src, run_id=run_id,
+            progress=deps.progress,
         )
     except collect.CollectError as exc:
         return emit({"ok": False, "code": exc.code})
 
-    # Load criteria and ctx
+    # Load criteria, ctx, and profile
     crit_text = criteria.read_latest(h)
     ctx_entries = _load_ctx(h)
+    from daily_agenda import profile as _profile
+    profile_text = _profile.read_latest(h)
 
     # Write bundle
     runs_dir = h / "runs" / run_id
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     open_todos = [t for t in ldg if t["status"] in ("open", "maybe_done")]
+    # Account for profile + criteria overhead in batch sizing
     batch_bytes = cfg.get("analysis", {}).get("batch_bytes", 300_000)
-    batches = bundle.split_batches(result.records, batch_bytes)
+    overhead = 0
+    if profile_text:
+        overhead += len(profile_text.encode("utf-8")) + 100
+    if crit_text:
+        overhead += len(crit_text.encode("utf-8")) + 100
+    effective_batch = max(batch_bytes - overhead, batch_bytes // 3)
+    batches = bundle.split_batches(result.records, effective_batch)
     if not batches:
         batches = [[]]  # At least one batch (may have zero records)
 
@@ -208,18 +218,32 @@ def _run_pipeline(
         batch_result = _BatchResult(batch_records, result, i + 1, len(batches))
         bundle.write_bundle(
             bp, result=batch_result, criteria=crit_text, open_todos=open_todos,
-            ctx=ctx_entries, batch_index=i + 1, batch_total=len(batches),
+            ctx=ctx_entries, profile_text=profile_text,
+            batch_index=i + 1, batch_total=len(batches),
         )
         bundle_paths.append(bp)
 
-    # Analyze
+    # Analyze — with progress events per batch
+    progress = deps.progress
     model_output: dict[str, Any]
     try:
         prompt = analyze.load_prompt("agenda")
-        batch_bytes_list = [bp.read_bytes() for bp in bundle_paths]
-        model_output = analyze.analyze_batches(batch_bytes_list, prompt,
-                                                model=cfg.get("analysis", {}).get("model"),
-                                                timeout_s=cfg.get("analysis", {}).get("timeout_s", 600))
+        n_batches = len(bundle_paths)
+        items: list[Any] = []
+        for bi, bp in enumerate(bundle_paths, 1):
+            progress.event("analyze_batch", i=bi, n=n_batches)
+            with progress.heartbeat():
+                ar = analyze.run_analyzer(
+                    bp.read_bytes(), prompt,
+                    model=cfg.get("analysis", {}).get("model"),
+                    timeout_s=cfg.get("analysis", {}).get("timeout_s", 600),
+                )
+            progress.event("analyze_batch_done", i=bi, n=n_batches)
+            batch_items = ar.output.get("items")
+            if not isinstance(batch_items, list):
+                raise analyze.AnalyzerError("MODEL_OUTPUT_INVALID")
+            items.extend(batch_items)
+        model_output = {"schema_version": 1, "items": items}
     except analyze.AnalyzerError as exc:
         return emit({"ok": False, "code": exc.code})
 
@@ -254,7 +278,8 @@ def _run_pipeline(
     events = [r for r in result.records if r.get("kind") == "event"]
     skipped = [item for item in val_result.items if item.get("action") == "skip"]
     new_chat_names = [c.get("name", "") for c in result.new_chats]
-    new_chats_output = [{"ref": c.get("ref", ""), "name": c.get("name", "")} for c in result.new_chats]
+    # F4b: emit only refs+count, not attacker-controlled names
+    new_chat_refs = [c.get("ref", "") for c in result.new_chats]
     src_index = _build_src_index(result.records)
 
     # Build meta dict for view
@@ -304,6 +329,8 @@ def _run_pipeline(
         "run_id": run_id,
         "at": now.isoformat(),
         "sources": {k: {"status": v.get("status")} for k, v in result.source_status.items()},
+        # F4b: store new_chats in state so `chats new` can retrieve names
+        "new_chats": [{"ref": c.get("ref", ""), "name": c.get("name", "")} for c in result.new_chats],
     }
 
     # Stage, commit, publish
@@ -366,7 +393,8 @@ def _run_pipeline(
         "outputs": output_paths,
         "sources": sources_summary,
         "counts": counts,
-        "new_chats": new_chats_output,
+        "new_chats_count": len(new_chat_refs),
+        "new_chat_refs": new_chat_refs,
         "needs": {
             "line_trust": needs_line_trust,
             "refine": needs_refine,

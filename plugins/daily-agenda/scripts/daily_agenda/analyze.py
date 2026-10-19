@@ -20,7 +20,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable
 
 ISOLATION_FLAGS: tuple[str, ...] = (
     "-p",
@@ -33,7 +33,13 @@ ISOLATION_FLAGS: tuple[str, ...] = (
     "--verbose",
 )
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
-PROMPT_FILES = {"agenda": "analyze-prompt.md", "criteria": "criteria-prompt.md", "refine": "refine-prompt.md"}
+PROMPT_FILES = {
+    "agenda": "analyze-prompt.md",
+    "criteria": "criteria-prompt.md",
+    "criteria_observe": "criteria-observe-prompt.md",
+    "criteria_reduce": "criteria-reduce-prompt.md",
+    "refine": "refine-prompt.md",
+}
 _FENCE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -142,16 +148,3 @@ def run_analyzer(stdin_bytes: bytes, prompt: str, *, model: str | None = None,
     return AnalyzerResult(output=extract_json(result["result"]), ms=ms,
                           usage=dict(result.get("usage") or {}))
 
-
-def analyze_batches(batches: Iterable[bytes], prompt: str, **kwargs: Any) -> dict[str, Any]:
-    """Analyze each batch separately (plan D-9) and concatenate their ``items``."""
-    items: list[Any] = []
-    count = 0
-    for batch in batches:
-        result = run_analyzer(batch, prompt, **kwargs)
-        batch_items = result.output.get("items")
-        if not isinstance(batch_items, list):
-            raise AnalyzerError("MODEL_OUTPUT_INVALID")
-        items.extend(batch_items)
-        count += 1
-    return {"schema_version": 1, "items": items, "batches": count}

@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from daily_agenda import criteria, state
+from daily_agenda.analyze import AnalyzerResult
 from daily_agenda.cli import main
 from daily_agenda.cli._common import Deps
 from tests.conftest import FakeGraph, FakeLine, make_line_chat, make_line_message, make_mail_item, make_calendar_item
@@ -93,8 +94,8 @@ class TestRunPipeline:
         h = _setup_home(tmp_path)
         deps = _deps(h)
 
-        with patch("daily_agenda.analyze.analyze_batches") as mock_analyzer:
-            mock_analyzer.return_value = _fake_analyzer_result()
+        with patch("daily_agenda.analyze.run_analyzer") as mock_analyzer:
+            mock_analyzer.return_value = AnalyzerResult(output=_fake_analyzer_result(), ms=0)
             code, obj = _run(["run"], deps, capsys)
 
         assert obj["ok"] is True
@@ -110,8 +111,8 @@ class TestRunPipeline:
         h = _setup_home(tmp_path)
         deps = _deps(h)
 
-        with patch("daily_agenda.analyze.analyze_batches") as mock_analyzer:
-            mock_analyzer.return_value = _fake_analyzer_result()
+        with patch("daily_agenda.analyze.run_analyzer") as mock_analyzer:
+            mock_analyzer.return_value = AnalyzerResult(output=_fake_analyzer_result(), ms=0)
             _run(["run"], deps, capsys)
 
         assert state.current_generation(h) == 1
@@ -144,8 +145,8 @@ class TestRunPipeline:
             graph_factory=lambda: fake_graph,
         )
 
-        with patch("daily_agenda.analyze.analyze_batches") as mock_analyzer:
-            mock_analyzer.return_value = {"schema_version": 1, "items": []}
+        with patch("daily_agenda.analyze.run_analyzer") as mock_analyzer:
+            mock_analyzer.return_value = AnalyzerResult(output={"schema_version": 1, "items": []}, ms=0)
             code, obj = _run(["run"], deps, capsys)
 
         # The JSON output must not contain the sentinel
@@ -156,7 +157,7 @@ class TestRunPipeline:
         h = _setup_home(tmp_path)
         deps = _deps(h)
 
-        with patch("daily_agenda.analyze.analyze_batches") as mock_analyzer:
+        with patch("daily_agenda.analyze.run_analyzer") as mock_analyzer:
             from daily_agenda.analyze import AnalyzerError
             mock_analyzer.side_effect = AnalyzerError("ANALYZER_TIMEOUT")
             code, obj = _run(["run"], deps, capsys)
@@ -186,8 +187,8 @@ class TestRunPipeline:
             noninteractive=True,
         )
 
-        with patch("daily_agenda.analyze.analyze_batches") as mock_analyzer:
-            mock_analyzer.return_value = {"schema_version": 1, "items": []}
+        with patch("daily_agenda.analyze.run_analyzer") as mock_analyzer:
+            mock_analyzer.return_value = AnalyzerResult(output={"schema_version": 1, "items": []}, ms=0)
             code, obj = _run(["run", "--noninteractive"], deps, capsys)
 
         assert obj["ok"] is True

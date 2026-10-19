@@ -30,6 +30,7 @@ _MD_ESCAPE_CHARS = "\\`*_[]()<!>#|"
 # Source status → Chinese label.
 _STATUS_LABELS: dict[str, str] = {
     "ok": "已讀取",
+    "partial": "部分讀取",
     "skipped": "略過",
 }
 
@@ -125,11 +126,15 @@ def build_view(
 
         if status == "failed":
             message = humanize(code) if code else "讀取失敗"
+        elif status == "partial":
+            label = _STATUS_LABELS["partial"]
+            hint = humanize(code) if code else ""
+            message = f"{label}（{hint}）" if hint else label
         else:
             message = _STATUS_LABELS.get(status, status)
 
         coverage = ""
-        if status == "ok":
+        if status in ("ok", "partial"):
             f = src_status.get("from", "")
             t = src_status.get("to", "")
             if f and t:

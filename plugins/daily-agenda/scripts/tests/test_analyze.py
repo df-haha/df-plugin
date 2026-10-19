@@ -131,20 +131,6 @@ def test_error_message_never_contains_model_text():
     assert secret not in str(e.value)
 
 
-def test_analyze_batches_merges_items():
-    outputs = iter([
-        '{"schema_version":1,"items":[{"action":"skip","src_ids":["a"],"reason":"r"}]}',
-        '{"schema_version":1,"items":[{"action":"skip","src_ids":["b"],"reason":"r"}]}',
-    ])
-
-    def runner(cmd, **kwargs):
-        return subprocess.CompletedProcess(cmd, 0, stdout=_events(result_text=next(outputs)), stderr=b"")
-
-    merged = analyze.analyze_batches([b"batch1", b"batch2"], "P", runner=runner, claude="claude")
-    assert [i["src_ids"] for i in merged["items"]] == [["a"], ["b"]]
-    assert merged["batches"] == 2
-
-
 def test_prompt_templates_exist_and_forbid_tools():
     agenda = analyze.load_prompt("agenda")
     criteria = analyze.load_prompt("criteria")

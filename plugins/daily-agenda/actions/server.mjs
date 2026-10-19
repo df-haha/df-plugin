@@ -12,6 +12,7 @@
  */
 
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import {
   parseMessage, successResponse, errorResponse,
@@ -123,6 +124,27 @@ export const createServer = (options = {}) => {
     return { isError: true, content: [{ type: 'text', text: `Unknown kind: ${kind}` }] };
   };
 
+  /** F7: resolve chat display name from state.json known_chats by ref. */
+  const resolveKnownChatName = (chatRef) => {
+    try {
+      const statePath = path.join(home, 'gen', String(_currentGen()), 'state.json');
+      const raw = readFileSync(statePath, 'utf8');
+      const st = JSON.parse(raw);
+      for (const c of (st.known_chats || [])) {
+        if (c.ref === chatRef) return c.name || null;
+      }
+    } catch { /* state unreadable — use model name as fallback */ }
+    return null;
+  };
+
+  /** Read current generation number from CURRENT file (matches state.py). */
+  const _currentGen = () => {
+    try {
+      const genPath = path.join(home, 'CURRENT');
+      return parseInt(readFileSync(genPath, 'utf8').trim(), 10);
+    } catch { return 0; }
+  };
+
   const prepareLineReply = async (params) => {
     const { target } = params;
     let content = params.content;
@@ -131,12 +153,22 @@ export const createServer = (options = {}) => {
     if (!target || typeof target !== 'object') {
       return errorContent('INVALID_TARGET', 'target must be an object with chat_ref, chat_name, chat_type');
     }
-    const { chat_ref, chat_name, chat_type } = target;
+    const { chat_ref, chat_type } = target;
+    let { chat_name } = target;
     if (!chat_ref || !CHAT_REF_RE.test(chat_ref)) {
       return errorContent('INVALID_CHAT_REF', 'target.chat_ref must match chat:<24hex>');
     }
-    if (!chat_name || typeof chat_name !== 'string' || chat_name.length > 200) {
-      return errorContent('INVALID_CHAT_NAME', 'target.chat_name must be a non-empty string (max 200)');
+
+    // F7: resolve display name from known_chats instead of trusting model
+    const resolvedName = resolveKnownChatName(chat_ref);
+    if (resolvedName) {
+      chat_name = resolvedName;
+    } else if (!chat_name || typeof chat_name !== 'string') {
+      return errorContent('UNKNOWN_CHAT_REF', `chat_ref ${chat_ref} not found in known_chats and no fallback name`);
+    }
+
+    if (chat_name.length > 200) {
+      return errorContent('INVALID_CHAT_NAME', 'chat_name exceeds 200 characters');
     }
     if (!['direct', 'group'].includes(chat_type)) {
       return errorContent('INVALID_CHAT_TYPE', 'target.chat_type must be "direct" or "group"');
