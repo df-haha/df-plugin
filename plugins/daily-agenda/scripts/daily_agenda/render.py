@@ -126,7 +126,7 @@ def build_view(
 
     Returns a dict ready for ``render()``, including ``report_index``.
     """
-    si = src_index or {}
+    si = _with_carryover_labels(src_index or {}, ledger, state)
     skipped_items = list(skipped) if skipped else []
     all_records = records or []
     all_chat_digests = chat_digests or []
@@ -667,6 +667,35 @@ def _derive_group_label(
             return folder
         return label[len(_MAIL_LABEL_PREFIX):] or _NO_SOURCE_GROUP
     return label
+
+
+def _with_carryover_labels(si: dict, ledger: list[dict], state: dict) -> dict:
+    """Add readable labels for ledger src_ids that are not in this run's records.
+
+    Carried-over todos cite messages from earlier runs; without this their
+    source label falls back to the raw src_id, which is unreadable and makes
+    every todo its own group.  LINE src_ids embed the chat_ref
+    (``line:<chat_ref>:<msg>``), resolved to a name via ``state.known_chats``.
+    """
+    names = {c.get("ref", ""): c.get("name", "") for c in state.get("known_chats", []) or []}
+    merged = dict(si)
+    for t in ledger:
+        for sid in t.get("src_ids", []):
+            if sid in merged or not isinstance(sid, str):
+                continue
+            kind, _, rest = sid.partition(":")
+            if kind == "line":
+                # chat_ref is "chat:<id>"; the message ref after it may itself contain ":".
+                name = names.get(":".join(rest.split(":", 2)[:2]), "")
+                label = f"{_LINE_LABEL_PREFIX}{name}" if name else "LINE 對話"
+            elif kind == "mail":
+                label = "信件"
+            elif kind == "event":
+                label = "行事曆"
+            else:
+                label = _NO_SOURCE_GROUP
+            merged[sid] = {"label": label, "href": None}
+    return merged
 
 
 def _group_other_todos(
