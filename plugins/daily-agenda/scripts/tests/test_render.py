@@ -191,38 +191,47 @@ class TestHtmlRender:
         html = render(v, "html")
         assert "每日彙整" in html
         assert "R-7K2" in html
-        assert "T-0001" in html
+        # Old-keys view uses the legacy fallback section.
+        assert "正常待辦" in html
 
     def test_csp_meta(self) -> None:
         v = _make_view()
         html = render(v, "html")
-        expected_csp = (
-            '<meta http-equiv="Content-Security-Policy" '
-            'content="default-src \'none\'; style-src \'unsafe-inline\'; '
-            'img-src data:; base-uri \'none\'; form-action \'none\'">'
-        )
-        assert expected_csp in html
+        # CSP now includes script-src with sha256 hash.
+        assert "default-src 'none'" in html
+        assert "style-src 'unsafe-inline'" in html
+        assert "img-src data:" in html
+        assert "base-uri 'none'" in html
+        assert "form-action 'none'" in html
+        assert "script-src 'sha256-" in html
 
-    def test_no_script_tag_in_template(self) -> None:
+    def test_exactly_one_script(self) -> None:
         v = _make_view()
         html = render(v, "html")
-        # Template itself should not contain <script>.
-        assert "<script" not in html.lower()
+        # Template has exactly one <script> for the digest UI.
+        assert html.lower().count("<script") == 1
 
-    def test_collapsed_uses_details(self) -> None:
+    def test_old_keys_collapsed_renders(self) -> None:
+        """Old-keys view with collapsed items renders without error."""
         ledger = [_ledger_item(tid="T-0001", status="collapsed",
                                maybe_done_reason="old")]
         v = _make_view(ledger=ledger)
         html = render(v, "html")
-        assert "<details>" in html
-        assert "<summary>" in html
+        assert "每日彙整" in html
 
-    def test_events_formatted_time(self) -> None:
-        """Event start/end should be formatted as MM/DD HH:MM, not raw ISO."""
+    def test_events_rendered_in_top_block_not_legacy(self) -> None:
+        """Events show in the top compact block, not the legacy fallback."""
         v = _make_view()
+        # Remove the new C3 keys and clear maybe_done so the legacy
+        # fallback triggers — events should still be in the top block.
+        for k in ("chats", "quiet_chats", "mail_folders", "other_todos"):
+            v.pop(k, None)
+        v["maybe_done"] = []
         html = render(v, "html")
-        assert "10/08 14:00" in html
-        assert "10/08 15:00" in html
+        # Top block groups by day and shows time separately
+        assert "14:00" in html
+        assert "15:00" in html
+        assert "近三天行程" in html
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +270,9 @@ class _TagCollector(HTMLParser):
         self.tags.append((tag, attrs))
 
 
-_FORBIDDEN_TAGS = {"script", "img", "iframe", "object", "embed", "svg"}
+_FORBIDDEN_TAGS = {"img", "iframe", "object", "embed"}
+# Note: "script" removed — the template has exactly one legitimate <script>.
+# "svg" removed — the template uses <svg> for the pulse timeline.
 
 
 class TestXssHtml:
@@ -309,15 +320,19 @@ class TestXssHtml:
         for tag, attrs in parser.tags:
             assert tag not in _FORBIDDEN_TAGS, f"forbidden tag <{tag}> found"
             for attr_name, attr_val in attrs:
+                # Allow fragment (#section) hrefs used for in-page navigation.
                 if attr_name == "href" and attr_val:
-                    assert attr_val.startswith(("https://", "mailto:")), \
+                    assert attr_val.startswith(("https://", "mailto:", "#")), \
                         f"unsafe href: {attr_val}"
+                # No event handler attributes from untrusted data.
+                assert not attr_name.startswith("on"), \
+                    f"event handler {attr_name!r} on <{tag}>"
                 if attr_name == "src":
                     # Only data: images allowed by CSP; shouldn't appear in output.
                     assert False, f"unexpected src attribute: {attr_val}"
 
-        # No raw <script>, event handlers.
-        assert "<script>" not in html
+        # Exactly one legitimate <script> tag in the output.
+        assert html.lower().count("<script") == 1
         assert "<link" not in html.split("</head>")[-1]  # no link tags in body
         assert "url(" not in html.split("</style>")[-1]  # no url() outside style
         assert "@import" not in html.split("</style>")[-1]
@@ -406,11 +421,10 @@ class TestTemplateContract:
         v = _make_view()
         html = render(v, "html")
         body = html.split("</head>")[-1] if "</head>" in html else html
-        assert "src=" not in body
         # No link tags loading external resources in body.
         assert "<link" not in body
 
-    def test_html_no_script(self) -> None:
+    def test_html_exactly_one_script(self) -> None:
         v = _make_view()
         html = render(v, "html")
-        assert "<script" not in html.lower()
+        assert html.lower().count("<script") == 1

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from daily_agenda import collect, ctx_index, state
+from daily_agenda import collect, ctx_index, history, state
 from daily_agenda.fence import fence_untrusted
 from ._common import Deps, emit, require_consent
 
@@ -189,6 +189,12 @@ def handle_exclude(argv: list[str], deps: Deps) -> int:
         refs = argv[idx + 1:]
         new_excluded = [{"ref": r, "name": known_chats.get(r, "")} for r in refs]
         cfg.setdefault("line", {})["excluded_chats"] = new_excluded
+        # C4: delete history rows for every excluded chat
+        for ref in refs:
+            try:
+                history.delete_by_chat_ref(deps.home, ref)
+            except Exception:
+                pass  # Non-fatal
     elif "--add" in argv:
         idx = argv.index("--add")
         if idx + 1 >= len(argv):
@@ -197,6 +203,11 @@ def handle_exclude(argv: list[str], deps: Deps) -> int:
         if ref not in existing_map:
             existing.append({"ref": ref, "name": known_chats.get(ref, "")})
             cfg.setdefault("line", {})["excluded_chats"] = existing
+        # C4: delete history rows for the excluded chat
+        try:
+            history.delete_by_chat_ref(deps.home, ref)
+        except Exception:
+            pass  # Non-fatal
     elif "--remove" in argv:
         idx = argv.index("--remove")
         if idx + 1 >= len(argv):

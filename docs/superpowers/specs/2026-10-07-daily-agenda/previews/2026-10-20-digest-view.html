@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'sha256-d6MlmPpUHgwR+8ASsO8kTrOBnoqZ/+JDxP1ocC5doAY='; base-uri 'none'; form-action 'none'">
+<title>每日彙整 10/20（預覽）</title>
+<style>
+:root {
+  --paper: #F4F6F4; --surface: #FFFFFF; --ink: #1E2B2A; --ink-soft: #4A5856;
+  --ink-faint: #6B7775; --rule: #DCE2DF; --moss: #2E6A57; --moss-tint: #E3EFEA;
+  --signal: #A6500A; --signal-tint: #FBEEDF; --alarm: #B42318; --alarm-tint: #FBE7E5;
+  --quiet: #8A9592; --focus: #2E6A57;
+  --r-sm: 4px; --r-md: 8px;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #131A19; --surface: #1B2423; --ink: #E6ECEA; --ink-soft: #B9C4C1;
+    --ink-faint: #93A09D; --rule: #2E3A38; --moss: #7FC4AA; --moss-tint: #1F3530;
+    --signal: #F2A65A; --signal-tint: #3A2A18; --alarm: #FF8A7E; --alarm-tint: #3D1F1C;
+    --quiet: #6E7B78; --focus: #7FC4AA;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: var(--s5); }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font-family: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif;
+  font-size: 16px; line-height: 1.65; font-variant-numeric: tabular-nums;
+}
+a { color: var(--moss); }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: var(--r-sm); }
+.skip { position: absolute; left: -999px; } .skip:focus { left: var(--s4); top: var(--s4); background: var(--surface); padding: var(--s2) var(--s3); z-index: 100; }
+
+.shell { display: grid; grid-template-columns: 210px minmax(0, 860px); gap: var(--s6); max-width: 1140px; margin: 0 auto; padding: var(--s6) var(--s5) 120px; }
+.rail { position: sticky; top: var(--s5); align-self: start; }
+.rail .date { font-size: 30px; font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; }
+.rail .weekday { color: var(--ink-faint); font-size: 14px; margin-bottom: var(--s5); }
+.rail nav a { display: flex; justify-content: space-between; align-items: baseline; padding: var(--s2) var(--s3); margin: 0 calc(var(--s3) * -1); border-radius: var(--r-sm); color: var(--ink); text-decoration: none; min-height: 44px; align-items: center; }
+.rail nav a:hover { background: var(--moss-tint); }
+.rail nav .n { color: var(--ink-faint); font-size: 14px; }
+.rail nav .n b { color: var(--signal); font-weight: 600; }
+.rail .src { margin-top: var(--s5); padding-top: var(--s4); border-top: 1px solid var(--rule); font-size: 13px; color: var(--ink-faint); line-height: 1.8; }
+.rail .src .ok::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--moss); margin-right: 6px; vertical-align: 1px; }
+
+.lede { font-size: 22px; font-weight: 500; line-height: 1.5; margin: 0 0 var(--s2); max-width: 34em; }
+.lede-sub { color: var(--ink-soft); margin: 0 0 var(--s7); }
+
+section { margin-bottom: var(--s7); }
+section > h2 { font-size: 22px; font-weight: 700; margin: 0 0 var(--s2); }
+.section-note { color: var(--ink-soft); margin: 0 0 var(--s4); font-size: 15px; }
+
+/* LINE digest */
+.chat { background: var(--surface); border: 1px solid var(--rule); border-left: 4px solid var(--rule); border-radius: var(--r-md); padding: var(--s4) var(--s5); margin-bottom: var(--s3); }
+.chat.needs { border-left-color: var(--signal); }
+.chat.todo { border-left-color: var(--moss); }
+.chat-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s2) var(--s3); }
+.chat-head h3 { font-size: 18px; margin: 0; font-weight: 700; }
+.kind { font-size: 13px; color: var(--ink-faint); }
+.state { margin-left: auto; font-size: 13px; font-weight: 600; padding: 2px var(--s2); border-radius: var(--r-sm); }
+.state.needs { color: var(--signal); background: var(--signal-tint); }
+.state.todo { color: var(--moss); background: var(--moss-tint); }
+.pulse { display: block; width: 100%; height: 26px; margin: var(--s3) 0 var(--s2); }
+.pulse-legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-faint); margin-top: calc(var(--s1) * -1); }
+.digest { margin: var(--s3) 0 0; padding-left: 1.2em; }
+.digest li { margin-bottom: var(--s1); }
+.reply { margin-top: var(--s4); background: var(--signal-tint); border-radius: var(--r-sm); padding: var(--s3) var(--s4); }
+.reply h4, .proposed h4 { margin: 0 0 var(--s1); font-size: 14px; font-weight: 700; }
+.reply h4 { color: var(--signal); }
+.reply p { margin: 0 0 var(--s2); } .reply p:last-child { margin: 0; }
+.who { font-weight: 600; } .when { color: var(--ink-soft); font-size: 14px; }
+.proposed { margin-top: var(--s3); }
+.proposed h4 { color: var(--moss); }
+.proposed ul { margin: 0; padding-left: 1.2em; }
+.proposed a { font-size: 14px; }
+details.history { margin-top: var(--s3); border-top: 1px dashed var(--rule); padding-top: var(--s2); }
+details.history summary { cursor: pointer; color: var(--ink-soft); font-size: 14px; min-height: 32px; display: flex; align-items: center; }
+details.history ol { list-style: none; margin: var(--s2) 0 0; padding: 0; font-size: 14px; color: var(--ink-soft); }
+details.history li { display: grid; grid-template-columns: 4.5em 1fr; gap: var(--s3); padding: var(--s1) 0; }
+details.history li span { color: var(--ink-faint); }
+.quiet-list { background: transparent; border: 1px dashed var(--rule); border-radius: var(--r-md); padding: var(--s3) var(--s5); color: var(--ink-soft); font-size: 15px; }
+.quiet-list summary { cursor: pointer; min-height: 32px; }
+.quiet-list ul { columns: 2; margin: var(--s2) 0 0; padding-left: 1.2em; }
+
+/* Mail */
+.folder { margin-bottom: var(--s5); }
+.folder h3 { font-size: 16px; margin: 0 0 var(--s2); color: var(--ink-soft); font-weight: 600; display: flex; gap: var(--s2); align-items: baseline; }
+.folder h3 small { font-weight: 400; color: var(--ink-faint); font-size: 13px; }
+.mail { display: grid; grid-template-columns: 7.5em 1fr auto; gap: var(--s1) var(--s4); background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-md); padding: var(--s3) var(--s4); margin-bottom: var(--s2); }
+.mail .from { font-weight: 600; font-size: 15px; }
+.mail .subj { font-weight: 600; }
+.mail .sum { grid-column: 2 / 4; color: var(--ink-soft); font-size: 15px; }
+.mail .tag { font-size: 13px; font-weight: 600; white-space: nowrap; align-self: start; padding: 2px var(--s2); border-radius: var(--r-sm); }
+.mail.needs { border-left: 4px solid var(--signal); } .mail.needs .tag { color: var(--signal); background: var(--signal-tint); }
+.mail.fyi .tag { color: var(--ink-faint); }
+.mail .time { color: var(--ink-faint); font-size: 13px; }
+
+/* Todos */
+.todo-row { display: grid; grid-template-columns: 2.2em 1fr auto; gap: var(--s2) var(--s4); align-items: start; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-md); padding: var(--s3) var(--s4); margin-bottom: var(--s2); transition: opacity 160ms ease-out, background-color 160ms ease-out; }
+.todo-row .no { font-weight: 700; color: var(--ink-faint); padding-top: 6px; }
+.todo-row .title { font-weight: 600; margin: 4px 0 2px; }
+.todo-row .src { font-size: 14px; color: var(--ink-faint); }
+.todo-row .why { font-size: 14px; color: var(--ink-soft); margin-top: 2px; }
+.pri { font-size: 12px; font-weight: 700; padding: 1px 6px; border-radius: var(--r-sm); margin-right: var(--s2); vertical-align: 2px; }
+.pri.P0 { color: var(--alarm); background: var(--alarm-tint); } .pri.P1 { color: var(--signal); background: var(--signal-tint); } .pri.P2 { color: var(--ink-faint); background: var(--paper); }
+.controls { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: flex-end; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r-sm); overflow: hidden; }
+.seg label { position: relative; }
+.seg input { position: absolute; opacity: 0; inset: 0; }
+.seg span { display: inline-flex; align-items: center; min-height: 40px; padding: 0 var(--s3); font-size: 14px; cursor: pointer; border-left: 1px solid var(--rule); color: var(--ink-soft); }
+.seg label:first-child span { border-left: 0; }
+.seg input:checked + span { background: var(--moss); color: var(--surface); font-weight: 600; }
+.seg input[value="drop"]:checked + span { background: var(--alarm); }
+.seg input:focus-visible + span { outline: 3px solid var(--focus); outline-offset: -3px; }
+select { font: inherit; font-size: 14px; min-height: 40px; padding: 0 var(--s2); border: 1px solid var(--rule); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); }
+.todo-row.is-done { opacity: .62; } .todo-row.is-done .title { text-decoration: line-through; }
+.todo-row.is-drop { opacity: .5; background: var(--paper); } .todo-row.is-drop .title { text-decoration: line-through; }
+.maybe { border-style: dashed; }
+.maybe .why::before { content: "AI 認為可能已完成："; font-weight: 600; }
+h3.sub { font-size: 16px; color: var(--ink-soft); margin: var(--s5) 0 var(--s2); }
+
+.dock { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--rule); padding: var(--s3) var(--s5); z-index: 40; }
+.dock-inner { max-width: 1140px; margin: 0 auto; display: flex; gap: var(--s4); align-items: center; flex-wrap: wrap; }
+.dock .count { color: var(--ink-soft); font-size: 15px; }
+.dock .count b { color: var(--ink); }
+.btn { font: inherit; font-weight: 600; min-height: 44px; padding: 0 var(--s5); border-radius: var(--r-sm); border: 1px solid var(--moss); background: var(--moss); color: var(--surface); cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--moss); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.out { display: none; width: 100%; }
+.out.show { display: block; }
+.out textarea { width: 100%; min-height: 120px; font: 14px/1.6 "Noto Sans TC", "Microsoft JhengHei", sans-serif; padding: var(--s3); border: 1px solid var(--rule); border-radius: var(--r-sm); background: var(--paper); color: var(--ink); }
+.out .hint { font-size: 14px; color: var(--ink-soft); margin: var(--s1) 0 var(--s2); }
+.toast { font-size: 14px; color: var(--moss); font-weight: 600; min-height: 1.4em; }
+
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; gap: var(--s4); padding: var(--s4) var(--s4) 160px; }
+  .rail { position: static; }
+  .rail nav { display: flex; gap: var(--s2); overflow-x: auto; }
+  .rail nav a { margin: 0; border: 1px solid var(--rule); flex: 0 0 auto; gap: var(--s2); }
+  .rail .src { display: none; }
+  .lede { font-size: 19px; }
+  .chat { padding: var(--s3) var(--s4); }
+  .mail { grid-template-columns: 1fr auto; } .mail .from { grid-column: 1 / 3; } .mail .sum { grid-column: 1 / 3; }
+  .todo-row { grid-template-columns: 2em 1fr; } .controls { grid-column: 1 / 3; justify-content: flex-start; }
+  .quiet-list ul { columns: 1; }
+}
+/* v2: todos live beside their chat / under their mail */
+.chat-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--s5); margin-top: var(--s2); }
+.chat-body.solo { grid-template-columns: minmax(0, 1fr); }
+.chat-todos { border-left: 1px solid var(--rule); padding-left: var(--s4); }
+.chat-todos > h4, .mail-todos > h4 { margin: 0 0 var(--s2); font-size: 14px; font-weight: 700; color: var(--moss); }
+.todo-row.inline { display: block; padding: var(--s3); margin-bottom: var(--s2); background: var(--paper); border-color: transparent; }
+.todo-row.inline .title { margin: 0 0 2px; font-size: 15px; }
+.todo-row.inline .why { margin-bottom: var(--s2); }
+.todo-row.inline .controls { justify-content: flex-start; }
+.todo-row.inline .seg span { padding: 0 10px; }
+.mail-todos { grid-column: 1 / -1; margin-top: var(--s2); padding-top: var(--s3); border-top: 1px dashed var(--rule); }
+.mail-todos .todo-row.inline .controls { margin-top: var(--s1); }
+.quiet-digest { margin: var(--s3) 0 var(--s1); }
+.quiet-digest > div { display: grid; grid-template-columns: 11em 1fr; gap: var(--s4); padding: var(--s2) 0; border-top: 1px solid var(--rule); }
+.quiet-digest dt { font-weight: 600; color: var(--ink); }
+.quiet-digest dt span { display: block; font-weight: 400; font-size: 13px; color: var(--ink-faint); }
+.quiet-digest dd { margin: 0; color: var(--ink-soft); }
+.todo-row.changed { box-shadow: inset 3px 0 0 var(--moss); }
+.out-actions { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s2); }
+@media (max-width: 860px) {
+  .chat-body { grid-template-columns: 1fr; gap: var(--s3); }
+  .chat-todos { border-left: 0; padding-left: 0; border-top: 1px solid var(--rule); padding-top: var(--s3); }
+  .todo-row.inline { display: block; }
+  .quiet-digest > div { grid-template-columns: 1fr; gap: var(--s1); }
+  .dock { padding: var(--s2) var(--s4); }
+  .dock-inner { gap: var(--s2) var(--s3); }
+  .out textarea { min-height: 96px; max-height: 30vh; }
+  .out .hint { display: none; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到主要內容</a>
+<div class="shell">
+  <aside class="rail" aria-label="導覽">
+    <div class="date">10/20</div>
+    <div class="weekday">星期一，報表 R-PH2</div>
+    <nav>
+      <a href="#line">LINE 對話 <span class="n"><b>3 待回</b>／9 則</span></a>
+      <a href="#mail">信件 <span class="n"><b>2 待回</b>／7 封</span></a>
+      <a href="#todos">其他待辦 <span class="n">3 項</span></a>
+    </nav>
+    <div class="src">
+      <div class="ok">LINE：10/19 08:30 起，104 則</div>
+      <div class="ok">信件：6 個資料夾，264 封</div>
+      <div class="ok">行事曆：今天起 3 天，10 筆</div>
+    </div>
+  </aside>
+
+  <main id="main">
+    <p class="lede">今天有 5 則訊息在等你回覆，其中 2 則跟明天的金馬站盤點有關。</p>
+    <p class="lede-sub">建議待辦就放在各對話和信件旁邊，看完直接決定保留、完成或刪除；全部看完再按最下面的「產生確認文字」。</p>
+
+    <!-- ① LINE -->
+    <section id="line" aria-labelledby="h-line">
+      <h2 id="h-line">LINE 對話整理</h2>
+      <p class="section-note">橫條上的點是訊息時間，橘色的點是需要你回覆的訊息。</p>
+
+      <article class="chat needs" aria-labelledby="c1">
+        <div class="chat-head">
+          <h3 id="c1">金馬站營運群</h3><span class="kind">群組，14 人</span>
+          <span class="state needs">2 則待回</span>
+        </div>
+        <svg class="pulse" viewBox="0 0 800 26" preserveAspectRatio="none" role="img" aria-label="這段期間 23 則訊息，集中在昨天下午與今天早上，2 則需要回覆">
+          <line x1="0" y1="13" x2="800" y2="13" stroke="var(--rule)" stroke-width="2"/>
+          <g fill="var(--ink-faint)"><circle cx="40" cy="13" r="3"/><circle cx="58" cy="13" r="3"/><circle cx="210" cy="13" r="3"/><circle cx="226" cy="13" r="3"/><circle cx="238" cy="13" r="3"/><circle cx="251" cy="13" r="3"/><circle cx="262" cy="13" r="3"/><circle cx="300" cy="13" r="3"/><circle cx="318" cy="13" r="3"/><circle cx="620" cy="13" r="3"/><circle cx="640" cy="13" r="3"/><circle cx="655" cy="13" r="3"/><circle cx="672" cy="13" r="3"/><circle cx="700" cy="13" r="3"/><circle cx="716" cy="13" r="3"/><circle cx="740" cy="13" r="3"/><circle cx="760" cy="13" r="3"/></g>
+          <g fill="var(--signal)"><circle cx="274" cy="13" r="6"/><circle cx="728" cy="13" r="6"/></g>
+        </svg>
+        <div class="pulse-legend"><span>10/19 08:30</span><span>10/20 08:30</span></div>
+        <div class="chat-body">
+          <div>
+            <ul class="digest">
+              <li>明天（10/21）上午 9 點月底盤點，陳站長請各區先回報現場鐵料噸數。</li>
+              <li>地磅二號機昨天下午異常，維修廠商排今天 14:00 到場。</li>
+              <li>新進人員林同學本週起支援夜班，排班表已更新在群組記事本。</li>
+            </ul>
+            <div class="reply">
+              <h4>需要你回覆</h4>
+              <p><span class="who">陳站長</span> <span class="when">10/19 15:42</span><br>問你盤點報表要用新版還是沿用上個月格式，他今天下班前要發給各區。</p>
+              <p><span class="who">吳主任</span> <span class="when">10/20 07:55</span><br>請你確認地磅維修的費用是否走本月預算，廠商到場前要先下單。</p>
+            </div>
+            <details class="history">
+              <summary>過往重點（最近 3 次）</summary>
+              <ol>
+                <li><span>10/18</span>陳站長提醒月底盤點時間，你回「格式我再確認」。</li>
+                <li><span>10/16</span>地磅二號機第一次回報讀數不穩，當時判斷先觀察。</li>
+                <li><span>10/14</span>討論夜班人力不足，決定向人資申請支援。</li>
+              </ol>
+            </details>
+          </div>
+          <aside class="chat-todos" aria-label="金馬站營運群的建議待辦">
+            <h4>建議待辦</h4>
+            <div class="todo-row inline" id="t1" data-no="1" data-pri="P0">
+              <div class="title"><span class="pri P0">P0</span>#1 回覆陳站長盤點報表格式</div>
+              <div class="why">他今天下班前要發給各區。</div>
+              <div class="controls" role="group" aria-label="#1 的處理方式"></div>
+            </div>
+            <div class="todo-row inline" id="t2" data-no="2" data-pri="P0">
+              <div class="title"><span class="pri P0">P0</span>#2 確認地磅維修費用歸屬並下單</div>
+              <div class="why">廠商 14:00 到場前要先下單。</div>
+              <div class="controls" role="group" aria-label="#2 的處理方式"></div>
+            </div>
+          </aside>
+        </div>
+      </article>
+
+      <article class="chat needs" aria-labelledby="c2">
+        <div class="chat-head">
+          <h3 id="c2">林佳穎</h3><span class="kind">一對一</span>
+          <span class="state needs">1 則待回</span>
+        </div>
+        <svg class="pulse" viewBox="0 0 800 26" preserveAspectRatio="none" role="img" aria-label="這段期間 4 則訊息，1 則需要回覆">
+          <line x1="0" y1="13" x2="800" y2="13" stroke="var(--rule)" stroke-width="2"/>
+          <g fill="var(--ink-faint)"><circle cx="480" cy="13" r="3"/><circle cx="496" cy="13" r="3"/><circle cx="512" cy="13" r="3"/></g>
+          <g fill="var(--signal)"><circle cx="530" cy="13" r="6"/></g>
+        </svg>
+        <div class="pulse-legend"><span>10/19 08:30</span><span>10/20 08:30</span></div>
+        <div class="chat-body">
+          <div>
+            <ul class="digest"><li>傳來加盟申請者的第二次面談時間候選：10/23 下午或 10/24 上午。</li></ul>
+            <div class="reply">
+              <h4>需要你回覆</h4>
+              <p><span class="who">林佳穎</span> <span class="when">10/19 21:10</span><br>請你從兩個時段選一個，她要回覆申請者。</p>
+            </div>
+            <details class="history"><summary>過往重點（最近 1 次）</summary><ol><li><span>10/15</span>第一次面談完成，你說「可以進下一關」。</li></ol></details>
+          </div>
+          <aside class="chat-todos" aria-label="林佳穎的建議待辦">
+            <h4>建議待辦</h4>
+            <div class="todo-row inline" id="t3" data-no="3" data-pri="P1">
+              <div class="title"><span class="pri P1">P1</span>#3 回覆林佳穎加盟面談時段</div>
+              <div class="why">10/23 下午或 10/24 上午擇一。</div>
+              <div class="controls" role="group" aria-label="#3 的處理方式"></div>
+            </div>
+          </aside>
+        </div>
+      </article>
+
+      <article class="chat todo" aria-labelledby="c3">
+        <div class="chat-head">
+          <h3 id="c3">廢鐵報價小組</h3><span class="kind">群組，6 人</span>
+          <span class="state todo">有建議待辦</span>
+        </div>
+        <svg class="pulse" viewBox="0 0 800 26" preserveAspectRatio="none" role="img" aria-label="這段期間 9 則訊息，沒有需要你回覆的訊息">
+          <line x1="0" y1="13" x2="800" y2="13" stroke="var(--rule)" stroke-width="2"/>
+          <g fill="var(--ink-faint)"><circle cx="120" cy="13" r="3"/><circle cx="134" cy="13" r="3"/><circle cx="150" cy="13" r="3"/><circle cx="380" cy="13" r="3"/><circle cx="394" cy="13" r="3"/><circle cx="410" cy="13" r="3"/><circle cx="590" cy="13" r="3"/><circle cx="604" cy="13" r="3"/><circle cx="618" cy="13" r="3"/></g>
+        </svg>
+        <div class="pulse-legend"><span>10/19 08:30</span><span>10/20 08:30</span></div>
+        <div class="chat-body">
+          <div>
+            <ul class="digest">
+              <li>本週重廢報價比上週每公斤高 0.3 元，業務建議週三前鎖定兩家回收商。</li>
+              <li>黃專員已整理三家報價比較表，放在群組相簿。</li>
+            </ul>
+            <details class="history"><summary>過往重點（最近 2 次）</summary><ol><li><span>10/17</span>報價開始上漲，決定這週再比價一次。</li><li><span>10/13</span>上月出貨對帳完成，無差異。</li></ol></details>
+          </div>
+          <aside class="chat-todos" aria-label="廢鐵報價小組的建議待辦">
+            <h4>建議待辦</h4>
+            <div class="todo-row inline" id="t4" data-no="4" data-pri="P1">
+              <div class="title"><span class="pri P1">P1</span>#4 週三前決定兩家回收商並通知業務</div>
+              <div class="why">截止 10/22。</div>
+              <div class="controls" role="group" aria-label="#4 的處理方式"></div>
+            </div>
+          </aside>
+        </div>
+      </article>
+
+      <article class="chat" aria-labelledby="c4">
+        <div class="chat-head">
+          <h3 id="c4">gov-recycle-ai 專案</h3><span class="kind">群組，5 人</span>
+          <span class="state">已看過，無需處理</span>
+        </div>
+        <svg class="pulse" viewBox="0 0 800 26" preserveAspectRatio="none" role="img" aria-label="這段期間 6 則訊息，沒有需要你回覆的訊息">
+          <line x1="0" y1="13" x2="800" y2="13" stroke="var(--rule)" stroke-width="2"/>
+          <g fill="var(--ink-faint)"><circle cx="330" cy="13" r="3"/><circle cx="344" cy="13" r="3"/><circle cx="358" cy="13" r="3"/><circle cx="372" cy="13" r="3"/><circle cx="660" cy="13" r="3"/><circle cx="676" cy="13" r="3"/></g>
+        </svg>
+        <div class="pulse-legend"><span>10/19 08:30</span><span>10/20 08:30</span></div>
+        <div class="chat-body solo">
+          <ul class="digest"><li>工程師回報辨識模型新版測試完成，準確率報告週五會議再看。</li></ul>
+        </div>
+      </article>
+
+      <details class="quiet-list">
+        <summary>另外 5 個對話是閒聊或通知，不需要處理（展開看統整）</summary>
+        <dl class="quiet-digest">
+          <div><dt>大豐全體同仁 <span>群組，2 則</span></dt><dd>公告 10/25 晚上 ERP 停機維護；提醒同仁月底前繳交出差單。</dd></div>
+          <div><dt>北區業務群 <span>群組，11 則</span></dt><dd>大多是貼圖和午餐討論；有人分享客戶廠區新設的回收區照片，沒有提到要你處理的事。</dd></div>
+          <div><dt>週五午餐團 <span>群組，7 則</span></dt><dd>週五中午改去公司對面的便當店，已經訂好。</dd></div>
+          <div><dt>總務通知群 <span>群組，1 則</span></dt><dd>B2 停車位 10/23 起重新分配，名單在群組記事本。</dd></div>
+          <div><dt>王建宏 <span>一對一，2 則</span></dt><dd>你回覆停車位改週三後，他回「收到」，對話已經結束。</dd></div>
+        </dl>
+      </details>
+    </section>
+
+    <!-- ② Mail -->
+    <section id="mail" aria-labelledby="h-mail">
+      <h2 id="h-mail">信件整理</h2>
+      <p class="section-note">依資料夾分組，需要回覆的排最前面。只列出 AI 判斷值得注意的信，其餘 257 封通知類信件已略過。</p>
+
+      <div class="folder">
+        <h3>收件匣 <small>3 封值得注意</small></h3>
+        <div class="mail needs">
+          <div class="from">黃志明<div class="time">10/19 16:20</div></div>
+          <div class="subj">Q4 回收量預估表請協助確認</div>
+          <div class="tag">需要回覆</div>
+          <div class="sum">請你在 10/22 前確認金馬站 Q4 預估量，他要彙整給總經理。附件是預估表。</div>
+          <div class="mail-todos">
+            <div class="todo-row inline" id="t5" data-no="5" data-pri="P1">
+              <div class="title"><span class="pri P1">P1</span>#5 確認 Q4 回收量預估表並回覆黃志明</div>
+              <div class="controls" role="group" aria-label="#5 的處理方式"></div>
+            </div>
+          </div>
+        </div>
+        <div class="mail needs">
+          <div class="from">環保局 承辦人<div class="time">10/20 08:05</div></div>
+          <div class="subj">月報補件通知</div>
+          <div class="tag">需要回覆</div>
+          <div class="sum">九月月報缺第三頁簽章，請 10/24 前補寄。</div>
+          <div class="mail-todos">
+            <div class="todo-row inline" id="t6" data-no="6" data-pri="P1">
+              <div class="title"><span class="pri P1">P1</span>#6 補寄九月月報第三頁簽章給環保局</div>
+              <div class="controls" role="group" aria-label="#6 的處理方式"></div>
+            </div>
+          </div>
+        </div>
+        <div class="mail fyi">
+          <div class="from">IT 部門<div class="time">10/19 11:00</div></div>
+          <div class="subj">10/25 系統維護公告</div>
+          <div class="tag">知道就好</div>
+          <div class="sum">週六 22:00 到隔天 02:00 ERP 停機，不影響現場地磅。</div>
+        </div>
+      </div>
+
+      <div class="folder">
+        <h3>收件匣 / SF報價簽核 <small>2 封值得注意</small></h3>
+        <div class="mail needs">
+          <div class="from">Salesforce 簽核<div class="time">10/20 07:30</div></div>
+          <div class="subj">報價單 Q-2310-044 待你簽核</div>
+          <div class="tag">需要處理</div>
+          <div class="sum">北區業務提交的工業廢料報價，金額超過授權上限，需要你簽核。</div>
+          <div class="mail-todos">
+            <div class="todo-row inline" id="t7" data-no="7" data-pri="P0">
+              <div class="title"><span class="pri P0">P0</span>#7 簽核報價單 Q-2310-044</div>
+              <div class="controls" role="group" aria-label="#7 的處理方式"></div>
+            </div>
+          </div>
+        </div>
+        <div class="mail fyi">
+          <div class="from">Salesforce 簽核<div class="time">10/19 18:02</div></div>
+          <div class="subj">報價單 Q-2310-039 已核准</div>
+          <div class="tag">知道就好</div>
+          <div class="sum">你上週簽的報價已由總經理核准。</div>
+        </div>
+      </div>
+
+      <div class="folder">
+        <h3>收件匣 / 會議通知/異動 <small>2 封值得注意</small></h3>
+        <div class="mail fyi">
+          <div class="from">陳秘書<div class="time">10/19 14:12</div></div>
+          <div class="subj">週五營運會議改到 10:30</div>
+          <div class="tag">知道就好</div>
+          <div class="sum">原 09:30 改為 10:30，地點不變，行事曆已更新。</div>
+        </div>
+        <div class="mail fyi">
+          <div class="from">人資部<div class="time">10/19 10:40</div></div>
+          <div class="subj">新人教育訓練邀請</div>
+          <div class="tag">知道就好</div>
+          <div class="sum">10/28 下午，邀請你分享站點營運，需不需要參加可之後再回。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ③ Other todos -->
+    <section id="todos" aria-labelledby="h-todos">
+      <h2 id="h-todos">其他待辦</h2>
+      <p class="section-note">之前留下還沒完成的待辦，以及 AI 認為可能已經做完的。</p>
+      <div class="todo-row" id="t9" data-no="9" data-pri="P1">
+        <div class="no">#9</div>
+        <div><div class="title"><span class="pri P1">P1</span>整理 10 月加盟申請名單給總經理</div><div class="src">10/16 起，來源：加盟相關信件</div><div class="why">截止 10/25，這次沒有看到新進展。</div></div>
+        <div class="controls" role="group" aria-label="#9 的處理方式"></div>
+      </div>
+      <div class="todo-row" id="t10" data-no="10" data-pri="P2">
+        <div class="no">#10</div>
+        <div><div class="title"><span class="pri P2">P2</span>回覆人資新人教育訓練是否參加</div><div class="src">10/17 起，來源：會議通知/異動</div></div>
+        <div class="controls" role="group" aria-label="#10 的處理方式"></div>
+      </div>
+      <h3 class="sub">AI 認為可能已經做完的</h3>
+      <div class="todo-row maybe" id="t8" data-no="8" data-pri="P2">
+        <div class="no">#8</div>
+        <div><div class="title"><span class="pri P2">P2</span>回覆王建宏停車位調整</div><div class="src">來源：王建宏，10/19 09:12</div><div class="why">你 10/19 10:03 回了「好，我改週三」，他已讀並回「收到」。</div></div>
+        <div class="controls" role="group" aria-label="#8 的處理方式"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="dock" role="region" aria-label="確認待辦">
+  <div class="dock-inner">
+    <span class="count" id="count" aria-live="polite">10 項待辦，目前 <b>0</b> 項有變更，其餘保留</span>
+    <button class="btn" id="gen" type="button">產生確認文字</button>
+    <div class="out" id="out">
+      <p class="hint">複製下面的文字，貼到 /agenda 對話送出，Claude 會照這段寫入待辦。</p>
+      <textarea id="txt" readonly aria-label="確認文字"></textarea>
+      <div class="out-actions">
+        <button class="btn" id="copy" type="button">複製</button>
+        <button class="btn ghost" id="fold" type="button">收起</button>
+        <span class="toast" id="toast" aria-live="polite"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var REPORT = "R-PH2";
+  var rows = Array.prototype.slice.call(document.querySelectorAll(".todo-row"));
+  var opts = [["keep", "保留"], ["done", "完成"], ["drop", "刪除"]];
+  rows.forEach(function (row) {
+    var no = row.dataset.no, pri = row.dataset.pri, box = row.querySelector(".controls");
+    var seg = document.createElement("div"); seg.className = "seg";
+    opts.forEach(function (o, i) {
+      var l = document.createElement("label"), inp = document.createElement("input"), s = document.createElement("span");
+      inp.type = "radio"; inp.name = "act-" + no; inp.value = o[0]; inp.checked = i === 0;
+      s.textContent = o[1]; l.appendChild(inp); l.appendChild(s); seg.appendChild(l);
+    });
+    var sel = document.createElement("select"); sel.setAttribute("aria-label", "#" + no + " 的優先順序");
+    ["P0", "P1", "P2"].forEach(function (p) { var op = document.createElement("option"); op.value = p; op.textContent = "優先 " + p; op.selected = p === pri; sel.appendChild(op); });
+    box.appendChild(seg); box.appendChild(sel);
+    box.addEventListener("change", refresh);
+  });
+  function state() {
+    return rows.map(function (row) {
+      return { row: row, no: row.dataset.no, act: row.querySelector("input:checked").value,
+               pri: row.querySelector("select").value, origPri: row.dataset.pri };
+    }).sort(function (a, b) { return a.no - b.no; });
+  }
+  function refresh() {
+    var n = 0;
+    state().forEach(function (s) {
+      var changed = s.act !== "keep" || s.pri !== s.origPri;
+      s.row.classList.toggle("is-done", s.act === "done");
+      s.row.classList.toggle("is-drop", s.act === "drop");
+      s.row.classList.toggle("changed", changed);
+      var badge = s.row.querySelector(".pri");
+      badge.className = "pri " + s.pri; badge.textContent = s.pri;
+      if (changed) n++;
+    });
+    document.querySelector("#count b").textContent = n;
+  }
+  document.getElementById("gen").addEventListener("click", function () {
+    var done = [], drop = [], pri = [];
+    state().forEach(function (s) {
+      if (s.act === "done") done.push(s.no);
+      else if (s.act === "drop") drop.push(s.no);
+      if (s.act === "keep" && s.pri !== s.origPri) pri.push(s.no + "→" + s.pri);
+    });
+    var lines = ["確認待辦 " + REPORT];
+    if (done.length) lines.push("完成：" + done.join("、"));
+    if (drop.length) lines.push("刪除：" + drop.join("、"));
+    if (pri.length) lines.push("改優先：" + pri.join("、"));
+    lines.push(done.length || drop.length || pri.length ? "其餘保留" : "全部保留");
+    var t = document.getElementById("txt"); t.value = lines.join("\n");
+    document.getElementById("out").classList.add("show"); t.focus(); t.select();
+  });
+  document.getElementById("fold").addEventListener("click", function () {
+    document.getElementById("out").classList.remove("show");
+    document.getElementById("gen").focus();
+  });
+  document.getElementById("copy").addEventListener("click", function () {
+    var t = document.getElementById("txt"), toast = document.getElementById("toast");
+    function ok() { toast.textContent = "已複製，貼到 /agenda 對話即可"; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(t.value).then(ok, function () { t.select(); document.execCommand("copy"); ok(); });
+    } else { t.select(); document.execCommand("copy"); ok(); }
+  });
+})();
+</script>
+</body>
+</html>
