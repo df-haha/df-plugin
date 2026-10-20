@@ -17,7 +17,7 @@ import pytest
 
 from daily_agenda.digest_script import DIGEST_SCRIPT, DIGEST_SCRIPT_HASH
 from daily_agenda.fsutil import atomic_write_text
-from daily_agenda.render import render
+from daily_agenda.render import _group_other_todos, render
 
 TZ = timezone(timedelta(hours=8))
 NOW = datetime(2026, 10, 20, 9, 0, 0, tzinfo=TZ)
@@ -561,3 +561,229 @@ class TestTemplateStructure:
         html = render(v, "html")
         assert 'class="dock"' in html
         assert "產生確認文字" in html
+
+
+# ---------------------------------------------------------------------------
+# _group_other_todos helper
+# ---------------------------------------------------------------------------
+
+def _src_todo(
+    no: int, title: str, pri: str = "P2", label: str = "",
+) -> dict:
+    """Shortcut: a todo_view with one source label."""
+    t = _todo_view(no=no, title=title, priority=pri, src_label=label)
+    t["todo_id"] = f"T-{no:04d}"
+    return t
+
+
+class TestGroupOtherTodos:
+    def test_p0_extracted(self) -> None:
+        todos = [
+            _src_todo(1, "urgent", "P0", "LINE · GroupA"),
+            _src_todo(2, "normal", "P1", "LINE · GroupA"),
+        ]
+        p0, groups = _group_other_todos(todos)
+        assert len(p0) == 1
+        assert p0[0]["no"] == 1
+        # Non-P0 in groups
+        assert len(groups) == 1
+        assert groups[0]["todos"][0]["no"] == 2
+
+    def test_line_prefix_stripped(self) -> None:
+        todos = [_src_todo(1, "t", "P1", "LINE · 金馬站營運群")]
+        _, groups = _group_other_todos(todos)
+        assert groups[0]["label"] == "金馬站營運群"
+
+    def test_mail_uses_folder_when_mapped(self) -> None:
+        todos = [_src_todo(1, "t", "P1", "Mail · 黃志明")]
+        todos[0]["todo_id"] = "T-0001"
+        _, groups = _group_other_todos(
+            todos, src_to_folder={"T-0001": "收件匣"},
+        )
+        assert groups[0]["label"] == "收件匣"
+
+    def test_mail_falls_back_to_sender(self) -> None:
+        todos = [_src_todo(1, "t", "P1", "Mail · 黃志明")]
+        _, groups = _group_other_todos(todos)
+        assert groups[0]["label"] == "黃志明"
+
+    def test_no_source_grouped_as_other(self) -> None:
+        t = _todo_view(no=1, title="t", priority="P1", src_label="")
+        t["sources"] = []
+        t["todo_id"] = "T-0001"
+        _, groups = _group_other_todos([t])
+        assert groups[0]["label"] == "其他"
+
+    def test_count_desc_order(self) -> None:
+        todos = [
+            _src_todo(1, "a", "P2", "LINE · Small"),
+            _src_todo(2, "b", "P2", "LINE · Big"),
+            _src_todo(3, "c", "P2", "LINE · Big"),
+            _src_todo(4, "d", "P2", "LINE · Big"),
+        ]
+        _, groups = _group_other_todos(todos)
+        assert groups[0]["label"] == "Big"
+        assert groups[0]["count"] == 3
+        assert groups[1]["label"] == "Small"
+        assert groups[1]["count"] == 1
+
+    def test_p1_before_p2_within_group(self) -> None:
+        todos = [
+            _src_todo(1, "a", "P2", "LINE · G"),
+            _src_todo(2, "b", "P1", "LINE · G"),
+            _src_todo(3, "c", "P2", "LINE · G"),
+        ]
+        _, groups = _group_other_todos(todos)
+        nos = [t["no"] for t in groups[0]["todos"]]
+        # P1 (#2) first, then P2s in original order
+        assert nos == [2, 1, 3]
+
+    def test_p1_count_correct(self) -> None:
+        todos = [
+            _src_todo(1, "a", "P1", "LINE · G"),
+            _src_todo(2, "b", "P2", "LINE · G"),
+            _src_todo(3, "c", "P1", "LINE · G"),
+        ]
+        _, groups = _group_other_todos(todos)
+        assert groups[0]["p1_count"] == 2
+
+    def test_empty_input(self) -> None:
+        p0, groups = _group_other_todos([])
+        assert p0 == []
+        assert groups == []
+
+
+# ---------------------------------------------------------------------------
+# Template: grouped other_todos rendering
+# ---------------------------------------------------------------------------
+
+def _grouped_view(**overrides: object) -> dict:
+    """View dict with other_todo_p0 and other_todo_groups set directly.
+
+    Uses numbers 10+ to avoid overlapping with chat/mail todos (1, 2).
+    """
+    v = _digest_view(other_todos=[])
+    v["other_todo_p0"] = [
+        _src_todo(10, "P0 urgent task", "P0", "LINE · GroupA"),
+    ]
+    v["other_todo_groups"] = [
+        {
+            "label": "金馬站營運群",
+            "count": 3,
+            "p1_count": 1,
+            "todos": [
+                _src_todo(11, "P1 in group", "P1", "LINE · 金馬站"),
+                _src_todo(12, "P2 first", "P2", "LINE · 金馬站"),
+                _src_todo(13, "P2 second", "P2", "LINE · 金馬站"),
+            ],
+        },
+        {
+            "label": "其他",
+            "count": 1,
+            "p1_count": 0,
+            "todos": [
+                _src_todo(14, "Misc task", "P2"),
+            ],
+        },
+    ]
+    for k, val in overrides.items():
+        v[k] = val
+    return v
+
+
+class TestGroupedOtherTodosTemplate:
+    def test_details_collapsed_by_default(self) -> None:
+        html = render(_grouped_view(), "html")
+        assert 'class="todo-group"' in html
+        # No open attribute
+        assert '<details class="todo-group" open' not in html
+
+    def test_p0_before_first_details(self) -> None:
+        html = render(_grouped_view(), "html")
+        p0_pos = html.find('data-no="10"')
+        details_pos = html.find('<details class="todo-group"')
+        assert p0_pos > 0
+        assert details_pos > 0
+        assert p0_pos < details_pos
+
+    def test_heading_shows_total_count(self) -> None:
+        """Section heading should show total = p0 + sum(group counts)."""
+        html = render(_grouped_view(), "html")
+        # 1 P0 + 3 + 1 = 5
+        assert "其他待辦（5 項）" in html  # 其他待辦（5 項）
+
+    def test_all_todo_rows_present(self) -> None:
+        v = _grouped_view()
+        html = render(v, "html")
+        # 5 todo rows total
+        assert html.count('class="todo-row') >= 5
+
+    def test_group_summary_line(self) -> None:
+        html = render(_grouped_view(), "html")
+        # Group 1: label + count + P1 count
+        assert "金馬站營運群" in html
+        assert "3 項" in html
+        assert "P1 1 項" in html
+        # Group 2: no P1 → no parenthetical
+        # "其他" and "1 項" should appear
+
+    def test_zero_p1_no_parenthetical(self) -> None:
+        v = _grouped_view()
+        # Change second group to make it identifiable
+        v["other_todo_groups"][1]["label"] = "NoPriGroup"
+        html = render(v, "html")
+        # Find the summary for NoPriGroup — should not have P1 count
+        idx = html.find("NoPriGroup")
+        assert idx > 0
+        # Get the text up to </summary>
+        end = html.find("</summary>", idx)
+        chunk = html[idx:end]
+        assert "P1" not in chunk
+
+    @pytest.mark.parametrize("payload", _MALICIOUS_NAMES)
+    def test_malicious_group_label(self, payload: str) -> None:
+        v = _grouped_view()
+        v["other_todo_groups"] = [{
+            "label": payload,
+            "count": 1,
+            "p1_count": 0,
+            "todos": [_src_todo(99, "task", "P2")],
+        }]
+        html = render(v, "html")
+        assert html.lower().count("<script") == 1
+        assert "<svg onload" not in html.lower()
+        if "7*191" in payload:
+            assert "1337" not in html
+
+    def test_malicious_label_not_in_attributes(self) -> None:
+        v = _grouped_view()
+        v["other_todo_groups"] = [{
+            "label": '" onerror="alert(1)',
+            "count": 1,
+            "p1_count": 0,
+            "todos": [_src_todo(99, "task", "P2")],
+        }]
+        html = render(v, "html")
+        parser = _TagCollector()
+        parser.feed(html)
+        for tag, attrs in parser.tags:
+            for attr_name, attr_val in attrs:
+                if attr_val and "alert" in attr_val:
+                    assert False, f"malicious value in {attr_name}={attr_val!r} on <{tag}>"
+
+    def test_flat_fallback_without_grouped_keys(self) -> None:
+        """When other_todo_groups is absent, flat rendering (old behavior)."""
+        v = _digest_view()
+        v.pop("other_todo_p0", None)
+        v.pop("other_todo_groups", None)
+        v["other_todos"] = [_src_todo(1, "Flat task", "P1")]
+        html = render(v, "html")
+        assert "Flat task" in html
+        # No grouped details
+        assert 'class="todo-group"' not in html
+
+    def test_dock_count_includes_grouped_todos(self) -> None:
+        v = _grouped_view()
+        html = render(v, "html")
+        # Dock counts ALL todos on the page: 1 chat + 1 mail + 5 other = 7
+        assert "7 項待辦" in html

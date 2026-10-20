@@ -239,6 +239,19 @@ def build_view(
         now=now,
     )
 
+    # --- Group other_todos: P0 always visible, rest collapsed by source ---
+    # Build todo_id → folder_label mapping for mail-sourced todos.
+    _todo_to_folder: dict[str, str] = {}
+    for mf in mail_folders:
+        fl_label = mf.get("folder_label", "")
+        for mail_row in mf.get("mails", []):
+            for tv in mail_row.get("todos", []):
+                _todo_to_folder[tv["todo_id"]] = fl_label
+
+    other_todo_p0, other_todo_groups = _group_other_todos(
+        other_todos, src_to_folder=_todo_to_folder,
+    )
+
     return {
         "report_code": report_code,
         "date": now.strftime("%Y-%m-%d"),
@@ -258,6 +271,9 @@ def build_view(
         "quiet_chats": quiet_chats,
         "mail_folders": mail_folders,
         "other_todos": other_todos,
+        # Grouped other_todos
+        "other_todo_p0": other_todo_p0,
+        "other_todo_groups": other_todo_groups,
     }
 
 
@@ -613,6 +629,93 @@ def _build_pulse(
         "from": _format_dt(pulse_from) if pulse_from else "",
         "to": _format_dt(pulse_to) if pulse_to else "",
     }
+
+
+# ---------------------------------------------------------------------------
+# § other_todos grouping (user decision 2026-10-20)
+# ---------------------------------------------------------------------------
+
+# Label prefixes emitted by _build_src_index in cmd_run.py.
+_LINE_LABEL_PREFIX = "LINE · "   # "LINE · "
+_MAIL_LABEL_PREFIX = "Mail · "   # "Mail · "
+_NO_SOURCE_GROUP = "其他"
+
+
+def _derive_group_label(
+    todo: dict,
+    src_to_folder: dict[str, str],
+) -> str:
+    """Derive a human-readable group label from a todo_view's first source.
+
+    LINE sources (prefixed ``LINE · <chat_name>``) → chat name.
+    Mail sources (prefixed ``Mail · <sender>``) → folder label if mapped,
+    else sender.  No sources → ``其他``.
+    """
+    sources = todo.get("sources") or []
+    if not sources:
+        return _NO_SOURCE_GROUP
+    label = sources[0].get("label", "")
+    if not label:
+        return _NO_SOURCE_GROUP
+    if label.startswith(_LINE_LABEL_PREFIX):
+        return label[len(_LINE_LABEL_PREFIX):] or _NO_SOURCE_GROUP
+    if label.startswith(_MAIL_LABEL_PREFIX):
+        # Try folder label first; fall back to the sender portion.
+        todo_id = todo.get("todo_id", "")
+        folder = src_to_folder.get(todo_id)
+        if folder:
+            return folder
+        return label[len(_MAIL_LABEL_PREFIX):] or _NO_SOURCE_GROUP
+    return label
+
+
+def _group_other_todos(
+    other_todos: list[dict],
+    *,
+    src_to_folder: dict[str, str] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Split *other_todos* into P0 (always-visible) and collapsed groups.
+
+    Returns ``(p0_list, groups)`` where *groups* is a list of
+    ``{label, count, p1_count, todos}`` dicts sorted by count descending
+    (ties broken by first-appearance order).  Todos within each group are
+    sorted P1 before P2, stable otherwise.
+    """
+    stf = src_to_folder or {}
+
+    p0: list[dict] = []
+    buckets: dict[str, list[dict]] = {}
+    bucket_order: list[str] = []
+
+    for t in other_todos:
+        if t.get("priority") == "P0":
+            p0.append(t)
+            continue
+        key = _derive_group_label(t, stf)
+        if key not in buckets:
+            buckets[key] = []
+            bucket_order.append(key)
+        buckets[key].append(t)
+
+    # Sort within each group: P1 before P2 (stable)
+    def _pri_sort_key(t: dict) -> int:
+        return 0 if t.get("priority") == "P1" else 1
+
+    groups: list[dict] = []
+    for key in bucket_order:
+        todos = buckets[key]
+        todos.sort(key=_pri_sort_key)
+        groups.append({
+            "label": key,
+            "count": len(todos),
+            "p1_count": sum(1 for t in todos if t.get("priority") == "P1"),
+            "todos": todos,
+        })
+
+    # Sort groups by count desc (stable → first-appearance tie-break)
+    groups.sort(key=lambda g: -g["count"])
+
+    return p0, groups
 
 
 def _todo_view(t: dict, no: int, si: dict, now: datetime) -> dict:

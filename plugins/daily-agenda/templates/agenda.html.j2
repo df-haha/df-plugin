@@ -141,6 +141,11 @@ select { font: inherit; font-size: 14px; min-height: 40px; padding: 0 var(--s2);
 .maybe { border-style: dashed; }
 .maybe .why::before { content: "AI 認為可能已完成："; font-weight: 600; }
 h3.sub { font-size: 16px; color: var(--ink-soft); margin: var(--s5) 0 var(--s2); }
+.todo-group { margin-bottom: var(--s3); border: 1px solid var(--rule); border-radius: var(--r-md); }
+.todo-group > summary { cursor: pointer; padding: var(--s3) var(--s4); font-weight: 600; color: var(--ink-soft); min-height: 44px; display: flex; align-items: center; }
+.todo-group > summary .gc { color: var(--ink-faint); font-weight: 400; font-size: 14px; margin-left: var(--s3); }
+.todo-group .todo-row { border-radius: 0; border-left: 0; border-right: 0; border-top: 0; margin-bottom: 0; }
+.todo-group .todo-row:last-child { border-bottom: 0; }
 
 /* Chat body with inline todos */
 .chat-body { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 26%, 400px); gap: var(--s5); margin-top: var(--s2); }
@@ -192,12 +197,27 @@ h3.sub { font-size: 16px; color: var(--ink-soft); margin: var(--s5) 0 var(--s2);
 </style>
 </head>
 <body>
+{#- Macro: reusable todo row to avoid 4x duplication -#}
+{%- macro todo_row(t, extra_class="") -%}
+{%- set safe_pri = t.priority if t.priority in ("P0", "P1", "P2") else "P2" -%}
+      <div class="todo-row{{ ' ' + extra_class if extra_class else '' }}" id="t{{ t.no|int }}" data-no="{{ t.no|int }}" data-pri="{{ safe_pri }}">
+        <div class="no">#{{ t.no|int }}</div>
+        <div><div class="title"><span class="pri {{ safe_pri }}">{{ safe_pri }}</span>{{ t.title }}</div>
+{%- if t.sources %}<div class="src">{% for s in t.sources %}{{ s.label }}{% if not loop.last %}、{% endif %}{% endfor %}</div>{% endif %}
+{%- if t.get("reason") %}<div class="why">{{ t.reason }}</div>{% endif %}
+        </div>
+        <div class="controls" role="group" aria-label="#{{ t.no|int }} 的處理方式"></div>
+      </div>
+{%- endmacro -%}
+
 <a class="skip" href="#main">跳到主要內容</a>
 {#- Compute derived stats for the nav sidebar -#}
 {%- set chats = v.get("chats") or [] -%}
 {%- set quiet_chats = v.get("quiet_chats") or [] -%}
 {%- set mail_folders = v.get("mail_folders") or [] -%}
 {%- set other_todos = v.get("other_todos") or [] -%}
+{%- set other_todo_groups = v.get("other_todo_groups") -%}
+{%- set other_todo_p0 = v.get("other_todo_p0") or [] -%}
 {%- set ns = namespace(
       chat_needs=0, chat_total=0,
       mail_needs=0, mail_total=0,
@@ -218,7 +238,12 @@ h3.sub { font-size: 16px; color: var(--ink-soft); margin: var(--s5) 0 var(--s2);
 {%- set ns.all_todo_count = 0 -%}
 {%- for c in chats -%}{%- set ns.all_todo_count = ns.all_todo_count + c.todos|length -%}{%- endfor -%}
 {%- for f in mail_folders -%}{%- for m in f.mails -%}{%- set ns.all_todo_count = ns.all_todo_count + m.todos|length -%}{%- endfor -%}{%- endfor -%}
-{%- set ns.all_todo_count = ns.all_todo_count + other_todos|length + v.maybe_done|length -%}
+{%- if other_todo_groups is not none -%}
+  {%- set ns.all_todo_count = ns.all_todo_count + other_todo_p0|length + v.maybe_done|length -%}
+  {%- for g in other_todo_groups -%}{%- set ns.all_todo_count = ns.all_todo_count + g.count -%}{%- endfor -%}
+{%- else -%}
+  {%- set ns.all_todo_count = ns.all_todo_count + other_todos|length + v.maybe_done|length -%}
+{%- endif -%}
 
 <div class="shell">
   <aside class="rail" aria-label="導覽">
@@ -457,33 +482,45 @@ h3.sub { font-size: 16px; color: var(--ink-soft); margin: var(--s5) 0 var(--s2);
 {#- ============================================================ -#}
 {#- ③ Other todos + maybe-done -#}
 {#- ============================================================ -#}
-{%- if other_todos or v.maybe_done %}
+{%- if other_todo_groups is not none %}
+{#- Grouped view: P0 always visible, rest in collapsed <details> groups -#}
+{%- set ns.grouped_total = other_todo_p0|length -%}
+{%- for g in other_todo_groups -%}{%- set ns.grouped_total = ns.grouped_total + g.count -%}{%- endfor -%}
+{%- if ns.grouped_total > 0 or v.maybe_done %}
     <section id="todos" aria-labelledby="h-todos">
-      <h2 id="h-todos">其他待辦</h2>
+      <h2 id="h-todos">其他待辦（{{ ns.grouped_total }} 項）</h2>
       <p class="section-note">之前留下還沒完成的待辦，以及 AI 認為可能已經做完的。</p>
-{%- for t in other_todos %}
-{%- set safe_pri = t.priority if t.priority in ("P0", "P1", "P2") else "P2" -%}
-      <div class="todo-row" id="t{{ t.no|int }}" data-no="{{ t.no|int }}" data-pri="{{ safe_pri }}">
-        <div class="no">#{{ t.no|int }}</div>
-        <div><div class="title"><span class="pri {{ safe_pri }}">{{ safe_pri }}</span>{{ t.title }}</div>
-{%- if t.sources %}<div class="src">{% for s in t.sources %}{{ s.label }}{% if not loop.last %}、{% endif %}{% endfor %}</div>{% endif %}
-{%- if t.get("reason") %}<div class="why">{{ t.reason }}</div>{% endif %}
-        </div>
-        <div class="controls" role="group" aria-label="#{{ t.no|int }} 的處理方式"></div>
-      </div>
+{%- for t in other_todo_p0 %}
+{{ todo_row(t) }}
+{%- endfor %}
+{%- for g in other_todo_groups %}
+      <details class="todo-group">
+        <summary>{{ g.label }}　{{ g.count }} 項{% if g.p1_count %}（P1 {{ g.p1_count }} 項）{% endif %}</summary>
+{%- for t in g.todos %}
+{{ todo_row(t) }}
+{%- endfor %}
+      </details>
 {%- endfor %}
 {%- if v.maybe_done %}
       <h3 class="sub">AI 認為可能已經做完的</h3>
 {%- for t in v.maybe_done %}
-{%- set safe_pri = t.priority if t.priority in ("P0", "P1", "P2") else "P2" -%}
-      <div class="todo-row maybe" id="t{{ t.no|int }}" data-no="{{ t.no|int }}" data-pri="{{ safe_pri }}">
-        <div class="no">#{{ t.no|int }}</div>
-        <div><div class="title"><span class="pri {{ safe_pri }}">{{ safe_pri }}</span>{{ t.title }}</div>
-{%- if t.sources %}<div class="src">{% for s in t.sources %}{{ s.label }}{% if not loop.last %}、{% endif %}{% endfor %}</div>{% endif %}
-{%- if t.get("reason") %}<div class="why">{{ t.reason }}</div>{% endif %}
-        </div>
-        <div class="controls" role="group" aria-label="#{{ t.no|int }} 的處理方式"></div>
-      </div>
+{{ todo_row(t, "maybe") }}
+{%- endfor %}
+{%- endif %}
+    </section>
+{%- endif %}
+{%- elif other_todos or v.maybe_done %}
+{#- Flat fallback (no grouped keys) -#}
+    <section id="todos" aria-labelledby="h-todos">
+      <h2 id="h-todos">其他待辦</h2>
+      <p class="section-note">之前留下還沒完成的待辦，以及 AI 認為可能已經做完的。</p>
+{%- for t in other_todos %}
+{{ todo_row(t) }}
+{%- endfor %}
+{%- if v.maybe_done %}
+      <h3 class="sub">AI 認為可能已經做完的</h3>
+{%- for t in v.maybe_done %}
+{{ todo_row(t, "maybe") }}
 {%- endfor %}
 {%- endif %}
     </section>
@@ -492,7 +529,7 @@ h3.sub { font-size: 16px; color: var(--ink-soft); margin: var(--s5) 0 var(--s2);
 {#- ============================================================ -#}
 {#- Legacy: old v1 sections (when no new keys) -#}
 {#- ============================================================ -#}
-{%- if not chats and not quiet_chats and not mail_folders and not other_todos and not v.maybe_done %}
+{%- if not chats and not quiet_chats and not mail_folders and not other_todos and not v.maybe_done and other_todo_groups is none %}
 {#- Old-keys-only fallback: today table + events (notices/new_chats/maybe_done rendered above) -#}
 {%- if v.today %}
     <h2>今天要處理</h2>
