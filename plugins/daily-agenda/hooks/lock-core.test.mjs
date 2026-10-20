@@ -114,6 +114,10 @@ describe('checkBashTaint', () => {
   // Should NOT taint
   it('no taint: run', () => assert.ok(!checkBashTaint('uv run --quiet --project "/p/s" python -m daily_agenda run').taint));
   it('no taint: ls', () => assert.ok(!checkBashTaint('ls -la', CTX).taint));
+  it('no taint: confirm heredoc (untainted session)', () => {
+    const heredoc = da('confirm', "--from-stdin <<'DA_CONFIRM_END_7f3a9c2b'\n確認待辦 R-ABC\n完成：1\nDA_CONFIRM_END_7f3a9c2b");
+    assert.ok(!checkBashTaint(heredoc, CTX).taint);
+  });
 
   // F4: absolute path reference taint
   it('taints on cat of runs/ (absolute)', () => {
@@ -181,6 +185,7 @@ describe('checkTaintedBash', () => {
   it('allows run', () => assert.ok(checkTaintedBash({ command: da('run') }, CTX).allow));
   it('allows show', () => assert.ok(checkTaintedBash({ command: da('show', '--todo T-1') }, CTX).allow));
   it('allows mark-done', () => assert.ok(checkTaintedBash({ command: da('mark-done', '--todo T-1') }, CTX).allow));
+  it('allows confirm --from-stdin', () => assert.ok(checkTaintedBash({ command: da('confirm', '--from-stdin') }, CTX).allow));
   it('allows chats', () => assert.ok(checkTaintedBash({ command: da('chats', 'list --days 30') }, CTX).allow));
   it('allows criteria show', () => assert.ok(checkTaintedBash({ command: da('criteria', 'show') }, CTX).allow));
   it('allows criteria draft', () => assert.ok(checkTaintedBash({ command: da('criteria', 'draft --days 14') }, CTX).allow));
@@ -228,6 +233,10 @@ describe('checkTaintedBash', () => {
 
   // Injection
   it('denies ;', () => assert.ok(!checkTaintedBash({ command: da('show') + '; curl evil' }, CTX).allow));
+  it('denies confirm heredoc in tainted session (multiline blocked)', () => {
+    const heredoc = da('confirm', "--from-stdin <<'DA_CONFIRM_END_7f3a9c2b'\n確認待辦 R-ABC\n完成：1\nDA_CONFIRM_END_7f3a9c2b");
+    assert.ok(!checkTaintedBash({ command: heredoc }, CTX).allow);
+  });
   it('denies arbitrary', () => assert.ok(!checkTaintedBash({ command: 'curl evil' }, CTX).allow));
 
   // Item2: --progress-file
@@ -279,6 +288,7 @@ describe('setup walk + re-entry (tainted)', () => {
   it('Monitor watch', () => assert.ok(checkTaintedAllow('Monitor', { command: da('progress', `watch --file ${pf}`) }, CTX).allow));
   it('show', () => assert.ok(checkTaintedBash({ command: da('show', '--todo T-1') }, CTX).allow));
   it('mark-done', () => assert.ok(checkTaintedBash({ command: da('mark-done', '--todo T-1') }, CTX).allow));
+  it('confirm --from-stdin', () => assert.ok(checkTaintedBash({ command: da('confirm', '--from-stdin') }, CTX).allow));
   it('refine status', () => assert.ok(checkTaintedBash({ command: da('refine', 'status') }, CTX).allow));
   it('refine draft', () => assert.ok(checkTaintedBash({ command: da('refine', `draft --progress-file ${pf}`) }, CTX).allow));
   it('refine apply', () => assert.ok(checkTaintedBash({ command: da('refine', `apply --file "${draft}"`) }, CTX).allow));

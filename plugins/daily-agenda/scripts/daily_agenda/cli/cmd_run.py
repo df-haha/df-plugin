@@ -28,6 +28,8 @@ def _build_src_index(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
     index: dict[str, dict[str, Any]] = {}
     for rec in records:
         sid = rec.get("src_id", "")
+        if not sid:
+            continue  # skip records without src_id (e.g. chat_history)
         kind = rec.get("kind", "")
         ut = rec.get("untrusted", {})
 
@@ -315,6 +317,11 @@ def _run_pipeline(
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     open_todos = [t for t in ldg if t["status"] in ("open", "maybe_done")]
+
+    # Load chat history for bundle context (C4 §B) — non-fatal
+    precomputed_history = bundle.load_chat_history(h, result.records, run_id)
+    history_sizes = bundle.compute_history_sizes(precomputed_history)
+
     # Account for profile + criteria overhead in batch sizing
     batch_bytes = cfg.get("analysis", {}).get("batch_bytes", 300_000)
     overhead = 0
@@ -323,7 +330,9 @@ def _run_pipeline(
     if crit_text:
         overhead += len(crit_text.encode("utf-8")) + 100
     effective_batch = max(batch_bytes - overhead, batch_bytes // 3)
-    batches = bundle.split_batches(result.records, effective_batch)
+    batches = bundle.split_batches(
+        result.records, effective_batch, history_sizes=history_sizes,
+    )
     if not batches:
         batches = [[]]  # At least one batch (may have zero records)
 
@@ -346,6 +355,7 @@ def _run_pipeline(
             bp, result=batch_result, criteria=crit_text, open_todos=open_todos,
             ctx=ctx_entries, profile_text=profile_text,
             batch_index=i + 1, batch_total=len(batches),
+            chat_history=precomputed_history,
         )
         bundle_paths.append(bp)
 
@@ -429,22 +439,6 @@ def _run_pipeline(
     notices: list[str] = []
     if needs_line_trust:
         notices.append("LINE 更新到新版本，需要手動確認一次。")
-
-    # Pre-compute chat history for build_view (keep render pure, no SQLite)
-    chat_refs_in_run: set[str] = set()
-    for rec in result.records:
-        if rec.get("kind") == "line_message":
-            cref = rec.get("chat_ref", "")
-            if cref:
-                chat_refs_in_run.add(cref)
-    precomputed_history: dict[str, list[dict[str, Any]]] = {}
-    for cref in chat_refs_in_run:
-        try:
-            precomputed_history[cref] = history.read_last(
-                h, cref, n=3, exclude_run_id=run_id,
-            )
-        except Exception:
-            precomputed_history[cref] = []
 
     # Attach chat_name from bundle records to validated digests
     chat_names: dict[str, str] = {}

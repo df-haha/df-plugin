@@ -30,6 +30,7 @@ _MESSAGES: dict[str, str] = {
     "MODEL_OUTPUT_INVALID": "AI 回傳的格式不正確，這次不產生彙整；下次會重讀。",
     "PUBLISH_FAILED": "彙整檔寫到輸出資料夾失敗（資料已保存），下次執行會先補寫。",
     "STALE_REPORT": "你指的不是最新一份彙整，為避免改錯，請改用待辦代碼（T-xxxx）或重新確認。",
+    "CONFIRM_INVALID": "確認內容有誤，請檢查後重新貼上（所有項目均未變更）。",
     "LOCKED": "已經有一個彙整正在執行，請稍後再試。",
     # environment
     "NODE_MISSING": "需要 Node.js 24 以上。請在 PowerShell 執行：winget install OpenJS.NodeJS.LTS",

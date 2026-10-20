@@ -194,20 +194,10 @@ def handle_dismiss(argv: list[str], deps: Deps) -> int:
     ldg = state.load_ledger(deps.home)
     now = deps.now_factory()
 
-    new_ldg = copy.deepcopy(ldg)
-    found = False
-    for i, t in enumerate(new_ldg):
-        if t["id"] == todo_id:
-            if t["status"] != "open":
-                return emit({"ok": False, "code": "ARG_ERROR",
-                              "detail": f"{todo_id} status is {t['status']}, expected open"})
-            from daily_agenda.ledger import _change_status
-            new_ldg[i] = _change_status(t, "dismissed", by="user", now=now)
-            found = True
-            break
-
-    if not found:
-        return emit({"ok": False, "code": "ARG_ERROR", "detail": f"todo {todo_id} not found"})
+    try:
+        new_ldg = ledger.dismiss(ldg, todo_id, now=now)
+    except (ledger.IllegalTransition, KeyError) as exc:
+        return emit({"ok": False, "code": "ARG_ERROR", "detail": str(exc)})
 
     rc = _commit_ledger_change(deps, new_ldg)
     if rc != -1:
