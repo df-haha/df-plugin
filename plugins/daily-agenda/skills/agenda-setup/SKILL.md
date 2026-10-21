@@ -122,9 +122,9 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
 1. 先確認使用者已安裝並登入 `df-graph`：`DA probe`，看 `sources.mail`。
    - `DF_GRAPH_NOT_REGISTERED`／`DF_GRAPH_AUTH` → 請使用者執行 `/df-graph-setup`（那是另一個 plugin 的設定流程，會開瀏覽器登入一次），完成後回來說「好了」，再跑一次 `DA probe`（本工具直接啟動 df-graph，不需要重啟 Claude Code）。
    - `DF_GRAPH_TOO_OLD` → 請使用者更新 df-graph plugin。
-   - `DF_GRAPH_START_FAILED` → df-graph 有註冊但啟動就當掉（常見原因：註冊指令沒釘套件版本）。請使用者重跑 `/df-graph-setup` 重新註冊並重啟 Claude Code；`detail` 裡有 server 的錯誤訊息尾巴可供排查，但不要貼給使用者。
+   - `DF_GRAPH_START_FAILED` → df-graph 有註冊但啟動就當掉（常見原因：註冊指令沒釘套件版本）。請使用者重跑 `/df-graph-setup` 重新註冊並重啟 Claude Code；`probe`／`outlook-preview` 回傳的 `detail`（圍欄包住）是 df-graph 自己的 stderr 尾巴，可用來判斷原因（例如 `ModuleNotFoundError` 就是版本沒釘），但不要整段貼給使用者。
 2. 用白話告訴使用者權限：「df-graph 登入時取得的權限包含讀信、寄信、修改行事曆；本工具平常只讀取，只有在你按允許後才會建立行事曆事件。」
-3. `DA outlook-preview`，把最近 3 封信的主旨與寄件者、以及 `events_range` 區間（今天與明天，時區見 `events_tz`）的行程列給使用者看；標題寫「今明兩天的行程」並附日期，不要寫「今天的行程」（深夜執行時看到的多半是明天的）。
+3. `DA outlook-preview`，把最近 3 封信的主旨與寄件者、以及 `events_range` 區間（依 `events_tz` 的當地日期，今天與明天）的行程列給使用者看；標題寫「今明兩天的行程」並附日期，不要寫「今天的行程」（深夜執行時看到的多半是明天的）。
 4. 用 AskUserQuestion：「上面是你最近的信與今明兩天的行程，看起來正確嗎？」選項「對（預設，直接選這個）」／「不對」。不對 → 請使用者描述，協助排查（通常是登入了別的帳號 → 重跑 `/df-graph-setup`）。
 
 ## 第 6 步：選擇不讀的 LINE 對話（US-12）
@@ -133,10 +133,10 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
 
 > ⚠️ **本步驟會觸發對話鎖定**（如果第 5 步尚未觸發）：`chats list` 讀取 LINE 對話名稱。
 
-1. `DA chats list --days 30 --brief`。回傳 `listing`（一個圍欄包住的編號清單：`編號. 名稱 (類型, 最後訊息日期)`，已排除的會標 `[已排除]`）與 `count`；編號對應的 ref 已由指令存檔，你不需要也不會拿到 ref。不要用沒有 `--brief` 的版本（170 個對話會超過 40KB，工具結果看不完）。
+1. `DA chats list --days 30 --brief`。回傳 `listing`（一個圍欄包住的編號清單：`編號. 名稱 (類型, 最後訊息日期)`，已排除的會標 `[已排除]`）與 `count`；清單最後會多幾列標 `[已排除，近期無訊息]`——那是之前排除、這段期間沒訊息的對話，也有編號（`preserved_count` 列）。編號對應的 ref 已由指令存檔（12 小時內有效），你不需要也不會拿到 ref。不要用沒有 `--brief` 的版本（170 個對話會超過 40KB，工具結果看不完）。
 2. 把 `listing` 原樣列在回覆正文，告訴使用者：「以下是最近 30 天有訊息的 LINE 對話（共 N 個）。勾選你**不想被讀取**的對話（例如家人群組、私人對話）。之後新出現的對話預設會讀，並會在彙整檔開頭提醒你；隨時可以再改。」
 3. 對話多時，用多個 AskUserQuestion（multiSelect，每張最多 4 個選項不夠用時）——建議做法：先把清單用編號列在回覆正文，再請使用者直接打編號（例如「3, 7, 12」或「都不排除」），比卡片更快。
-4. 使用者打編號後直接用編號：要排除的少 → `DA exclude --set 3 7 12`；要讀的少 → `DA exclude --keep 1 5 9`（清單上除了這幾個全部排除）；都不排除 → `DA exclude --set`。回傳 `excluded_count`（目前排除總數）與 `kept_unlisted`（之前排除、但這份清單沒列出的對話數——它們維持排除，不會被悄悄移出）。回報「已排除 N 個對話」，`kept_unlisted` > 0 時補一句「另有 M 個之前排除、最近沒訊息的對話維持排除」。
+4. 使用者打編號後直接用編號：要排除的少 → `DA exclude --set 3 7 12`；要讀的少 → `DA exclude --keep 1 5 9`（清單上除了這幾個全部排除）；都不排除 → `DA exclude --set`。標 `[已排除，近期無訊息]` 的對話一律維持排除，除非使用者點名要讀回來：`--keep` 時把它的編號一起列進去，或 `DA exclude --remove <編號>`。回傳 `excluded_count`（目前排除總數）與 `kept_unlisted`（維持排除、沒被重新勾選的舊對話數）。回報「已排除 N 個對話」，`kept_unlisted` > 0 時補一句「另有 M 個之前排除、最近沒訊息的對話維持排除」。
 
 ## 第 7 步：選擇信箱資料夾（US-14）
 

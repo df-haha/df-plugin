@@ -384,12 +384,17 @@ class GraphSource:
             raise GraphClientError("GRAPH_FAILED", "Unexpected folder_list format")
         return items
 
-    def calendar_list(self, *, days_ahead: int = 3, days_back: int = 1) -> list[dict[str, Any]]:
-        """List calendar events.  Returns parsed JSON items."""
-        raw = self._call_tool("calendar_list", {
-            "days_ahead": days_ahead,
-            "days_back": days_back,
-        })
+    def calendar_list(self, *, days_ahead: int = 3, days_back: int = 1, tz: str = "") -> list[dict[str, Any]]:
+        """List calendar events.  Returns parsed JSON items.
+
+        df-graph's window is rolling (now-days_back … now+days_ahead), not
+        calendar days.  *tz* names the zone for the returned times
+        (df-graph defaults to Asia/Taipei when empty).
+        """
+        args: dict[str, Any] = {"days_ahead": days_ahead, "days_back": days_back}
+        if tz:
+            args["tz"] = tz
+        raw = self._call_tool("calendar_list", args)
         _check_error(raw)
         summary, items = _parse_summary_json(raw)
         _check_truncation(summary)
