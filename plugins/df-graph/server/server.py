@@ -4,7 +4,7 @@
 信箱（讀/寄/回覆/轉發）+ 行事曆 CRUD。未來可在此擴 Teams / Files / Excel。
 
 啟動（任一支援 MCP stdio 的 AI client 皆可用，路徑由安裝流程按各人填入）：
-  uv run --with mcp --with msal python <path>/server.py
+  uv run --with mcp==1.27.2 --with msal==1.37.0 python <path>/server.py
 """
 import os
 import sys

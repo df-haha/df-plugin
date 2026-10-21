@@ -24,7 +24,7 @@ Microsoft 365 / Graph MCP server（信箱 + 行事曆 + 人員）。純雲端 Mi
 
 ```
 claude mcp add df-graph --scope user -- \
-  uv run --with mcp --with msal python "${CLAUDE_PLUGIN_ROOT}/server/server.py"
+  uv run --with mcp==1.27.2 --with msal==1.37.0 python "${CLAUDE_PLUGIN_ROOT}/server/server.py"
 ```
 
 > ⚠️ **刻意不透過 plugin `.mcp.json` 註冊**。user-scope 註冊讓工具名保持乾淨的
