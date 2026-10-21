@@ -11,6 +11,7 @@
 """
 import io
 import json
+import pathlib
 import unittest
 import urllib.error
 
@@ -1127,6 +1128,35 @@ class TestImmutableIdsAndTransactionId(Base):
         self.assertIs(sig_search.parameters["immutable_ids"].default, False)
         sig_create = inspect.signature(server.calendar_create)
         self.assertEqual(sig_create.parameters["transaction_id"].default, "")
+
+
+# ============ 安裝指令與 pyproject 釘版本一致 ============
+
+class TestPinnedInstallCommand(unittest.TestCase):
+    """README / setup skill / server.py 裡的 `uv run --with …` 必須與 pyproject 釘的版本一致。
+
+    `--with mcp` 不帶版本會抓到 mcp 2.x（FastMCP 已改名），server 啟動即 ModuleNotFoundError。
+    """
+
+    def _pins(self):
+        import re
+        toml = (pathlib.Path(__file__).parent / "pyproject.toml").read_text(encoding="utf-8")
+        deps = re.search(r"dependencies\s*=\s*\[(.*?)\]", toml, re.S).group(1)
+        return dict(re.findall(r'"([a-z]+)==([0-9.]+)"', deps))
+
+    def test_pyproject_pins_mcp_and_msal(self):
+        pins = self._pins()
+        self.assertIn("mcp", pins)
+        self.assertIn("msal", pins)
+
+    def test_install_commands_match_pyproject(self):
+        pins = self._pins()
+        expected = f"uv run --with mcp=={pins['mcp']} --with msal=={pins['msal']} python"
+        plugin = pathlib.Path(__file__).resolve().parent.parent
+        for rel in ("README.md", "skills/df-graph-setup/SKILL.md", "server/server.py"):
+            text = (plugin / rel).read_text(encoding="utf-8")
+            self.assertIn(expected, text, rel)
+            self.assertNotIn("--with mcp --with msal", text, rel)
 
 
 if __name__ == "__main__":

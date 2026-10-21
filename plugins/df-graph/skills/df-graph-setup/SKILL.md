@@ -30,10 +30,16 @@ allowed-tools: Bash, Read, AskUserQuestion
 
 ```bash
 claude mcp add df-graph --scope user -- \
-  uv run --with mcp --with msal python "${CLAUDE_PLUGIN_ROOT}/server/server.py"
+  uv run --with mcp==1.27.2 --with msal==1.37.0 python "${CLAUDE_PLUGIN_ROOT}/server/server.py"
 ```
 
 > 已存在同名註冊時先移除：`claude mcp remove df-graph --scope user` 再重跑。
+>
+> **版本一定要釘死**（`mcp==1.27.2`、`msal==1.37.0`，與 `server/pyproject.toml` 一致）。
+> `--with mcp` 不帶版本會抓到 mcp 2.x，而 2.x 已把 `mcp.server.fastmcp` 改名，server 一啟動就
+> `ModuleNotFoundError`，呼叫端只看到 `CONNECTION_CLOSED`。
+> **升級既有安裝**：先跑 `claude mcp get df-graph`，若 args 裡的 `mcp`、`msal` 沒有 `==`，
+> 就 `claude mcp remove df-graph --scope user` 再用上面的指令重新註冊，然後重啟 Claude Code 才會生效。
 
 ## Phase 2：device-code 登入（一次）
 
