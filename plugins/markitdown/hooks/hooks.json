@@ -1,11 +1,15 @@
-[
-  {
-    "event": "SessionStart",
-    "hooks": [
+{
+  "hooks": {
+    "SessionStart": [
       {
-        "type": "command",
-        "command": "pip install -q 'markitdown[all]' 2>/dev/null || true"
+        "hooks": [
+          {
+            "type": "command",
+            "timeout": 10,
+            "command": "python3 -P -E -c 'import markitdown' 2>/dev/null || echo 'markitdown plugin: Python 套件 markitdown 未安裝，轉檔前請先執行 python3 -m pip install \"markitdown[all]\"'"
+          }
+        ]
       }
     ]
   }
-]
+}
