@@ -101,6 +101,31 @@ class TestLineCollection:
         assert result.new_chats == []
         assert {c["ref"] for c in result.known_chats} == {c["chatRef"] for c in chats}
 
+    def test_first_successful_line_run_after_failed_one_is_still_baseline(self) -> None:
+        """A run where LINE failed leaves last_run set but no LINE checkpoint and no
+        known_chats; the next successful LINE run must still be the baseline."""
+        chats = [make_line_chat(ref=f"chat:{i:024x}", name=f"G{i}") for i in range(3)]
+        msg = make_line_message(chat_ref=chats[0]["chatRef"])
+        state = fake_state(known_chats=[])
+        state["last_run"] = {"run_id": "r0", "at": NOW.isoformat()}
+        state["checkpoints"] = {"line": None, "mail": None}
+        line = FakeLine(chats=chats, messages=[msg])
+
+        result = collect(fake_cfg(), state, now=NOW, line=line, graph=None, run_id="r5")
+
+        assert result.new_chats == []
+
+    def test_new_chat_after_line_checkpoint_exists(self) -> None:
+        chat = make_line_chat(ref="chat:aabbccddee112233aabbccdd", name="New Chat")
+        msg = make_line_message(chat_ref="chat:aabbccddee112233aabbccdd")
+        state = fake_state(known_chats=[])
+        state["checkpoints"] = {"line": NOW.isoformat(), "mail": None}
+        line = FakeLine(chats=[chat], messages=[msg])
+
+        result = collect(fake_cfg(), state, now=NOW, line=line, graph=None, run_id="r6")
+
+        assert [c["ref"] for c in result.new_chats] == ["chat:aabbccddee112233aabbccdd"]
+
     def test_checkpoint_not_advanced_on_failure(self) -> None:
         """SC-9: Failed source must not advance checkpoint."""
         cfg = fake_cfg()

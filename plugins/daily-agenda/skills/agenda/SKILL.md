@@ -58,7 +58,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
    - 讀取期間：用 `sources.line.from`／`to`、`sources.mail.from`／`to` 說「這次讀了 <from> 到 <to> 的 LINE 與信件」。第一次執行沒有上次進度，固定往回讀 7 天，之後每次接著上次讀到的地方。
    - 待辦數量摘要（今天要處理 N 項，其中 P0 有 X 項；可能已完成 M 項）。
    - 任何 `sources` 狀態不是 ok 的來源，轉述其 `message`（例如「LINE 這次沒讀到：請打開 LINE 視窗…；下次會補讀這段期間」）。
-   - `new_chats_count` > 0（第一次執行一定是 0，所有對話都當成已知的基準）→ 「本次有 N 個新的 LINE 對話。要查看名稱並選擇排除嗎？（查看名稱會讓這個對話鎖定，之後只能用 daily-agenda 功能）」使用者要看 → 執行 `DA chats new`（會鎖定對話），把回傳的 `name`（被圍欄包住的第三方名稱）列給使用者看。使用者要排除 → 用對應的 `ref`（不是 name）呼叫 `DA exclude --add <ref> <ref> ...`（可一次給多個）。
+   - `new_chats_count` > 0（LINE 第一次成功讀取的那次一定是 0，那次的對話就是之後比對的基準）→ 「本次有 N 個新的 LINE 對話。要查看名稱並選擇排除嗎？（查看名稱會讓這個對話鎖定，之後只能用 daily-agenda 功能）」使用者要看 → 執行 `DA chats new`（會鎖定對話），把回傳的 `name`（被圍欄包住的第三方名稱）列給使用者看。使用者要排除 → 用對應的 `ref`（不是 name）呼叫 `DA exclude --add <ref> <ref> ...`（可一次給多個）。
    - `sources.mail.code` 是 `MAIL_FOLDER_MISSING` → 「有些選取的信箱資料夾已不存在（可能被刪除或改名了），那些資料夾的信件這次沒讀到。要更新信箱資料夾設定嗎？」使用者要更新 → 引導到 `/agenda-setup` → 只改信箱資料夾。
    - `rejected_items` > 0 → 一句話：「有 N 筆 AI 結果因為引用不到原始資料而被略過。」
 4. 問使用者要不要開啟；要 → `DA open`（開最新一份 html；`--format md` 開 md）。不要用 `start`、`explorer`、`Invoke-Item`——對話鎖定時會被擋，`DA open` 是 daily-agenda 自己的指令，鎖定時也能用。

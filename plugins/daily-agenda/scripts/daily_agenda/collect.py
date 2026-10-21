@@ -132,10 +132,12 @@ def _collect_line(
         c["ref"] for c in cfg.get("line", {}).get("excluded_chats", [])
     }
     known_refs = {c["ref"] for c in state.get("known_chats", [])}
-    # First run ever: there is no baseline to compare against, so nothing is
-    # "new" — every chat the user chose to read would otherwise be reported
-    # (and the skill would re-ask the exclusion question right after setup).
-    first_run = not known_refs and not state.get("last_run")
+    # No LINE baseline yet (no known chats and LINE never completed a run —
+    # the LINE checkpoint only advances on success, so a first run where LINE
+    # was closed does not count): nothing is "new".  Otherwise every chat the
+    # user chose to read would be reported and the skill would re-ask the
+    # exclusion question right after setup.
+    first_run = not known_refs and not (state.get("checkpoints") or {}).get("line")
 
     # Paginate recentChats
     all_chats: list[dict[str, Any]] = []
