@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import tempfile
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -208,6 +209,10 @@ class GraphSource:
         self._stop = asyncio.Event()
         self._error: Exception | None = None
         self._has_folder_list: bool = False
+        # Server stderr goes here instead of our own stderr: df-graph prints
+        # pydantic warnings and "Processing request..." lines on every call,
+        # and on a crash the tail is the only useful diagnostic.
+        self._errlog = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -216,9 +221,27 @@ class GraphSource:
             target=self._run_loop, args=(params,), daemon=True,
         )
         self._thread.start()
-        self._ready.wait(timeout=30)
+        ready = self._ready.wait(timeout=30)
         if self._error:
-            raise self._error
+            if isinstance(self._error, GraphClientError):
+                raise self._error
+            # Anything else (process exited, broken pipe, protocol error) means
+            # the registered command could not be started — a different
+            # problem from "not registered", which resolve_server_params covers.
+            raise GraphClientError(
+                "DF_GRAPH_START_FAILED",
+                f"{type(self._error).__name__}: {self._error}\n{self._stderr_tail()}".rstrip(),
+            )
+        if not ready:
+            raise GraphClientError("DF_GRAPH_START_FAILED", f"timed out after 30s\n{self._stderr_tail()}".rstrip())
+
+    def _stderr_tail(self, max_lines: int = 20, max_chars: int = 2000) -> str:
+        try:
+            self._errlog.seek(0)
+            lines = self._errlog.read().splitlines()
+        except (OSError, ValueError):
+            return ""
+        return "\n".join(lines[-max_lines:])[-max_chars:]
 
     def _run_loop(self, params: StdioServerParameters) -> None:
         loop = asyncio.new_event_loop()
@@ -233,7 +256,7 @@ class GraphSource:
             loop.close()
 
     async def _session_lifecycle(self, params: StdioServerParameters) -> None:
-        async with stdio_client(params) as (read_stream, write_stream):
+        async with stdio_client(params, errlog=self._errlog) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 self._session = session
@@ -267,6 +290,10 @@ class GraphSource:
             self._loop.call_soon_threadsafe(self._stop.set)
         if self._thread:
             self._thread.join(timeout=10)
+        try:
+            self._errlog.close()
+        except OSError:
+            pass
 
     # -- tool calls ----------------------------------------------------------
 
@@ -393,8 +420,8 @@ def open_graph(
     """
     params = resolve_server_params(claude_json_path, server_config)
     source = GraphSource()
-    source._start(params)
     try:
+        source._start(params)
         yield source
     finally:
         source._shutdown()

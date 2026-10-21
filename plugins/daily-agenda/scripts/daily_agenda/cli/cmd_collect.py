@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from typing import Any
 
 from daily_agenda import collect, ctx_index, history, state
 from daily_agenda.fence import fence_untrusted
+from daily_agenda.fsutil import atomic_write_json
 from ._common import Deps, emit, require_consent
+
+# Numbered listing written by `chats list --brief`; `exclude` resolves numbers
+# against it and uses it to tell "chats the user was shown" from "chats the
+# user never saw" (those keep their previous exclusion state).
+_LISTING_FILE = "chat-listing.json"
+_PREVIEW_DAYS_AHEAD = 1
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +88,7 @@ def handle_outlook_preview(argv: list[str], deps: Deps) -> int:
         return emit({"ok": False, "code": code})
 
     try:
-        events = graph.calendar_list(days_ahead=1, days_back=0)
+        events = graph.calendar_list(days_ahead=_PREVIEW_DAYS_AHEAD, days_back=0)
         event_preview = [
             {"subject": fence_untrusted(e.get("subject", ""), raw=True),
              "start": e.get("start", ""), "end": e.get("end", "")}
@@ -93,7 +101,13 @@ def handle_outlook_preview(argv: list[str], deps: Deps) -> int:
     cfg.setdefault("mail", {})["enabled"] = True
     state.save_config(deps.home, cfg)
 
-    return emit({"ok": True, "code": None, "mail": mail_preview, "events": event_preview})
+    today = deps.now_factory().date()
+    return emit({
+        "ok": True, "code": None, "mail": mail_preview, "events": event_preview,
+        "events_tz": cfg.get("tz", "Asia/Taipei"),
+        "events_range": {"from": today.isoformat(),
+                         "to": (today + timedelta(days=_PREVIEW_DAYS_AHEAD)).isoformat()},
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +150,8 @@ def handle_chats(argv: list[str], deps: Deps) -> int:
 
     # Mark excluded
     excluded_refs = {c["ref"] for c in cfg.get("line", {}).get("excluded_chats", [])}
+    if "--brief" in argv:
+        return _emit_brief_listing(deps, chats, excluded_refs, days=days)
     result_chats = []
     for c in chats:
         result_chats.append({
@@ -147,6 +163,37 @@ def handle_chats(argv: list[str], deps: Deps) -> int:
         })
 
     return emit({"ok": True, "code": None, "chats": result_chats})
+
+
+def _emit_brief_listing(deps: Deps, chats: list[dict[str, Any]], excluded_refs: set[str], *, days: int) -> int:
+    """One fenced, numbered block (no refs) + persist n→ref so `exclude` can take numbers.
+
+    The full listing is ~250 bytes per chat (per-name fence, ref, timestamp); with
+    170+ chats that exceeds what the tool-result view shows, so the model ends up
+    reading the raw file.  Brief mode keeps the whole list under a single fence.
+    """
+    items = []
+    lines = []
+    for n, c in enumerate(chats, start=1):
+        items.append({"n": n, "ref": c["ref"], "name": c["name"]})
+        date = (c.get("last_message_at") or "")[:10]
+        tag = " [已排除]" if c["ref"] in excluded_refs else ""
+        lines.append(f"{n}. {c['name']} ({c['type']}, {date}){tag}")
+    atomic_write_json(deps.home / _LISTING_FILE, {
+        "days": days, "listed_at": deps.now_factory().isoformat(), "items": items,
+    })
+    return emit({"ok": True, "code": None, "count": len(items),
+                 "listing": fence_untrusted("\n".join(lines), raw=True)})
+
+
+def _load_listing(deps: Deps) -> dict[str, Any] | None:
+    try:
+        data = json.loads((deps.home / _LISTING_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+        return None
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -176,18 +223,53 @@ def _handle_chats_new(deps: Deps) -> int:
 # exclude --set REF...|--add REF|--remove REF
 # ---------------------------------------------------------------------------
 
+def _resolve_refs(tokens: list[str], listing: dict[str, Any] | None) -> tuple[list[str], str | None]:
+    """Map `exclude` arguments to chat refs.  Plain digits are listing numbers."""
+    by_n = {int(i["n"]): i["ref"] for i in (listing or {}).get("items", [])}
+    refs: list[str] = []
+    for tok in tokens:
+        if tok.isdigit():
+            if listing is None:
+                return [], "numbers need a listing: run `chats list --brief` first"
+            ref = by_n.get(int(tok))
+            if ref is None:
+                return [], f"number {tok} is not in the latest listing (1..{len(by_n)})"
+            refs.append(ref)
+        else:
+            refs.append(tok)
+    return list(dict.fromkeys(refs)), None
+
+
 def handle_exclude(argv: list[str], deps: Deps) -> int:
     cfg = state.load_config(deps.home)
     st = state.load_state(deps.home)
-    known_chats = {c["ref"]: c.get("name", "") for c in st.get("known_chats", [])}
+    listing = _load_listing(deps)
+    listed_refs = [i["ref"] for i in (listing or {}).get("items", [])]
+    names: dict[str, str] = {c["ref"]: c.get("name", "") for c in st.get("known_chats", [])}
+    names.update({i["ref"]: i.get("name", "") for i in (listing or {}).get("items", [])})
 
     existing = cfg.get("line", {}).get("excluded_chats", [])
     existing_map = {c["ref"]: c for c in existing}
 
-    if "--set" in argv:
-        idx = argv.index("--set")
-        refs = argv[idx + 1:]
-        new_excluded = [{"ref": r, "name": known_chats.get(r, "")} for r in refs]
+    def _entry(ref: str) -> dict[str, Any]:
+        return existing_map.get(ref) or {"ref": ref, "name": names.get(ref, "")}
+
+    kept_unlisted = 0
+    if "--set" in argv or "--keep" in argv:
+        mode = "--set" if "--set" in argv else "--keep"
+        refs, err = _resolve_refs(argv[argv.index(mode) + 1:], listing)
+        if err:
+            return emit({"ok": False, "code": "ARG_ERROR", "detail": err}, exit_code=2)
+        if mode == "--keep":
+            if listing is None:
+                return emit({"ok": False, "code": "ARG_ERROR",
+                              "detail": "--keep needs a listing: run `chats list --brief` first"}, exit_code=2)
+            refs = [r for r in listed_refs if r not in set(refs)]
+        # Chats the latest listing never showed keep their previous state: the
+        # user could not have un-excluded something they did not see.
+        unlisted = [c for c in existing if c["ref"] not in set(listed_refs)] if listing else []
+        kept_unlisted = len(unlisted)
+        new_excluded = unlisted + [_entry(r) for r in refs if r not in {c["ref"] for c in unlisted}]
         cfg.setdefault("line", {})["excluded_chats"] = new_excluded
         # C4: delete history rows for every excluded chat
         for ref in refs:
@@ -196,31 +278,36 @@ def handle_exclude(argv: list[str], deps: Deps) -> int:
             except Exception:
                 pass  # Non-fatal
     elif "--add" in argv:
-        idx = argv.index("--add")
-        if idx + 1 >= len(argv):
+        refs, err = _resolve_refs(argv[argv.index("--add") + 1:], listing)
+        if err:
+            return emit({"ok": False, "code": "ARG_ERROR", "detail": err}, exit_code=2)
+        if not refs:
             return emit({"ok": False, "code": "ARG_ERROR", "detail": "--add requires a ref"}, exit_code=2)
-        ref = argv[idx + 1]
-        if ref not in existing_map:
-            existing.append({"ref": ref, "name": known_chats.get(ref, "")})
-            cfg.setdefault("line", {})["excluded_chats"] = existing
-        # C4: delete history rows for the excluded chat
-        try:
-            history.delete_by_chat_ref(deps.home, ref)
-        except Exception:
-            pass  # Non-fatal
+        for ref in refs:
+            if ref not in existing_map:
+                existing.append(_entry(ref))
+                existing_map[ref] = existing[-1]
+            # C4: delete history rows for the excluded chat
+            try:
+                history.delete_by_chat_ref(deps.home, ref)
+            except Exception:
+                pass  # Non-fatal
+        cfg.setdefault("line", {})["excluded_chats"] = existing
     elif "--remove" in argv:
-        idx = argv.index("--remove")
-        if idx + 1 >= len(argv):
+        refs, err = _resolve_refs(argv[argv.index("--remove") + 1:], listing)
+        if err:
+            return emit({"ok": False, "code": "ARG_ERROR", "detail": err}, exit_code=2)
+        if not refs:
             return emit({"ok": False, "code": "ARG_ERROR", "detail": "--remove requires a ref"}, exit_code=2)
-        ref = argv[idx + 1]
-        cfg.setdefault("line", {})["excluded_chats"] = [c for c in existing if c["ref"] != ref]
+        cfg.setdefault("line", {})["excluded_chats"] = [c for c in existing if c["ref"] not in set(refs)]
     else:
         return emit({"ok": False, "code": "ARG_ERROR",
-                      "detail": "usage: exclude --set REF...|--add REF|--remove REF"}, exit_code=2)
+                      "detail": "usage: exclude --set REF|N...|--keep REF|N...|--add REF|N...|--remove REF|N..."},
+                    exit_code=2)
 
     state.save_config(deps.home, cfg)
     count = len(cfg.get("line", {}).get("excluded_chats", []))
-    return emit({"ok": True, "code": None, "excluded_count": count})
+    return emit({"ok": True, "code": None, "excluded_count": count, "kept_unlisted": kept_unlisted})
 
 
 # ---------------------------------------------------------------------------

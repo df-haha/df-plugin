@@ -42,7 +42,7 @@ def handle(argv: list[str], deps: Deps) -> int:
         if version is None:
             version = profile.latest_version(deps.home)
         if version == 0:
-            return emit({"ok": False, "code": "CONFIG_MISSING",
+            return emit({"ok": False, "code": "PROFILE_MISSING",
                           "detail": "no profile versions found"})
 
         text = profile.read_version(deps.home, version)

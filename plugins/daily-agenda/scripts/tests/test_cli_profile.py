@@ -79,7 +79,7 @@ class TestProfileCLI:
         d = _deps(tmp_path)
         result = _run(["profile", "show"], d)
         assert result["ok"] is False
-        assert result["code"] == "CONFIG_MISSING"
+        assert result["code"] == "PROFILE_MISSING"
 
     def test_restore(self, tmp_path: Path) -> None:
         d = _deps(tmp_path)

@@ -6,6 +6,7 @@ _MESSAGES: dict[str, str] = {
     # consent / setup
     "CONSENT_REQUIRED": "尚未完成資料外送說明與同意，請先執行 /agenda-setup。",
     "CONFIG_MISSING": "還沒有設定，請先執行 /agenda-setup。",
+    "PROFILE_MISSING": "還沒有個人工作檔案（/agenda-setup 第 8 步會建立）。",
     # LINE
     "LINE_NOT_RUNNING": "LINE 沒有在執行。請打開 LINE 並登入後再試。",
     "SESSION_KEY_UNAVAILABLE": "讀不到 LINE 的登入資料。請打開 LINE 視窗（不要只縮在右下角）、確認已登入後再試。",
@@ -20,6 +21,7 @@ _MESSAGES: dict[str, str] = {
     "LOCAL_READER_FAILED": "LINE 讀取失敗，原因不明；其他來源照常彙整，下次會補讀。",
     # Outlook / df-graph
     "DF_GRAPH_NOT_REGISTERED": "還沒安裝或登入 df-graph（讀 Outlook 用）。請先執行 /df-graph-setup。",
+    "DF_GRAPH_START_FAILED": "df-graph 已註冊但啟動失敗（多半是套件版本沒釘死）。請重跑 /df-graph-setup 重新註冊，再重啟 Claude Code。",
     "DF_GRAPH_TOO_OLD": "df-graph 版本太舊，缺少本工具需要的功能，請更新 df-graph plugin。",
     "DF_GRAPH_AUTH": "Outlook 登入已過期，請重新執行 /df-graph-setup 的登入步驟。",
     "GRAPH_FAILED": "讀取 Outlook 失敗；其他來源照常彙整，下次會補讀。",
