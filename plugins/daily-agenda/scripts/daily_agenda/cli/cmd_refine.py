@@ -146,7 +146,7 @@ def handle(argv: list[str], deps: Deps) -> int:
             with progress.heartbeat():
                 analyzer_output = analyze.run_analyzer(
                     bundle_bytes, prompt,
-                    model=cfg.get("analysis", {}).get("model"),
+                    model=state.analysis_model(cfg),
                     timeout_s=cfg.get("analysis", {}).get("timeout_s", 600),
                 )
             progress.event("analyze_batch_done", i=1, n=1)

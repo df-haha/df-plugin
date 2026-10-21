@@ -276,3 +276,44 @@ class TestNoRawContent:
         code, obj = _run_cli(["probe"], deps, capsys)
         full_output = capsys.readouterr().out + json.dumps(obj, ensure_ascii=False)
         assert self.SENTINEL not in full_output
+
+
+class TestAnalysisModelConfig:
+    """Analysis model defaults to the cheaper tier and is validated on set."""
+
+    def test_default_is_sonnet(self, tmp_path: Path, capsys: Any) -> None:
+        from daily_agenda import state
+        assert state.load_config(tmp_path)["analysis"]["model"] == "sonnet"
+        _, obj = _run_cli(["config", "get"], _deps(tmp_path), capsys)
+        assert obj["config"]["analysis.model"] == "sonnet"
+
+    def test_set_alias_and_full_id(self, tmp_path: Path, capsys: Any) -> None:
+        from daily_agenda import state
+        deps = _deps(tmp_path)
+        code, obj = _run_cli(["config", "set", "analysis.model=Opus"], deps, capsys)
+        assert code == 0 and state.load_config(tmp_path)["analysis"]["model"] == "opus"
+        code, _ = _run_cli(["config", "set", "analysis.model=claude-sonnet-5[1m]"], deps, capsys)
+        assert code == 0 and state.load_config(tmp_path)["analysis"]["model"] == "claude-sonnet-5[1m]"
+
+    def test_empty_resets_to_default(self, tmp_path: Path, capsys: Any) -> None:
+        from daily_agenda import state
+        deps = _deps(tmp_path)
+        _run_cli(["config", "set", "analysis.model=opus"], deps, capsys)
+        _run_cli(["config", "set", "analysis.model="], deps, capsys)
+        assert state.load_config(tmp_path)["analysis"]["model"] == "sonnet"
+
+    def test_rejects_garbage(self, tmp_path: Path, capsys: Any) -> None:
+        for bad in ("gpt-4", "sonnet; rm -rf", "claude-", "--model"):
+            code, obj = _run_cli(["config", "set", f"analysis.model={bad}"], _deps(tmp_path), capsys)
+            assert code == 2 and obj["code"] == "ARG_ERROR", bad
+
+    def test_legacy_config_without_model_uses_default(self) -> None:
+        from daily_agenda import state
+        assert state.analysis_model({"analysis": {"model": None}}) == "sonnet"
+        assert state.analysis_model({}) == "sonnet"
+        assert state.analysis_model({"analysis": {"model": "opus"}}) == "opus"
+
+    def test_run_passes_model_to_claude(self) -> None:
+        from daily_agenda.analyze import build_command
+        cmd = build_command("p", claude="claude", model="sonnet")
+        assert cmd[cmd.index("--model") + 1] == "sonnet"

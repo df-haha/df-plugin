@@ -115,6 +115,8 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
 
 寫入：`DA config set output.formats=<…> output.dir="<…>" refine.every_runs=<…> refine.every_days=<…>`；要排程則 `DA schedule install --time HH:MM`。
 
+5. **分析模型（不用問，只告知）**：寫入設定後告訴使用者一句：「整理訊息用的 AI 模型預設是 Sonnet（速度快、成本低，做分類整理夠用）。之後覺得判斷不夠準，跟我說「換成 Opus」就能改。」想改時執行 `DA config set analysis.model=<sonnet|opus|haiku|完整模型 id>`（本步驟仍在鎖定前，可直接改；之後在 `/agenda` 裡改也可以）。
+
 ## 第 5 步：串 Outlook（US-3）
 
 > ⚠️ **本步驟會觸發對話鎖定**：`outlook-preview` 讀取外部信件原文，之後本對話只能使用 daily-agenda 功能。

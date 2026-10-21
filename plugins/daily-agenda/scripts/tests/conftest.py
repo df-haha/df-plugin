@@ -54,7 +54,7 @@ def fake_cfg(
         "refine": {"every_runs": 10, "every_days": 14},
         "ctx": {"dir": None},
         "schedule": {"enabled": False, "time": None},
-        "analysis": {"batch_bytes": 300000, "model": None, "timeout_s": 600},
+        "analysis": {"batch_bytes": 300000, "model": "sonnet", "timeout_s": 600},
     }
 
 
