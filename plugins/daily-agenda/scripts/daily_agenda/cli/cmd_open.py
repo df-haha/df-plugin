@@ -18,11 +18,20 @@ from ._common import Deps, emit
 
 
 def _latest_receipt(h: Path) -> dict[str, Any] | None:
+    """Receipt of the newest generation that was published.
+
+    Ledger operations (confirm / mark-done / …) commit a new generation that
+    copies the outputs but not the receipt, so walk back from the current
+    generation until a receipt is found.
+    """
     gen = state.current_generation(h)
     if gen is None:
         return None
-    data = read_json(state._gen_dir(h, gen) / "published")
-    return data if isinstance(data, dict) else None
+    for g in range(gen, 0, -1):
+        data = read_json(state._gen_dir(h, g) / "published")
+        if isinstance(data, dict) and data.get("targets"):
+            return data
+    return None
 
 
 def handle(argv: list[str], deps: Deps) -> int:

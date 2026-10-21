@@ -277,8 +277,9 @@ def _validate_chat_digests(
             # Drop if src_id is a self-message
             if src_id in self_src_ids:
                 continue
-            # Drop if src_id belongs to a different chat_ref
-            if filtering and src_id in src_id_to_chat and src_id_to_chat[src_id] != chat_ref:
+            # Drop unless src_id is a message of this chat in this batch
+            # (unknown ids would render as ghost items with no sender/time).
+            if filtering and src_id_to_chat.get(src_id) != chat_ref:
                 continue
             ask = nr.get("ask", "")
             if not isinstance(ask, str):

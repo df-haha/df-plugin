@@ -106,10 +106,22 @@ def _normalise_bullets(raw: Any) -> list[str]:
 
 
 def _normalise_needs_reply(raw: Any) -> list[dict[str, Any]]:
-    """Normalise needs_reply: non-list → [], non-dict entries dropped."""
+    """Normalise needs_reply: non-list → [], non-dict entries and entries
+    whose src_id is not a non-empty string dropped (they would otherwise
+    poison the set-based union and empty every digest)."""
     if not isinstance(raw, list):
         return []
-    return [nr for nr in raw if isinstance(nr, dict)]
+    return [nr for nr in raw if isinstance(nr, dict) and isinstance(nr.get("src_id"), str) and nr.get("src_id")]
+
+
+def _sweep_excluded_history(h: Path, cfg: dict[str, Any]) -> None:
+    """C4 retry: `exclude` may have failed to delete history rows (reported as
+    history_cleanup_failed); deleting again here is idempotent and cheap."""
+    for c in cfg.get("line", {}).get("excluded_chats", []):
+        try:
+            history.delete_by_chat_ref(h, c.get("ref", ""))
+        except Exception:
+            pass  # still non-fatal for the run; reported path is `exclude`
 
 
 def _merge_chat_digests(
@@ -140,7 +152,7 @@ def _merge_chat_digests_inner(
             if not isinstance(d, dict):
                 continue
             cref = d.get("chat_ref", "")
-            if not cref:
+            if not isinstance(cref, str) or not cref:
                 continue
             bullets = _normalise_bullets(d.get("bullets"))
             nr = _normalise_needs_reply(d.get("needs_reply"))
@@ -183,7 +195,7 @@ def _merge_mail_digests(
                 if not isinstance(d, dict):
                     continue
                 sid = d.get("src_id", "")
-                if sid:
+                if isinstance(sid, str) and sid:
                     merged[sid] = dict(d)
         return list(merged.values())
     except Exception:
@@ -245,6 +257,7 @@ def handle(argv: list[str], deps: Deps) -> int:
         return emit({"ok": False, "code": "LOCKED"})
 
     try:
+        _sweep_excluded_history(h, cfg)
         return _run_pipeline(h, cfg, now, deps, noninteractive)
     finally:
         lock_ctx.__exit__(None, None, None)

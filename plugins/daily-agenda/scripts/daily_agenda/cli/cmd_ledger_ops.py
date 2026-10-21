@@ -33,10 +33,21 @@ def _commit_ledger_change(deps: Deps, new_ledger: list[dict], new_state: dict | 
     if pub:
         publish_targets = pub.get("targets", [])
 
-    staging = state.stage_generation(
-        h, state=st, ledger=new_ledger, outputs=outputs, publish_targets=publish_targets,
-    )
-    state.commit_generation(h, staging)
+    # Serialize against a running `run` (which holds the lock for minutes and
+    # commits its own generation at the end): without this a confirm/mark-done
+    # committed mid-run is overwritten by run's stale ledger.
+    try:
+        lock_ctx = state.acquire_lock(h)
+        lock_ctx.__enter__()
+    except state.Locked:
+        return emit({"ok": False, "code": "LOCKED"})
+    try:
+        staging = state.stage_generation(
+            h, state=st, ledger=new_ledger, outputs=outputs, publish_targets=publish_targets,
+        )
+        state.commit_generation(h, staging)
+    finally:
+        lock_ctx.__exit__(None, None, None)
     return -1  # sentinel: success, caller emits
 
 

@@ -307,14 +307,30 @@ def handle_exclude(argv: list[str], deps: Deps) -> int:
     def _entry(ref: str) -> dict[str, Any]:
         return existing_map.get(ref) or {"ref": ref, "name": names.get(ref, "")}
 
-    def _result(**extra: Any) -> int:
-        state.save_config(deps.home, cfg)
+    def _result(*, history_cleanup_failed: list[str] | None = None, **extra: Any) -> int:
         count = len(cfg.get("line", {}).get("excluded_chats", []))
         out = {"ok": True, "code": None, "excluded_count": count, "kept_unlisted": 0}
         if listing:
             out["listing"] = {"days": listing.get("days"), "listed_at": listing.get("listed_at")}
         out.update(extra)
+        if history_cleanup_failed:
+            out["history_cleanup_failed"] = len(history_cleanup_failed)
+            out["message"] = ("排除設定已儲存，但有 "
+                              f"{len(history_cleanup_failed)} 個對話的舊摘要暫時清不掉；下次執行 /agenda 會再清一次。")
         return emit(out)
+
+    def _purge_history(deps_: Deps, refs: list[str]) -> list[str]:
+        """C4: history rows of excluded chats are deleted *after* the exclusion is
+        persisted (so a failed config write cannot lose history for a chat that
+        is still read).  Failures are reported, and `run` retries them."""
+        state.save_config(deps_.home, cfg)
+        failed: list[str] = []
+        for ref in refs:
+            try:
+                history.delete_by_chat_ref(deps_.home, ref)
+            except Exception:
+                failed.append(ref)
+        return failed
 
     if "--set" in argv or "--keep" in argv:
         mode = "--set" if "--set" in argv else "--keep"
@@ -335,13 +351,7 @@ def handle_exclude(argv: list[str], deps: Deps) -> int:
         unlisted_refs = {c["ref"] for c in unlisted}
         new_excluded = unlisted + [_entry(r) for r in refs if r not in unlisted_refs]
         cfg.setdefault("line", {})["excluded_chats"] = new_excluded
-        # C4: delete history rows for every excluded chat
-        for ref in refs:
-            try:
-                history.delete_by_chat_ref(deps.home, ref)
-            except Exception:
-                pass  # Non-fatal
-        return _result(kept_unlisted=len(unlisted))
+        return _result(kept_unlisted=len(unlisted), history_cleanup_failed=_purge_history(deps, refs))
 
     if "--add" in argv:
         refs, err = _resolve_refs(argv[argv.index("--add") + 1:], listing)
@@ -353,13 +363,8 @@ def handle_exclude(argv: list[str], deps: Deps) -> int:
             if ref not in existing_map:
                 existing.append(_entry(ref))
                 existing_map[ref] = existing[-1]
-            # C4: delete history rows for the excluded chat
-            try:
-                history.delete_by_chat_ref(deps.home, ref)
-            except Exception:
-                pass  # Non-fatal
         cfg.setdefault("line", {})["excluded_chats"] = existing
-        return _result()
+        return _result(history_cleanup_failed=_purge_history(deps, refs))
 
     if "--remove" in argv:
         refs, err = _resolve_refs(argv[argv.index("--remove") + 1:], listing)
@@ -368,6 +373,7 @@ def handle_exclude(argv: list[str], deps: Deps) -> int:
         if not refs:
             return emit({"ok": False, "code": "ARG_ERROR", "detail": "--remove requires a ref"}, exit_code=2)
         cfg.setdefault("line", {})["excluded_chats"] = [c for c in existing if c["ref"] not in set(refs)]
+        state.save_config(deps.home, cfg)
         return _result()
 
     return emit({"ok": False, "code": "ARG_ERROR",
