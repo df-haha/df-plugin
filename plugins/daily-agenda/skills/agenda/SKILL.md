@@ -129,6 +129,13 @@ delimiter 必須保持**單引號**包住（`'DA_CONFIRM_END_7f3a9c2b'`），防
    - 更新 coverage（該維度 status → have/inferred）：`DA draft new --kind coverage` 取得 `draft_path`，Write coverage-draft.json 到該 `draft_path`，`DA profile coverage save --file <draft_path>`。
 4. 每次 run 最多問一題（自動限速）。
 
+## F. 更換分析模型
+
+使用者說「換成 Opus」「用 Sonnet 就好」「改模型」：
+1. `DA config set analysis.model=<opus|sonnet|haiku|完整 claude-* 模型 id>`；成功後回「下次 /agenda 起，整理訊息改用 <模型>」。
+2. 這個對話若已鎖定（讀過原文），`config set` 會被擋；告訴使用者「請開新對話再說一次『換成 Opus』」。
+3. 使用者問現在用哪個 → `DA config get` 看 `analysis.model`（預設 sonnet）。
+
 ## E. 查看待辦原始訊息
 
 使用者問「T-xxxx 的原文是什麼」或「讓我看原始訊息」時：

@@ -54,7 +54,10 @@ _DEFAULT_CONFIG: dict[str, Any] = {
     "refine": {"every_runs": 10, "every_days": 14},
     "ctx": {"dir": None},
     "schedule": {"enabled": False, "time": None},
-    "analysis": {"batch_bytes": 300_000, "model": None, "timeout_s": 600},
+    # model: alias or full id passed to `claude -p --model`. The analysis is
+    # mechanical (classify + summarise under fixed rules), so the default is the
+    # cheaper tier; users can raise it with `config set analysis.model=opus`.
+    "analysis": {"batch_bytes": 300_000, "model": "sonnet", "timeout_s": 600},  # see analysis_model()
 }
 
 
@@ -63,6 +66,18 @@ def home() -> Path:
     if env:
         return Path(env)
     return Path.home() / ".daily-agenda"
+
+
+DEFAULT_ANALYSIS_MODEL = "sonnet"
+
+
+def analysis_model(cfg: dict) -> str:
+    """Model for the tool-less analysis subprocess.
+
+    Configs written before the default existed hold ``None``; treat that as
+    the default so existing installs get the same behaviour as new ones.
+    """
+    return cfg.get("analysis", {}).get("model") or DEFAULT_ANALYSIS_MODEL
 
 
 def load_config(h: Path) -> dict:

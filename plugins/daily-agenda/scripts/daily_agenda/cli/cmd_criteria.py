@@ -291,7 +291,7 @@ def _draft_analyze(
         overhead += len(crit_text.encode("utf-8")) + 100
     effective_batch = max(batch_bytes_cfg - overhead, batch_bytes_cfg // 3)
     batches = bundle.split_batches(records, effective_batch)  # type: ignore[attr-defined]
-    model_cfg = cfg.get("analysis", {}).get("model")
+    model_cfg = state.analysis_model(cfg)
     timeout_s = cfg.get("analysis", {}).get("timeout_s", 600)
 
     if len(batches) <= 1:

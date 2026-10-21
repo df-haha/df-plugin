@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from daily_agenda import state
 from ._common import Deps, emit
 
@@ -17,6 +19,10 @@ _INT_KEYS = {"refine.every_runs", "refine.every_days", "analysis.timeout_s", "an
 _BOOL_KEYS = {"line.enabled", "mail.enabled"}
 _LIST_KEYS = {"output.formats"}
 _VALID_FORMATS = {"html", "md"}
+# Model aliases Claude Code resolves itself, or a full model id. Anything else
+# is rejected so a typo does not silently break every analysis run.
+_MODEL_ALIASES = {"sonnet", "opus", "haiku"}
+_MODEL_ID_RE = re.compile(r"^claude-[a-z0-9][a-z0-9.-]*(\[1m\])?$")
 
 
 def _set_nested(cfg: dict, dotkey: str, value: object) -> None:
@@ -79,6 +85,16 @@ def handle(argv: list[str], deps: Deps) -> int:
                         return emit({"ok": False, "code": "ARG_ERROR",
                                       "detail": f"invalid formats: {invalid}; allowed: {_VALID_FORMATS}"}, exit_code=2)
                 value = parts
+            elif key == "analysis.model":
+                v = raw_value.strip().lower()
+                if not v:
+                    value = state.DEFAULT_ANALYSIS_MODEL  # empty = back to default
+                elif v in _MODEL_ALIASES or _MODEL_ID_RE.match(v):
+                    value = v
+                else:
+                    return emit({"ok": False, "code": "ARG_ERROR",
+                                  "detail": f"analysis.model must be one of {sorted(_MODEL_ALIASES)} or a claude-* model id"},
+                                exit_code=2)
             else:
                 value = raw_value if raw_value else None
 

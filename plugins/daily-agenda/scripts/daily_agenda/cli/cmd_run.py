@@ -75,7 +75,7 @@ def _analyze_batch_with_retry(
     Also checks that ``items`` is a list in the result — if not, treats it
     as MODEL_OUTPUT_INVALID so the retry covers it.
     """
-    model_name = cfg.get("analysis", {}).get("model")
+    model_name = state.analysis_model(cfg)
     timeout_s = cfg.get("analysis", {}).get("timeout_s", 600)
     stdin_bytes = bp.read_bytes()
 
