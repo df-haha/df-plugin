@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 import jinja2
+import markupsafe
 
+from daily_agenda.digest_script import DIGEST_SCRIPT, DIGEST_SCRIPT_HASH
 from daily_agenda.ledger import carry_days as _carry_days
 from daily_agenda.messages import humanize
 
@@ -20,6 +22,10 @@ from daily_agenda.messages import humanize
 _TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates"
 
 _SAFE_HREF_PREFIXES = ("https://", "mailto:")
+
+# Report code validation — only codes matching this pattern are emitted
+# into the data-report attribute.
+_REPORT_CODE_RE = re.compile(r"^R-[A-Z0-9]{3}$")
 
 # Characters that could form a control sequence if left in a URL.
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -106,6 +112,12 @@ def build_view(
     report_code: str,
     skipped: list[dict] | None = None,
     src_index: dict[str, dict] | None = None,
+    # C3 digest additions (all optional for backward compat)
+    records: list[dict] | None = None,
+    chat_digests: list[dict] | None = None,
+    mail_digests: list[dict] | None = None,
+    folder_labels: dict[str, str] | None = None,
+    chat_history: dict[str, list[dict]] | None = None,
 ) -> dict:
     """Build the view model for rendering.
 
@@ -114,8 +126,13 @@ def build_view(
 
     Returns a dict ready for ``render()``, including ``report_index``.
     """
-    si = src_index or {}
+    si = _with_carryover_labels(src_index or {}, ledger, state)
     skipped_items = list(skipped) if skipped else []
+    all_records = records or []
+    all_chat_digests = chat_digests or []
+    all_mail_digests = mail_digests or []
+    fl = folder_labels or {}
+    ch = chat_history or {}
 
     # --- sources header ---
     sources_header: list[dict] = []
@@ -133,15 +150,15 @@ def build_view(
         else:
             message = _STATUS_LABELS.get(status, status)
 
-        coverage = ""
+        coverage_str = ""
         if status in ("ok", "partial"):
             f = src_status.get("from", "")
             t = src_status.get("to", "")
             if f and t:
-                coverage = f"{_format_dt(f)} – {_format_dt(t)}"
+                coverage_str = f"{_format_dt(f)} – {_format_dt(t)}"
 
         sources_header.append({
-            "name": name, "status": status, "message": message, "coverage": coverage,
+            "name": name, "status": status, "message": message, "coverage": coverage_str,
         })
 
     # --- today (open items) ---
@@ -207,6 +224,34 @@ def build_view(
     total = batch.get("total", 1)
     coverage = {"batched": total > 1, "batches": total}
 
+    # --- C3: digest view keys ---
+    chats, quiet_chats, mail_folders, other_todos = _build_digest_views(
+        ledger=ledger,
+        today=today,
+        report_index=report_index,
+        all_records=all_records,
+        all_chat_digests=all_chat_digests,
+        all_mail_digests=all_mail_digests,
+        folder_labels=fl,
+        chat_history=ch,
+        bundle_meta=bundle_meta,
+        si=si,
+        now=now,
+    )
+
+    # --- Group other_todos: P0 always visible, rest collapsed by source ---
+    # Build todo_id → folder_label mapping for mail-sourced todos.
+    _todo_to_folder: dict[str, str] = {}
+    for mf in mail_folders:
+        fl_label = mf.get("folder_label", "")
+        for mail_row in mf.get("mails", []):
+            for tv in mail_row.get("todos", []):
+                _todo_to_folder[tv["todo_id"]] = fl_label
+
+    other_todo_p0, other_todo_groups = _group_other_todos(
+        other_todos, src_to_folder=_todo_to_folder,
+    )
+
     return {
         "report_code": report_code,
         "date": now.strftime("%Y-%m-%d"),
@@ -221,7 +266,485 @@ def build_view(
         "skipped": skipped_views,
         "coverage": coverage,
         "report_index": report_index,
+        # C3 new keys
+        "chats": chats,
+        "quiet_chats": quiet_chats,
+        "mail_folders": mail_folders,
+        "other_todos": other_todos,
+        # Grouped other_todos
+        "other_todo_p0": other_todo_p0,
+        "other_todo_groups": other_todo_groups,
     }
+
+
+# ---------------------------------------------------------------------------
+# C3 digest view helpers
+# ---------------------------------------------------------------------------
+
+_CHAT_TYPE_LABELS: dict[str, str] = {
+    "group": "群組",
+    "direct": "一對一",
+}
+
+_MAIL_CATEGORY_ORDER: dict[str, int] = {
+    "reply": 0,
+    "action": 1,
+    "fyi": 2,
+}
+
+_DEFAULT_FOLDER_LABELS: dict[str, str] = {
+    "inbox": "收件匣",
+}
+
+
+def _build_digest_views(
+    *,
+    ledger: list[dict],
+    today: list[dict],
+    report_index: dict[str, str],
+    all_records: list[dict],
+    all_chat_digests: list[dict],
+    all_mail_digests: list[dict],
+    folder_labels: dict[str, str],
+    chat_history: dict[str, list[dict]],
+    bundle_meta: dict,
+    si: dict,
+    now: datetime,
+) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
+    """Build chats, quiet_chats, mail_folders, other_todos per C3."""
+
+    # --- Build indexes from records ---
+    # src_id → chat_ref for line_message records
+    src_to_chat: dict[str, str] = {}
+    # chat_ref → list of records
+    chat_records: dict[str, list[dict]] = {}
+    # chat_ref → chat info (name, type)
+    chat_info: dict[str, dict[str, str]] = {}
+    # src_id → mail record
+    mail_records_by_id: dict[str, dict] = {}
+
+    for rec in all_records:
+        kind = rec.get("kind", "")
+        if kind == "line_message":
+            cref = rec.get("chat_ref", "")
+            sid = rec.get("src_id", "")
+            if cref and sid:
+                src_to_chat[sid] = cref
+                chat_records.setdefault(cref, []).append(rec)
+            ut = rec.get("untrusted", {})
+            if cref and cref not in chat_info:
+                chat_info[cref] = {
+                    "name": ut.get("chat_name", ""),
+                    "chat_type": rec.get("chat_type", ""),
+                }
+        elif kind == "mail":
+            sid = rec.get("src_id", "")
+            if sid:
+                mail_records_by_id[sid] = rec
+
+    # src_id → mail src_id set (for attribution)
+    mail_src_ids: set[str] = set(mail_records_by_id.keys())
+
+    # --- Todo attribution ---
+    # For each open todo, determine if it belongs to a chat or mail
+    todo_to_chat: dict[str, str] = {}  # todo_id → chat_ref
+    todo_to_mail: dict[str, str] = {}  # todo_id → mail src_id
+    attributed_todo_ids: set[str] = set()
+
+    for t in ledger:
+        if t["status"] != "open":
+            continue
+        tid = t["id"]
+        for sid in t.get("src_ids", []):
+            if sid in src_to_chat:
+                todo_to_chat[tid] = src_to_chat[sid]
+                attributed_todo_ids.add(tid)
+                break
+            if sid in mail_src_ids:
+                todo_to_mail[tid] = sid
+                attributed_todo_ids.add(tid)
+                break
+
+    # --- Build chat_ref → digest lookup ---
+    digest_by_chat: dict[str, dict] = {}
+    for d in all_chat_digests:
+        cref = d.get("chat_ref", "")
+        if cref:
+            digest_by_chat[cref] = d
+
+    # --- Build needs_reply src_id set per chat ---
+    nr_src_ids_by_chat: dict[str, set[str]] = {}
+    for d in all_chat_digests:
+        cref = d.get("chat_ref", "")
+        nr_sids: set[str] = set()
+        for nr in d.get("needs_reply", []):
+            s = nr.get("src_id", "")
+            if s:
+                nr_sids.add(s)
+        if cref:
+            nr_src_ids_by_chat[cref] = nr_sids
+
+    # --- Pulse window ---
+    line_src = bundle_meta.get("sources", {}).get("line", {})
+    pulse_from = line_src.get("from", "")
+    pulse_to = line_src.get("to", "")
+
+    # --- Build chat cards ---
+    chats: list[dict] = []
+    quiet_chats: list[dict] = []
+
+    for d in all_chat_digests:
+        cref = d.get("chat_ref", "")
+        if not cref:
+            continue
+        info = chat_info.get(cref, {"name": "", "chat_type": ""})
+        msgs = chat_records.get(cref, [])
+        bullets = d.get("bullets", [])
+        needs_reply = d.get("needs_reply", [])
+        quiet = d.get("quiet", False)
+
+        # Collect attributed todos for this chat
+        chat_todos: list[dict] = []
+        for tv in today:
+            tid = tv["todo_id"]
+            if todo_to_chat.get(tid) == cref:
+                chat_todos.append(tv)
+
+        # Determine state
+        if needs_reply:
+            card_state = "needs"
+        elif chat_todos:
+            card_state = "todo"
+        else:
+            card_state = "seen"
+
+        # If quiet and no attributed todos → quiet_chats
+        if quiet and not chat_todos and not needs_reply:
+            quiet_chats.append({
+                "name": info.get("name", ""),
+                "kind_label": _CHAT_TYPE_LABELS.get(info.get("chat_type", ""), "對話"),
+                "msg_count": len(msgs),
+                "summary": "；".join(bullets) if bullets else "",
+            })
+            continue
+
+        # Build needs_reply views (lookup who/when from records)
+        nr_views: list[dict] = []
+        for nr in needs_reply:
+            nr_sid = nr.get("src_id", "")
+            # Find the record to get who/when
+            who = ""
+            when = ""
+            for rec in msgs:
+                if rec.get("src_id") == nr_sid:
+                    ut = rec.get("untrusted", {})
+                    who = ut.get("sender", "")
+                    when = _format_dt(rec.get("ts", ""))
+                    break
+            nr_views.append({
+                "who": who,
+                "when": when,
+                "ask": nr.get("ask", ""),
+            })
+
+        # Pulse
+        pulse = _build_pulse(
+            msgs, pulse_from, pulse_to,
+            nr_src_ids_by_chat.get(cref, set()),
+        )
+
+        # History
+        hist_entries = chat_history.get(cref, [])
+        history_views: list[dict] = []
+        for h in hist_entries[:3]:
+            history_views.append({
+                "date": _format_dt(h.get("created_at", h.get("period_to", ""))),
+                "bullets": h.get("bullets", []),
+            })
+
+        chats.append({
+            "_chat_ref": cref,  # internal, for sorting/testing
+            "name": info.get("name", ""),
+            "kind_label": _CHAT_TYPE_LABELS.get(info.get("chat_type", ""), "對話"),
+            "msg_count": len(msgs),
+            "needs_reply": nr_views,
+            "bullets": bullets,
+            "todos": chat_todos,
+            "history": history_views,
+            "pulse": pulse,
+            "state": card_state,
+        })
+
+    # US-2: chats with messages but no digest → missing-digest handling
+    # If the chat has attributed todos → active card (state "todo"); else → quiet_chats
+    digested_refs = {d.get("chat_ref", "") for d in all_chat_digests}
+    for cref, msgs in chat_records.items():
+        if cref in digested_refs:
+            continue
+        info = chat_info.get(cref, {"name": "", "chat_type": ""})
+        n = len(msgs)
+
+        # Check if this missing-digest chat has attributed todos
+        missing_chat_todos: list[dict] = []
+        for tv in today:
+            tid = tv["todo_id"]
+            if todo_to_chat.get(tid) == cref:
+                missing_chat_todos.append(tv)
+
+        if missing_chat_todos:
+            # HIGH-1: missing-digest chat with todos → active card
+            pulse = _build_pulse(msgs, pulse_from, pulse_to, set())
+            chats.append({
+                "_chat_ref": cref,
+                "name": info.get("name", ""),
+                "kind_label": _CHAT_TYPE_LABELS.get(info.get("chat_type", ""), "對話"),
+                "msg_count": n,
+                "needs_reply": [],
+                "bullets": ["AI 這次沒有產生整理，請到 LINE 查看。"],
+                "todos": missing_chat_todos,
+                "history": [],
+                "pulse": pulse,
+                "state": "todo",
+                "missing": True,
+            })
+        else:
+            quiet_chats.append({
+                "name": info.get("name", ""),
+                "kind_label": _CHAT_TYPE_LABELS.get(info.get("chat_type", ""), "對話"),
+                "msg_count": n,
+                "summary": f"AI 這次沒有產生整理（{n} 則訊息），請到 LINE 查看。",
+                "missing": True,
+            })
+
+    # Sort chats: needs_reply count desc → has todos → other
+    chats.sort(key=lambda c: (-len(c["needs_reply"]), 0 if c["todos"] else 1))
+
+    # --- Build mail folders ---
+    # mail digest → mail record lookup
+    mail_folder_map: dict[str, list[dict]] = {}
+    for md in all_mail_digests:
+        sid = md.get("src_id", "")
+        rec = mail_records_by_id.get(sid)
+        if not rec:
+            continue
+        folder_ref = rec.get("folder", "inbox")
+        ut = rec.get("untrusted", {})
+
+        # Collect attributed todos for this mail
+        mail_todos: list[dict] = []
+        for tv in today:
+            tid = tv["todo_id"]
+            if todo_to_mail.get(tid) == sid:
+                mail_todos.append(tv)
+
+        mail_view = {
+            "from": ut.get("from", ""),
+            "when": _format_dt(rec.get("received_at", "")),
+            "subject": ut.get("subject", ""),
+            "category": md.get("category", "fyi"),
+            "summary": md.get("summary", ""),
+            "todos": mail_todos,
+        }
+        mail_folder_map.setdefault(folder_ref, []).append(mail_view)
+
+    mail_folders: list[dict] = []
+    for folder_ref, mails in mail_folder_map.items():
+        # Sort: reply → action → fyi
+        mails.sort(key=lambda m: _MAIL_CATEGORY_ORDER.get(m["category"], 9))
+        # Label lookup
+        label = folder_labels.get(folder_ref, _DEFAULT_FOLDER_LABELS.get(folder_ref, folder_ref))
+        mail_folders.append({
+            "folder_label": label,
+            "mails": mails,
+        })
+
+    # --- other_todos: attributed todos not emitted in any card/mail → other_todos ---
+    # Collect all todo_ids that were actually placed in a chat card or mail row
+    emitted_todo_ids: set[str] = set()
+    for c in chats:
+        for tv in c.get("todos", []):
+            emitted_todo_ids.add(tv["todo_id"])
+    for mf in mail_folders:
+        for mail_row in mf.get("mails", []):
+            for tv in mail_row.get("todos", []):
+                emitted_todo_ids.add(tv["todo_id"])
+
+    other_todos: list[dict] = []
+    for tv in today:
+        tid = tv["todo_id"]
+        if tid not in emitted_todo_ids:
+            other_todos.append(tv)
+
+    return chats, quiet_chats, mail_folders, other_todos
+
+
+def _build_pulse(
+    msgs: list[dict],
+    pulse_from: str,
+    pulse_to: str,
+    nr_src_ids: set[str],
+) -> dict:
+    """Build pulse visualization data for a chat card.
+
+    ``dots[].x`` is a Python-computed float 0–800 from message timestamps.
+    """
+    # Parse window boundaries
+    try:
+        dt_from = datetime.fromisoformat(pulse_from)
+        dt_to = datetime.fromisoformat(pulse_to)
+    except (ValueError, TypeError):
+        # Fall back to message range
+        ts_list = sorted(m.get("ts", "") for m in msgs if m.get("ts"))
+        if len(ts_list) >= 2:
+            try:
+                dt_from = datetime.fromisoformat(ts_list[0])
+                dt_to = datetime.fromisoformat(ts_list[-1])
+            except (ValueError, TypeError):
+                return {"dots": [], "from": "", "to": ""}
+        else:
+            return {"dots": [], "from": pulse_from, "to": pulse_to}
+
+    span = (dt_to - dt_from).total_seconds()
+    if span <= 0:
+        span = 1.0  # Avoid division by zero
+
+    dots: list[dict] = []
+    for m in msgs:
+        ts_str = m.get("ts", "")
+        try:
+            dt_msg = datetime.fromisoformat(ts_str)
+        except (ValueError, TypeError):
+            continue
+        offset = (dt_msg - dt_from).total_seconds()
+        x = max(0.0, min(800.0, float(offset / span * 800.0)))
+        sid = m.get("src_id", "")
+        dots.append({
+            "x": x,
+            "reply": sid in nr_src_ids,
+            "when": _format_dt(ts_str),
+        })
+
+    return {
+        "dots": dots,
+        "from": _format_dt(pulse_from) if pulse_from else "",
+        "to": _format_dt(pulse_to) if pulse_to else "",
+    }
+
+
+# ---------------------------------------------------------------------------
+# § other_todos grouping (user decision 2026-10-20)
+# ---------------------------------------------------------------------------
+
+# Label prefixes emitted by _build_src_index in cmd_run.py.
+_LINE_LABEL_PREFIX = "LINE · "   # "LINE · "
+_MAIL_LABEL_PREFIX = "Mail · "   # "Mail · "
+_NO_SOURCE_GROUP = "其他"
+
+
+def _derive_group_label(
+    todo: dict,
+    src_to_folder: dict[str, str],
+) -> str:
+    """Derive a human-readable group label from a todo_view's first source.
+
+    LINE sources (prefixed ``LINE · <chat_name>``) → chat name.
+    Mail sources (prefixed ``Mail · <sender>``) → folder label if mapped,
+    else sender.  No sources → ``其他``.
+    """
+    sources = todo.get("sources") or []
+    if not sources:
+        return _NO_SOURCE_GROUP
+    label = sources[0].get("label", "")
+    if not label:
+        return _NO_SOURCE_GROUP
+    if label.startswith(_LINE_LABEL_PREFIX):
+        return label[len(_LINE_LABEL_PREFIX):] or _NO_SOURCE_GROUP
+    if label.startswith(_MAIL_LABEL_PREFIX):
+        # Try folder label first; fall back to the sender portion.
+        todo_id = todo.get("todo_id", "")
+        folder = src_to_folder.get(todo_id)
+        if folder:
+            return folder
+        return label[len(_MAIL_LABEL_PREFIX):] or _NO_SOURCE_GROUP
+    return label
+
+
+def _with_carryover_labels(si: dict, ledger: list[dict], state: dict) -> dict:
+    """Add readable labels for ledger src_ids that are not in this run's records.
+
+    Carried-over todos cite messages from earlier runs; without this their
+    source label falls back to the raw src_id, which is unreadable and makes
+    every todo its own group.  LINE src_ids embed the chat_ref
+    (``line:<chat_ref>:<msg>``), resolved to a name via ``state.known_chats``.
+    """
+    names = {c.get("ref", ""): c.get("name", "") for c in state.get("known_chats", []) or []}
+    merged = dict(si)
+    for t in ledger:
+        for sid in t.get("src_ids", []):
+            if sid in merged or not isinstance(sid, str):
+                continue
+            kind, _, rest = sid.partition(":")
+            if kind == "line":
+                # chat_ref is "chat:<id>"; the message ref after it may itself contain ":".
+                name = names.get(":".join(rest.split(":", 2)[:2]), "")
+                label = f"{_LINE_LABEL_PREFIX}{name}" if name else "LINE 對話"
+            elif kind == "mail":
+                label = "信件"
+            elif kind == "event":
+                label = "行事曆"
+            else:
+                label = _NO_SOURCE_GROUP
+            merged[sid] = {"label": label, "href": None}
+    return merged
+
+
+def _group_other_todos(
+    other_todos: list[dict],
+    *,
+    src_to_folder: dict[str, str] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Split *other_todos* into P0 (always-visible) and collapsed groups.
+
+    Returns ``(p0_list, groups)`` where *groups* is a list of
+    ``{label, count, p1_count, todos}`` dicts sorted by count descending
+    (ties broken by first-appearance order).  Todos within each group are
+    sorted P1 before P2, stable otherwise.
+    """
+    stf = src_to_folder or {}
+
+    p0: list[dict] = []
+    buckets: dict[str, list[dict]] = {}
+    bucket_order: list[str] = []
+
+    for t in other_todos:
+        if t.get("priority") == "P0":
+            p0.append(t)
+            continue
+        key = _derive_group_label(t, stf)
+        if key not in buckets:
+            buckets[key] = []
+            bucket_order.append(key)
+        buckets[key].append(t)
+
+    # Sort within each group: P1 before P2 (stable)
+    def _pri_sort_key(t: dict) -> int:
+        return 0 if t.get("priority") == "P1" else 1
+
+    groups: list[dict] = []
+    for key in bucket_order:
+        todos = buckets[key]
+        todos.sort(key=_pri_sort_key)
+        groups.append({
+            "label": key,
+            "count": len(todos),
+            "p1_count": sum(1 for t in todos if t.get("priority") == "P1"),
+            "todos": todos,
+        })
+
+    # Sort groups by count desc (stable → first-appearance tie-break)
+    groups.sort(key=lambda g: -g["count"])
+
+    return p0, groups
 
 
 def _todo_view(t: dict, no: int, si: dict, now: datetime) -> dict:
@@ -275,7 +798,18 @@ def _render_html(view: dict) -> str:
         undefined=jinja2.StrictUndefined,
     )
     template = env.get_template("agenda.html.j2")
-    return template.render(v=view)
+
+    # Validate report code — only emit into data-report if it matches
+    # the fixed pattern R-[A-Z0-9]{3}.
+    raw_code = str(view.get("report_code", ""))
+    report_attr = raw_code if _REPORT_CODE_RE.fullmatch(raw_code) else ""
+
+    return template.render(
+        v=view,
+        digest_script=markupsafe.Markup(DIGEST_SCRIPT),
+        csp_hash=DIGEST_SCRIPT_HASH,
+        report_attr=report_attr,
+    )
 
 
 def _render_md(view: dict) -> str:

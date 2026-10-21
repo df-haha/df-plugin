@@ -214,7 +214,7 @@ class FakeGraph:
             "body": "Test body",
         }
 
-    def calendar_list(self, *, days_ahead: int = 3, days_back: int = 1) -> list[dict[str, Any]]:
+    def calendar_list(self, *, days_ahead: int = 3, days_back: int = 1, tz: str = "") -> list[dict[str, Any]]:
         self.calendar_list_calls += 1
         if self._fail_on_calendar:
             from daily_agenda.graph_client import GraphClientError

@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
-from . import schedule
+from . import history, schedule
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -26,8 +26,15 @@ def _assert_safe_home(h: Path) -> Path:
 def uninstall(h: Path, *, purge: bool, runner: Runner = subprocess.run) -> dict[str, Any]:
     resolved = _assert_safe_home(h)
     removed = schedule.remove(resolved, runner=runner)
+    # C4: remove history database (always, not just on purge)
+    history_removed = False
+    try:
+        history_removed = history.remove_database(resolved)
+    except Exception:
+        pass
     home_removed = False
     if purge and resolved.exists():
         shutil.rmtree(resolved)
         home_removed = True
-    return {"schedule_removed": removed["ok"], "home_removed": home_removed}
+    return {"schedule_removed": removed["ok"], "home_removed": home_removed,
+            "history_removed": history_removed}

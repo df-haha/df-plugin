@@ -21,8 +21,15 @@ class ModelOutputInvalid(Exception):
 # Constants
 # ---------------------------------------------------------------------------
 
+_VALID_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2})
 _VALID_ACTIONS: frozenset[str] = frozenset({"new", "update", "maybe_done", "skip"})
 _VALID_PRIORITIES: frozenset[str] = frozenset({"P0", "P1", "P2"})
+_VALID_MAIL_CATEGORIES: frozenset[str] = frozenset({"reply", "action", "fyi"})
+
+_MAX_BULLET: int = 80
+_MAX_ASK: int = 80
+_MAX_MAIL_SUMMARY: int = 120
+_MAX_DIGEST_BULLETS: int = 5
 
 _MAX_TITLE: int = 120
 _MAX_REASON: int = 200
@@ -45,6 +52,8 @@ _ACTION_FIELDS: dict[str, frozenset[str]] = {
 class ValidationResult:
     items: list[dict] = field(default_factory=list)
     rejected: list[dict] = field(default_factory=list)
+    chat_digests: list[dict] = field(default_factory=list)
+    mail_digests: list[dict] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -72,16 +81,22 @@ def validate(
     model: dict,
     bundle_src_ids: set[str],
     open_todo_ids: set[str],
+    *,
+    records: list[dict] | None = None,
 ) -> ValidationResult:
-    """Validate model output against §3 contract.
+    """Validate model output against §3 / C1 contract.
 
     Raises :class:`ModelOutputInvalid` when the top-level structure is invalid.
     Per-item failures are collected in ``result.rejected``.
+
+    When *records* is provided, digest entries are validated leniently (C1):
+    bad entries are silently dropped or truncated, never causing a run failure.
     """
     if not isinstance(model, dict):
         raise ModelOutputInvalid("top-level value is not an object")
 
-    if model.get("schema_version") != 1:
+    sv = model.get("schema_version")
+    if sv not in _VALID_SCHEMA_VERSIONS:
         raise ModelOutputInvalid("missing or unsupported schema_version")
 
     items_raw = model.get("items")
@@ -89,7 +104,7 @@ def validate(
         raise ModelOutputInvalid("missing or invalid 'items'")
 
     # Any extra top-level key → reject entire output.
-    allowed_top = {"schema_version", "items"}
+    allowed_top = {"schema_version", "items", "chat_digests", "mail_digests"}
     extra_top = set(model.keys()) - allowed_top
     if extra_top:
         raise ModelOutputInvalid(f"unknown top-level fields: {extra_top}")
@@ -185,6 +200,150 @@ def validate(
                 continue
 
         result.items.append(item)
+
+    # --- Digest validation (lenient per C1) ---
+    result.chat_digests = _validate_chat_digests(
+        model.get("chat_digests"), records,
+    )
+    result.mail_digests = _validate_mail_digests(
+        model.get("mail_digests"), records,
+    )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Digest validation helpers (lenient — drop bad entries, never fail the run)
+# ---------------------------------------------------------------------------
+
+def _validate_chat_digests(
+    raw: Any,
+    records: list[dict] | None,
+) -> list[dict]:
+    """Validate chat_digests leniently.  Bad entries are dropped or truncated."""
+    if not isinstance(raw, list):
+        return []
+
+    # When records are provided, filter against known chat_refs/src_ids.
+    # When records is None (legacy caller), skip ref filtering entirely.
+    filtering = records is not None
+    valid_chat_refs: set[str] = set()
+    self_src_ids: set[str] = set()
+    # src_id → chat_ref mapping for needs_reply cross-chat validation
+    src_id_to_chat: dict[str, str] = {}
+    if filtering:
+        for rec in (records or []):
+            if rec.get("kind") == "line_message":
+                cref = rec.get("chat_ref", "")
+                sid = rec.get("src_id", "")
+                if cref:
+                    valid_chat_refs.add(cref)
+                if cref and sid:
+                    src_id_to_chat[sid] = cref
+                if rec.get("is_self") and sid:
+                    self_src_ids.add(sid)
+
+    result: list[dict] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        chat_ref = entry.get("chat_ref")
+        if not isinstance(chat_ref, str) or not chat_ref:
+            continue
+        # Drop if chat_ref not in this run's records (when filtering is active)
+        if filtering and chat_ref not in valid_chat_refs:
+            continue
+
+        # bullets — truncate list to 5, each string to 80 chars
+        bullets_raw = entry.get("bullets")
+        if not isinstance(bullets_raw, list):
+            bullets_raw = []
+        bullets: list[str] = []
+        for b in bullets_raw[:_MAX_DIGEST_BULLETS]:
+            if isinstance(b, str):
+                bullets.append(b[:_MAX_BULLET])
+
+        # needs_reply — drop bad entries, drop is_self references
+        nr_raw = entry.get("needs_reply")
+        if not isinstance(nr_raw, list):
+            nr_raw = []
+        needs_reply: list[dict] = []
+        for nr in nr_raw:
+            if not isinstance(nr, dict):
+                continue
+            src_id = nr.get("src_id")
+            if not isinstance(src_id, str):
+                continue
+            # Drop if src_id is a self-message
+            if src_id in self_src_ids:
+                continue
+            # Drop unless src_id is a message of this chat in this batch
+            # (unknown ids would render as ghost items with no sender/time).
+            if filtering and src_id_to_chat.get(src_id) != chat_ref:
+                continue
+            ask = nr.get("ask", "")
+            if not isinstance(ask, str):
+                ask = ""
+            needs_reply.append({
+                "src_id": src_id,
+                "ask": ask[:_MAX_ASK],
+            })
+
+        quiet = bool(entry.get("quiet", False))
+
+        result.append({
+            "chat_ref": chat_ref,
+            "bullets": bullets,
+            "needs_reply": needs_reply,
+            "quiet": quiet,
+        })
+
+    return result
+
+
+def _validate_mail_digests(
+    raw: Any,
+    records: list[dict] | None,
+) -> list[dict]:
+    """Validate mail_digests leniently.  Bad entries are dropped or truncated."""
+    if not isinstance(raw, list):
+        return []
+
+    # When records are provided, filter against known mail src_ids.
+    filtering = records is not None
+    mail_src_ids: set[str] = set()
+    if filtering:
+        for rec in (records or []):
+            if rec.get("kind") == "mail":
+                sid = rec.get("src_id", "")
+                if sid:
+                    mail_src_ids.add(sid)
+
+    result: list[dict] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        src_id = entry.get("src_id")
+        if not isinstance(src_id, str) or not src_id:
+            continue
+        # Drop if src_id not in this run's mail records (when filtering)
+        if filtering and src_id not in mail_src_ids:
+            continue
+
+        category = entry.get("category", "")
+        if category not in _VALID_MAIL_CATEGORIES:
+            continue
+
+        summary = entry.get("summary", "")
+        if not isinstance(summary, str):
+            summary = ""
+        summary = summary[:_MAX_MAIL_SUMMARY]
+
+        result.append({
+            "src_id": src_id,
+            "category": category,
+            "summary": summary,
+        })
 
     return result
 

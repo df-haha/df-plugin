@@ -34,6 +34,8 @@ _TRANSITIONS: dict[tuple[str, str], str] = {
     ("maybe_done", "open"): "user",
     ("open", "done"): "user",
     ("open", "dismissed"): "user",
+    ("maybe_done", "dismissed"): "user",
+    ("collapsed", "dismissed"): "user",
     ("maybe_done", "collapsed"): "system",
     ("collapsed", "open"): "user",
     ("collapsed", "done"): "user",
@@ -264,6 +266,18 @@ def auto_collapse(ledger: list[dict], *, now: datetime) -> list[dict]:
 # mark_done — user marks items as done
 # ---------------------------------------------------------------------------
 
+def check_report_code(state: dict, report_code: str | None) -> None:
+    """Raise :class:`StaleReport` if *report_code* does not match the current report.
+
+    Shared by ``mark_done`` and ``confirm``.
+    """
+    current_code = state.get("report_code")
+    if not current_code or report_code != current_code:
+        raise StaleReport(
+            f"report code {report_code!r} does not match current {current_code!r}"
+        )
+
+
 def mark_done(
     ledger: list[dict],
     state: dict,
@@ -280,11 +294,7 @@ def mark_done(
     """
     if numbers:
         # Number-based: require matching report_code.
-        current_code = state.get("report_code")
-        if not current_code or report_code != current_code:
-            raise StaleReport(
-                f"report code {report_code!r} does not match current {current_code!r}"
-            )
+        check_report_code(state, report_code)
         # Resolve numbers via report_index.
         report_index = state.get("report_index", {})
         resolved_ids: list[str] = []
@@ -337,6 +347,69 @@ def restore(ledger: list[dict], todo_id: str, *, now: datetime) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Derived transition sets (computed from _TRANSITIONS, single source of truth)
+# ---------------------------------------------------------------------------
+
+DISMISSABLE: frozenset[str] = frozenset(
+    frm for (frm, to) in _TRANSITIONS if to == "dismissed"
+)
+"""Statuses from which a user can dismiss (刪除/不追了)."""
+
+PRIORITY_EDITABLE: frozenset[str] = frozenset({"open", "maybe_done"})
+"""Statuses on which the user can change priority."""
+
+
+# ---------------------------------------------------------------------------
+# dismiss — DISMISSABLE → dismissed
+# ---------------------------------------------------------------------------
+
+
+def dismiss(ledger: list[dict], todo_id: str, *, now: datetime) -> list[dict]:
+    """Dismiss an open, maybe_done, or collapsed item.  Returns new ledger."""
+    result = copy.deepcopy(ledger)
+    for i, t in enumerate(result):
+        if t["id"] == todo_id:
+            if t["status"] not in DISMISSABLE:
+                raise IllegalTransition(
+                    f"cannot dismiss {todo_id}: status is {t['status']}, "
+                    f"expected one of {', '.join(sorted(DISMISSABLE))}"
+                )
+            result[i] = _change_status(t, "dismissed", by="user", now=now)
+            return result
+    raise KeyError(f"todo {todo_id!r} not found")
+
+
+# ---------------------------------------------------------------------------
+# set_priority — change priority on an open/maybe_done item
+# ---------------------------------------------------------------------------
+
+_VALID_PRIORITIES: frozenset[str] = frozenset({"P0", "P1", "P2"})
+
+
+def set_priority(
+    ledger: list[dict],
+    todo_id: str,
+    priority: str,
+    *,
+    now: datetime,
+) -> list[dict]:
+    """Set the priority of an open or maybe_done item.  Returns new ledger."""
+    if priority not in _VALID_PRIORITIES:
+        raise ValueError(f"invalid priority {priority!r}")
+    result = copy.deepcopy(ledger)
+    for i, t in enumerate(result):
+        if t["id"] == todo_id:
+            if t["status"] not in PRIORITY_EDITABLE:
+                raise IllegalTransition(
+                    f"cannot change priority of {todo_id}: status is {t['status']}"
+                )
+            result[i]["priority"] = priority
+            result[i]["updated_at"] = now.isoformat()
+            return result
+    raise KeyError(f"todo {todo_id!r} not found")
+
+
+# ---------------------------------------------------------------------------
 # feedback_signals — extract user/system feedback for criteria refinement
 # ---------------------------------------------------------------------------
 
@@ -346,6 +419,8 @@ _SIGNAL_MAP: dict[tuple[str, str, str], str] = {
     ("collapsed", "done", "user"): "user_confirmed_done",
     ("maybe_done", "done", "user"): "user_confirmed_done",
     ("open", "dismissed", "user"): "user_dismissed",
+    ("maybe_done", "dismissed", "user"): "user_dismissed",
+    ("collapsed", "dismissed", "user"): "user_dismissed",
     ("maybe_done", "open", "user"): "user_rejected_maybe_done",
     ("collapsed", "open", "user"): "user_restored",
     ("maybe_done", "collapsed", "system"): "system_collapsed",

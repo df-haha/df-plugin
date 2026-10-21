@@ -6,6 +6,7 @@ _MESSAGES: dict[str, str] = {
     # consent / setup
     "CONSENT_REQUIRED": "尚未完成資料外送說明與同意，請先執行 /agenda-setup。",
     "CONFIG_MISSING": "還沒有設定，請先執行 /agenda-setup。",
+    "PROFILE_MISSING": "還沒有個人工作檔案（/agenda-setup 第 8 步會建立）。",
     # LINE
     "LINE_NOT_RUNNING": "LINE 沒有在執行。請打開 LINE 並登入後再試。",
     "SESSION_KEY_UNAVAILABLE": "讀不到 LINE 的登入資料。請打開 LINE 視窗（不要只縮在右下角）、確認已登入後再試。",
@@ -20,6 +21,7 @@ _MESSAGES: dict[str, str] = {
     "LOCAL_READER_FAILED": "LINE 讀取失敗，原因不明；其他來源照常彙整，下次會補讀。",
     # Outlook / df-graph
     "DF_GRAPH_NOT_REGISTERED": "還沒安裝或登入 df-graph（讀 Outlook 用）。請先執行 /df-graph-setup。",
+    "DF_GRAPH_START_FAILED": "df-graph 已註冊但啟動失敗（多半是套件版本沒釘死）。請重跑 /df-graph-setup 重新註冊，再重啟 Claude Code。",
     "DF_GRAPH_TOO_OLD": "df-graph 版本太舊，缺少本工具需要的功能，請更新 df-graph plugin。",
     "DF_GRAPH_AUTH": "Outlook 登入已過期，請重新執行 /df-graph-setup 的登入步驟。",
     "GRAPH_FAILED": "讀取 Outlook 失敗；其他來源照常彙整，下次會補讀。",
@@ -30,7 +32,11 @@ _MESSAGES: dict[str, str] = {
     "MODEL_OUTPUT_INVALID": "AI 回傳的格式不正確，這次不產生彙整；下次會重讀。",
     "PUBLISH_FAILED": "彙整檔寫到輸出資料夾失敗（資料已保存），下次執行會先補寫。",
     "STALE_REPORT": "你指的不是最新一份彙整，為避免改錯，請改用待辦代碼（T-xxxx）或重新確認。",
+    "CONFIRM_INVALID": "確認內容有誤，請檢查後重新貼上（所有項目均未變更）。",
     "LOCKED": "已經有一個彙整正在執行，請稍後再試。",
+    "NO_OUTPUT_YET": "還沒有產生過彙整檔，請先執行 /agenda。",
+    "OUTPUT_MISSING": "最新的彙整檔已不在原位置（可能被移動或刪除），請重新執行 /agenda。",
+    "OPEN_FAILED": "無法用預設程式開啟彙整檔，請自行到輸出資料夾打開。",
     # environment
     "NODE_MISSING": "需要 Node.js 24 以上。請在 PowerShell 執行：winget install OpenJS.NodeJS.LTS",
     "NODE_TOO_OLD": "Node.js 版本太舊（需要 24 以上）。請在 PowerShell 執行：winget upgrade OpenJS.NodeJS.LTS",

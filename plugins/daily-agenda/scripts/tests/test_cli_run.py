@@ -230,3 +230,185 @@ class TestRunPipeline:
 
         code, obj = _run(["run"], deps, capsys)
         assert obj["code"] == "LOCKED"
+
+
+# ---------------------------------------------------------------------------
+# Retry + digest merge tests (C1, C2)
+# ---------------------------------------------------------------------------
+
+class TestRetryAndDigestMerge:
+    def test_single_batch_retry_on_parse_failure(self, tmp_path: Path, capsys: Any) -> None:
+        """MODEL_OUTPUT_INVALID on first attempt → retry once → succeed."""
+        h = _setup_home(tmp_path)
+        deps = _deps(h)
+
+        good_result = {
+            "schema_version": 2,
+            "items": [],
+            "chat_digests": [],
+            "mail_digests": [],
+        }
+
+        call_count = 0
+
+        def _side_effect(*args: Any, **kwargs: Any) -> AnalyzerResult:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                from daily_agenda.analyze import AnalyzerError
+                raise AnalyzerError("MODEL_OUTPUT_INVALID")
+            return AnalyzerResult(output=good_result, ms=0)
+
+        with patch("daily_agenda.analyze.run_analyzer", side_effect=_side_effect):
+            code, obj = _run(["run"], deps, capsys)
+
+        assert obj["ok"] is True
+        assert call_count == 2  # First attempt + one retry
+
+    def test_retry_not_on_other_errors(self, tmp_path: Path, capsys: Any) -> None:
+        """Non-parse errors (e.g. ANALYZER_TIMEOUT) should NOT retry."""
+        h = _setup_home(tmp_path)
+        deps = _deps(h)
+
+        call_count = 0
+
+        def _side_effect(*args: Any, **kwargs: Any) -> AnalyzerResult:
+            nonlocal call_count
+            call_count += 1
+            from daily_agenda.analyze import AnalyzerError
+            raise AnalyzerError("ANALYZER_TIMEOUT")
+
+        with patch("daily_agenda.analyze.run_analyzer", side_effect=_side_effect):
+            code, obj = _run(["run"], deps, capsys)
+
+        assert obj["ok"] is False
+        assert obj["code"] == "ANALYZER_TIMEOUT"
+        assert call_count == 1  # No retry
+
+    def test_retry_both_fail(self, tmp_path: Path, capsys: Any) -> None:
+        """Both attempts fail → should return error."""
+        h = _setup_home(tmp_path)
+        deps = _deps(h)
+
+        def _side_effect(*args: Any, **kwargs: Any) -> AnalyzerResult:
+            from daily_agenda.analyze import AnalyzerError
+            raise AnalyzerError("MODEL_OUTPUT_INVALID")
+
+        with patch("daily_agenda.analyze.run_analyzer", side_effect=_side_effect):
+            code, obj = _run(["run"], deps, capsys)
+
+        assert obj["ok"] is False
+        assert obj["code"] == "MODEL_OUTPUT_INVALID"
+
+
+class TestDigestMerge:
+    """Test C2 merge functions directly."""
+
+    def test_merge_chat_digests_single_batch(self) -> None:
+        from daily_agenda.cli.cmd_run import _merge_chat_digests
+        batches = [[
+            {"chat_ref": "chat:A", "bullets": ["b1"], "needs_reply": [], "quiet": False},
+        ]]
+        result = _merge_chat_digests(batches)
+        assert len(result) == 1
+        assert result[0]["bullets"] == ["b1"]
+
+    def test_merge_chat_digests_multi_batch(self) -> None:
+        from daily_agenda.cli.cmd_run import _merge_chat_digests
+        batches = [
+            [{"chat_ref": "chat:A", "bullets": ["b1", "b2"], "needs_reply": [{"src_id": "s1"}], "quiet": True}],
+            [{"chat_ref": "chat:A", "bullets": ["b3", "b4", "b5", "b6"], "needs_reply": [{"src_id": "s1"}, {"src_id": "s2"}], "quiet": True}],
+        ]
+        result = _merge_chat_digests(batches)
+        assert len(result) == 1
+        # Bullets concatenated then truncated to 5
+        assert len(result[0]["bullets"]) == 5
+        assert result[0]["bullets"] == ["b1", "b2", "b3", "b4", "b5"]
+        # needs_reply dedup by src_id
+        assert len(result[0]["needs_reply"]) == 2
+        # quiet = all True
+        assert result[0]["quiet"] is True
+
+    def test_merge_chat_digests_quiet_false_if_any(self) -> None:
+        from daily_agenda.cli.cmd_run import _merge_chat_digests
+        batches = [
+            [{"chat_ref": "chat:A", "bullets": [], "needs_reply": [], "quiet": True}],
+            [{"chat_ref": "chat:A", "bullets": [], "needs_reply": [], "quiet": False}],
+        ]
+        result = _merge_chat_digests(batches)
+        assert result[0]["quiet"] is False
+
+    def test_merge_mail_digests_dedup_last_wins(self) -> None:
+        from daily_agenda.cli.cmd_run import _merge_mail_digests
+        batches = [
+            [{"src_id": "mail:A", "category": "fyi", "summary": "old"}],
+            [{"src_id": "mail:A", "category": "reply", "summary": "new"}],
+        ]
+        result = _merge_mail_digests(batches)
+        assert len(result) == 1
+        assert result[0]["summary"] == "new"
+        assert result[0]["category"] == "reply"
+
+    def test_merge_mail_digests_different_ids(self) -> None:
+        from daily_agenda.cli.cmd_run import _merge_mail_digests
+        batches = [
+            [{"src_id": "mail:A", "category": "reply", "summary": "a"}],
+            [{"src_id": "mail:B", "category": "action", "summary": "b"}],
+        ]
+        result = _merge_mail_digests(batches)
+        assert len(result) == 2
+
+    def test_merge_chat_digests_null_fields_no_crash(self) -> None:
+        """HIGH-2: null/non-list bullets or needs_reply must not crash."""
+        from daily_agenda.cli.cmd_run import _merge_chat_digests
+        batches = [
+            [{"chat_ref": "chat:A", "bullets": None, "needs_reply": None, "quiet": False}],
+            [{"chat_ref": "chat:A", "bullets": "bad", "needs_reply": "bad", "quiet": True}],
+        ]
+        result = _merge_chat_digests(batches)
+        assert len(result) == 1
+        assert isinstance(result[0]["bullets"], list)
+        assert isinstance(result[0]["needs_reply"], list)
+
+    def test_merge_chat_digests_non_dict_entries_dropped(self) -> None:
+        """HIGH-2: non-dict entries in needs_reply and non-str bullets dropped."""
+        from daily_agenda.cli.cmd_run import _merge_chat_digests
+        batches = [
+            [{"chat_ref": "chat:A", "bullets": [123, "ok", None], "needs_reply": ["bad", {"src_id": "s1"}], "quiet": False}],
+        ]
+        result = _merge_chat_digests(batches)
+        assert result[0]["bullets"] == ["ok"]
+        assert result[0]["needs_reply"] == [{"src_id": "s1"}]
+
+    def test_merge_unexpected_exception_degrades_to_empty(self) -> None:
+        """HIGH-2: unexpected error in merge → empty digests, no crash."""
+        from daily_agenda.cli.cmd_run import _merge_chat_digests, _merge_mail_digests
+        # A truly bizarre input that might cause issues
+        result_chat = _merge_chat_digests([None, "bad", 42])  # type: ignore
+        assert result_chat == []
+        result_mail = _merge_mail_digests([None, "bad"])  # type: ignore
+        assert result_mail == []
+
+    def test_items_not_list_retried(self, tmp_path: Path, capsys: Any) -> None:
+        """MEDIUM-1: items not a list should be inside retry logic."""
+        h = _setup_home(tmp_path)
+        deps = _deps(h)
+
+        call_count = 0
+
+        def _side_effect(*args: Any, **kwargs: Any) -> AnalyzerResult:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call: valid JSON but items is a string
+                return AnalyzerResult(output={"schema_version": 2, "items": "bad"}, ms=0)
+            return AnalyzerResult(output={
+                "schema_version": 2, "items": [],
+                "chat_digests": [], "mail_digests": [],
+            }, ms=0)
+
+        with patch("daily_agenda.analyze.run_analyzer", side_effect=_side_effect):
+            code, obj = _run(["run"], deps, capsys)
+
+        assert obj["ok"] is True
+        assert call_count == 2  # First attempt failed, retry succeeded

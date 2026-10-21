@@ -2,160 +2,572 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'sha256-{{ csp_hash }}'; base-uri 'none'; form-action 'none'">
 <title>每日彙整 {{ v.date }}</title>
 <style>
-body { font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif; max-width: 800px; margin: 2em auto; padding: 0 1em; color: #222; background: #fff; line-height: 1.6; }
-h1 { font-size: 1.4em; border-bottom: 2px solid #333; padding-bottom: 0.3em; }
-h2 { font-size: 1.1em; margin-top: 1.5em; color: #444; }
-.meta { color: #666; font-size: 0.9em; margin-bottom: 1em; }
-.meta dt { font-weight: bold; display: inline; }
-.meta dd { display: inline; margin: 0 1em 0 0; }
-.source-ok { color: #2a7; }
-.source-failed { color: #c33; }
-.source-skipped { color: #888; }
-.notice { background: #fff3cd; border-left: 4px solid #ffc107; padding: 0.5em 1em; margin: 0.5em 0; }
-.new-chat { background: #e7f3fe; border-left: 4px solid #2196f3; padding: 0.5em 1em; margin: 0.5em 0; }
-table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
-th, td { border: 1px solid #ddd; padding: 0.4em 0.6em; text-align: left; vertical-align: top; }
-th { background: #f5f5f5; }
-.priority-P0 { color: #c00; font-weight: bold; }
-.priority-P1 { color: #e60; }
-.priority-P2 { color: #666; }
-details { margin: 0.5em 0; }
-summary { cursor: pointer; font-weight: bold; color: #555; }
-.src-label { font-size: 0.85em; color: #666; }
-a { color: #1a73e8; text-decoration: none; }
-a:hover { text-decoration: underline; }
+:root {
+  --paper: #F4F6F4; --surface: #FFFFFF; --ink: #1E2B2A; --ink-soft: #4A5856;
+  --ink-faint: #6B7775; --rule: #DCE2DF; --moss: #2E6A57; --moss-tint: #E3EFEA;
+  --signal: #A6500A; --signal-tint: #FBEEDF; --alarm: #B42318; --alarm-tint: #FBE7E5;
+  --quiet: #8A9592; --focus: #2E6A57;
+  --r-sm: 4px; --r-md: 8px;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #131A19; --surface: #1B2423; --ink: #E6ECEA; --ink-soft: #B9C4C1;
+    --ink-faint: #93A09D; --rule: #2E3A38; --moss: #7FC4AA; --moss-tint: #1F3530;
+    --signal: #F2A65A; --signal-tint: #3A2A18; --alarm: #FF8A7E; --alarm-tint: #3D1F1C;
+    --quiet: #6E7B78; --focus: #7FC4AA;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: var(--s5); }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } * { transition: none !important; } }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font-family: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif;
+  font-size: 16px; line-height: 1.65; font-variant-numeric: tabular-nums;
+}
+a { color: var(--moss); }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: var(--r-sm); }
+.skip { position: absolute; left: -999px; } .skip:focus { left: var(--s4); top: var(--s4); background: var(--surface); padding: var(--s2) var(--s3); z-index: 100; }
+
+.shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: var(--s6); max-width: 1560px; margin: 0 auto; padding: var(--s6) var(--s5) 120px; }
+.rail { position: sticky; top: var(--s5); align-self: start; }
+.rail .date { font-size: 30px; font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; }
+.rail .weekday { color: var(--ink-faint); font-size: 14px; margin-bottom: var(--s5); }
+.rail nav a { display: flex; justify-content: space-between; align-items: center; padding: var(--s2) var(--s3); margin: 0 calc(var(--s3) * -1); border-radius: var(--r-sm); color: var(--ink); text-decoration: none; min-height: 44px; }
+.rail nav a:hover { background: var(--moss-tint); }
+.rail nav .n { color: var(--ink-faint); font-size: 14px; }
+.rail nav .n b { color: var(--signal); font-weight: 600; }
+.rail .src { margin-top: var(--s5); padding-top: var(--s4); border-top: 1px solid var(--rule); font-size: 13px; color: var(--ink-faint); line-height: 1.8; }
+.rail .src .ok::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--moss); margin-right: 6px; vertical-align: 1px; }
+
+.lede { font-size: 22px; font-weight: 500; line-height: 1.5; margin: 0 0 var(--s2); max-width: 34em; }
+.digest, .reply, .quiet-digest dd, .mail .sum, .section-note, .lede-sub { max-width: 40em; }
+.notice { background: var(--signal-tint); border-left: 4px solid var(--signal); padding: var(--s2) var(--s4); margin: 0 0 var(--s3); border-radius: var(--r-sm); }
+.new-chat { background: var(--moss-tint); border-left: 4px solid var(--moss); padding: var(--s2) var(--s4); margin: 0 0 var(--s3); border-radius: var(--r-sm); }
+.lede-sub { color: var(--ink-soft); margin: 0 0 var(--s7); }
+
+section { margin-bottom: var(--s7); }
+section > h2 { font-size: 22px; font-weight: 700; margin: 0 0 var(--s2); }
+.section-note { color: var(--ink-soft); margin: 0 0 var(--s4); font-size: 15px; }
+
+/* Calendar / events compact block */
+.events { margin-bottom: var(--s6); }
+.events h2 { font-size: 18px; font-weight: 700; margin: 0 0 var(--s3); color: var(--ink-soft); }
+.ev-day { font-size: 14px; font-weight: 600; color: var(--ink-faint); margin: var(--s3) 0 var(--s1); }
+.ev-day:first-child { margin-top: 0; }
+.ev-item { display: grid; grid-template-columns: auto 1fr auto; gap: var(--s1) var(--s3); padding: var(--s1) 0; font-size: 15px; }
+.ev-time { color: var(--ink-faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ev-loc { color: var(--ink-faint); font-size: 14px; white-space: nowrap; }
+.ev-item a { color: var(--moss); text-decoration: none; } .ev-item a:hover { text-decoration: underline; }
+
+/* LINE digest cards */
+.chat { background: var(--surface); border: 1px solid var(--rule); border-left: 4px solid var(--rule); border-radius: var(--r-md); padding: var(--s4) var(--s5); margin-bottom: var(--s3); }
+.chat.needs { border-left-color: var(--signal); }
+.chat.todo { border-left-color: var(--moss); }
+.chat-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s2) var(--s3); }
+.chat-head h3 { font-size: 18px; margin: 0; font-weight: 700; }
+.kind { font-size: 13px; color: var(--ink-faint); }
+.state { margin-left: auto; font-size: 13px; font-weight: 600; padding: 2px var(--s2); border-radius: var(--r-sm); }
+.state.needs { color: var(--signal); background: var(--signal-tint); }
+.state.todo { color: var(--moss); background: var(--moss-tint); }
+.pulse { display: block; width: 100%; height: 26px; margin: var(--s3) 0 var(--s2); }
+.pulse-legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-faint); margin-top: calc(var(--s1) * -1); }
+.digest { margin: var(--s3) 0 0; padding-left: 1.2em; }
+.digest li { margin-bottom: var(--s1); }
+.reply { margin-top: var(--s4); background: var(--signal-tint); border-radius: var(--r-sm); padding: var(--s3) var(--s4); }
+.reply h4, .proposed h4 { margin: 0 0 var(--s1); font-size: 14px; font-weight: 700; }
+.reply h4 { color: var(--signal); }
+.reply p { margin: 0 0 var(--s2); } .reply p:last-child { margin: 0; }
+.who { font-weight: 600; } .when { color: var(--ink-soft); font-size: 14px; }
+.proposed { margin-top: var(--s3); }
+.proposed h4 { color: var(--moss); }
+.proposed ul { margin: 0; padding-left: 1.2em; }
+.proposed a { font-size: 14px; }
+details.history { margin-top: var(--s3); border-top: 1px dashed var(--rule); padding-top: var(--s2); }
+details.history summary { cursor: pointer; color: var(--ink-soft); font-size: 14px; min-height: 32px; display: flex; align-items: center; }
+details.history ol { list-style: none; margin: var(--s2) 0 0; padding: 0; font-size: 14px; color: var(--ink-soft); }
+details.history li { display: grid; grid-template-columns: 4.5em 1fr; gap: var(--s3); padding: var(--s1) 0; }
+details.history li span { color: var(--ink-faint); }
+.quiet-list { background: transparent; border: 1px dashed var(--rule); border-radius: var(--r-md); padding: var(--s3) var(--s5); color: var(--ink-soft); font-size: 15px; }
+.quiet-list summary { cursor: pointer; min-height: 32px; }
+.quiet-list ul { columns: 2; margin: var(--s2) 0 0; padding-left: 1.2em; }
+
+/* Quiet digest */
+.quiet-digest { margin: var(--s3) 0 var(--s1); }
+.quiet-digest > div { display: grid; grid-template-columns: 11em 1fr; gap: var(--s4); padding: var(--s2) 0; border-top: 1px solid var(--rule); }
+.quiet-digest dt { font-weight: 600; color: var(--ink); }
+.quiet-digest dt span { display: block; font-weight: 400; font-size: 13px; color: var(--ink-faint); }
+.quiet-digest dd { margin: 0; color: var(--ink-soft); }
+
+/* Mail */
+.folder { margin-bottom: var(--s5); }
+.folder h3 { font-size: 16px; margin: 0 0 var(--s2); color: var(--ink-soft); font-weight: 600; display: flex; gap: var(--s2); align-items: baseline; }
+.folder h3 small { font-weight: 400; color: var(--ink-faint); font-size: 13px; }
+.mail { display: grid; grid-template-columns: 7.5em 1fr auto; gap: var(--s1) var(--s4); background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-md); padding: var(--s3) var(--s4); margin-bottom: var(--s2); }
+.mail .from { font-weight: 600; font-size: 15px; }
+.mail .subj { font-weight: 600; }
+.mail .sum { grid-column: 2 / 4; color: var(--ink-soft); font-size: 15px; }
+.mail .tag { font-size: 13px; font-weight: 600; white-space: nowrap; align-self: start; padding: 2px var(--s2); border-radius: var(--r-sm); }
+.mail.needs { border-left: 4px solid var(--signal); } .mail.needs .tag { color: var(--signal); background: var(--signal-tint); }
+.mail.fyi .tag { color: var(--ink-faint); }
+.mail .time { color: var(--ink-faint); font-size: 13px; }
+
+/* Todos */
+.todo-row { display: grid; grid-template-columns: 2.2em 1fr auto; gap: var(--s2) var(--s4); align-items: start; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-md); padding: var(--s3) var(--s4); margin-bottom: var(--s2); transition: opacity 160ms ease-out, background-color 160ms ease-out; }
+.todo-row .no { font-weight: 700; color: var(--ink-faint); padding-top: 6px; }
+.todo-row .title { font-weight: 600; margin: 4px 0 2px; }
+.todo-row .src { font-size: 14px; color: var(--ink-faint); }
+.todo-row .why { font-size: 14px; color: var(--ink-soft); margin-top: 2px; }
+.pri { font-size: 12px; font-weight: 700; padding: 1px 6px; border-radius: var(--r-sm); margin-right: var(--s2); vertical-align: 2px; }
+.pri.P0 { color: var(--alarm); background: var(--alarm-tint); } .pri.P1 { color: var(--signal); background: var(--signal-tint); } .pri.P2 { color: var(--ink-faint); background: var(--paper); }
+.controls { display: flex; flex-wrap: wrap; gap: var(--s2); justify-content: flex-end; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r-sm); overflow: hidden; }
+.seg label { position: relative; }
+.seg input { position: absolute; opacity: 0; inset: 0; }
+.seg span { display: inline-flex; align-items: center; min-height: 40px; padding: 0 var(--s3); font-size: 14px; cursor: pointer; border-left: 1px solid var(--rule); color: var(--ink-soft); }
+.seg label:first-child span { border-left: 0; }
+.seg input:checked + span { background: var(--moss); color: var(--surface); font-weight: 600; }
+.seg input[value="drop"]:checked + span { background: var(--alarm); }
+.seg input:focus-visible + span { outline: 3px solid var(--focus); outline-offset: -3px; }
+select { font: inherit; font-size: 14px; min-height: 40px; padding: 0 var(--s2); border: 1px solid var(--rule); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); }
+.todo-row.is-done { opacity: .62; } .todo-row.is-done .title { text-decoration: line-through; }
+.todo-row.is-drop { opacity: .5; background: var(--paper); } .todo-row.is-drop .title { text-decoration: line-through; }
+.todo-row.changed { box-shadow: inset 3px 0 0 var(--moss); }
+.maybe { border-style: dashed; }
+.maybe .why::before { content: "AI 認為可能已完成："; font-weight: 600; }
+h3.sub { font-size: 16px; color: var(--ink-soft); margin: var(--s5) 0 var(--s2); }
+.todo-group { margin-bottom: var(--s3); border: 1px solid var(--rule); border-radius: var(--r-md); }
+.todo-group > summary { cursor: pointer; padding: var(--s3) var(--s4); font-weight: 600; color: var(--ink-soft); min-height: 44px; display: flex; align-items: center; }
+.todo-group > summary .gc { color: var(--ink-faint); font-weight: 400; font-size: 14px; margin-left: var(--s3); }
+.todo-group .todo-row { border-radius: 0; border-left: 0; border-right: 0; border-top: 0; margin-bottom: 0; }
+.todo-group .todo-row:last-child { border-bottom: 0; }
+
+/* Chat body with inline todos */
+.chat-body { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 26%, 400px); gap: var(--s5); margin-top: var(--s2); }
+.chat-body.solo { grid-template-columns: minmax(0, 1fr); }
+.chat-todos { border-left: 1px solid var(--rule); padding-left: var(--s4); }
+.chat-todos > h4, .mail-todos > h4 { margin: 0 0 var(--s2); font-size: 14px; font-weight: 700; color: var(--moss); }
+.todo-row.inline { display: block; padding: var(--s3); margin-bottom: var(--s2); background: var(--paper); border-color: transparent; }
+.todo-row.inline .title { margin: 0 0 2px; font-size: 15px; }
+.todo-row.inline .why { margin-bottom: var(--s2); }
+.todo-row.inline .controls { justify-content: flex-start; }
+.todo-row.inline .seg span { padding: 0 10px; }
+.mail-todos { grid-column: 1 / -1; margin-top: var(--s2); padding-top: var(--s3); border-top: 1px dashed var(--rule); }
+.mail-todos .todo-row.inline .controls { margin-top: var(--s1); }
+
+/* Dock */
+.dock { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--rule); padding: var(--s3) var(--s5); z-index: 40; }
+.dock-inner { max-width: 1560px; margin: 0 auto; display: flex; gap: var(--s4); align-items: center; flex-wrap: wrap; }
+.dock .count { color: var(--ink-soft); font-size: 15px; }
+.dock .count b { color: var(--ink); }
+.btn { font: inherit; font-weight: 600; min-height: 44px; padding: 0 var(--s5); border-radius: var(--r-sm); border: 1px solid var(--moss); background: var(--moss); color: var(--surface); cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--moss); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.out { display: none; width: 100%; }
+.out.show { display: block; }
+.out textarea { width: 100%; min-height: 120px; font: 14px/1.6 "Noto Sans TC", "Microsoft JhengHei", sans-serif; padding: var(--s3); border: 1px solid var(--rule); border-radius: var(--r-sm); background: var(--paper); color: var(--ink); }
+.out .hint { font-size: 14px; color: var(--ink-soft); margin: var(--s1) 0 var(--s2); }
+.toast { font-size: 14px; color: var(--moss); font-weight: 600; min-height: 1.4em; }
+.out-actions { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s2); }
+
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; gap: var(--s4); padding: var(--s4) var(--s4) 160px; }
+  .rail { position: static; }
+  .rail nav { display: flex; gap: var(--s2); overflow-x: auto; }
+  .rail nav a { margin: 0; border: 1px solid var(--rule); flex: 0 0 auto; gap: var(--s2); }
+  .rail .src { display: none; }
+  .lede { font-size: 19px; }
+  .chat { padding: var(--s3) var(--s4); }
+  .chat-body { grid-template-columns: 1fr; gap: var(--s3); }
+  .chat-todos { border-left: 0; padding-left: 0; border-top: 1px solid var(--rule); padding-top: var(--s3); }
+  .mail { grid-template-columns: 1fr auto; } .mail .from { grid-column: 1 / 3; } .mail .sum { grid-column: 1 / 3; }
+  .todo-row { grid-template-columns: 2em 1fr; } .controls { grid-column: 1 / 3; justify-content: flex-start; }
+  .quiet-list ul { columns: 1; }
+  .quiet-digest > div { grid-template-columns: 1fr; gap: var(--s1); }
+  .dock { padding: var(--s2) var(--s4); }
+  .dock-inner { gap: var(--s2) var(--s3); }
+  .out textarea { min-height: 96px; max-height: 30vh; }
+  .out .hint { display: none; }
+}
 </style>
 </head>
 <body>
-<h1>每日彙整 {{ v.date }}</h1>
+{#- Macro: reusable todo row to avoid 4x duplication -#}
+{%- macro todo_row(t, extra_class="") -%}
+{%- set safe_pri = t.priority if t.priority in ("P0", "P1", "P2") else "P2" -%}
+      <div class="todo-row{{ ' ' + extra_class if extra_class else '' }}" id="t{{ t.no|int }}" data-no="{{ t.no|int }}" data-pri="{{ safe_pri }}">
+        <div class="no">#{{ t.no|int }}</div>
+        <div><div class="title"><span class="pri {{ safe_pri }}">{{ safe_pri }}</span>{{ t.title }}</div>
+{%- if t.sources %}<div class="src">{% for s in t.sources %}{{ s.label }}{% if not loop.last %}、{% endif %}{% endfor %}</div>{% endif %}
+{%- if t.get("reason") %}<div class="why">{{ t.reason }}</div>{% endif %}
+        </div>
+        <div class="controls" role="group" aria-label="#{{ t.no|int }} 的處理方式"></div>
+      </div>
+{%- endmacro -%}
 
-<div class="meta">
-<dl>
-<dt>報表代碼</dt><dd>{{ v.report_code }}</dd>
-<dt>產生時間</dt><dd>{{ v.generated_at }}</dd>
-</dl>
+<a class="skip" href="#main">跳到主要內容</a>
+{#- Compute derived stats for the nav sidebar -#}
+{%- set chats = v.get("chats") or [] -%}
+{%- set quiet_chats = v.get("quiet_chats") or [] -%}
+{%- set mail_folders = v.get("mail_folders") or [] -%}
+{%- set other_todos = v.get("other_todos") or [] -%}
+{%- set other_todo_groups = v.get("other_todo_groups") -%}
+{%- set other_todo_p0 = v.get("other_todo_p0") or [] -%}
+{%- set ns = namespace(
+      chat_needs=0, chat_total=0,
+      mail_needs=0, mail_total=0,
+      todo_count=0) -%}
+{%- for c in chats -%}
+  {%- set ns.chat_needs = ns.chat_needs + c.needs_reply|length -%}
+  {%- set ns.chat_total = ns.chat_total + 1 -%}
+{%- endfor -%}
+{%- set ns.chat_total = ns.chat_total + quiet_chats|length -%}
+{%- for f in mail_folders -%}
+  {%- for m in f.mails -%}
+    {%- if m.category == "reply" -%}{%- set ns.mail_needs = ns.mail_needs + 1 -%}{%- endif -%}
+    {%- set ns.mail_total = ns.mail_total + 1 -%}
+  {%- endfor -%}
+{%- endfor -%}
+{%- set ns.todo_count = other_todos|length + v.maybe_done|length -%}
+{#- Count all todos on the page for the dock -#}
+{%- set ns.all_todo_count = 0 -%}
+{%- for c in chats -%}{%- set ns.all_todo_count = ns.all_todo_count + c.todos|length -%}{%- endfor -%}
+{%- for f in mail_folders -%}{%- for m in f.mails -%}{%- set ns.all_todo_count = ns.all_todo_count + m.todos|length -%}{%- endfor -%}{%- endfor -%}
+{%- if other_todo_groups is not none -%}
+  {%- set ns.all_todo_count = ns.all_todo_count + other_todo_p0|length + v.maybe_done|length -%}
+  {%- for g in other_todo_groups -%}{%- set ns.all_todo_count = ns.all_todo_count + g.count -%}{%- endfor -%}
+{%- else -%}
+  {%- set ns.all_todo_count = ns.all_todo_count + other_todos|length + v.maybe_done|length -%}
+{%- endif -%}
+
+<div class="shell">
+  <aside class="rail" aria-label="導覽">
+    <div class="date">{{ v.date[5:] | replace("-", "/") }}</div>
+    <div class="weekday">報表 {{ v.report_code }}</div>
+    <nav>
+{%- if v.events %}
+      <a href="#events">行程 <span class="n">{{ v.events|length }} 筆</span></a>
+{%- endif %}
+{%- if chats or quiet_chats %}
+      <a href="#line">LINE 對話 <span class="n">{% if ns.chat_needs %}<b>{{ ns.chat_needs }} 待回</b>／{% endif %}{{ ns.chat_total }} 則</span></a>
+{%- endif %}
+{%- if mail_folders %}
+      <a href="#mail">信件 <span class="n">{% if ns.mail_needs %}<b>{{ ns.mail_needs }} 待回</b>／{% endif %}{{ ns.mail_total }} 封</span></a>
+{%- endif %}
+{%- if other_todos or v.maybe_done %}
+      <a href="#todos">其他待辦 <span class="n">{{ ns.todo_count }} 項</span></a>
+{%- endif %}
+    </nav>
+    <div class="src">
+{%- for s in v.sources %}
+      <div class="{{ 'ok' if s.status == 'ok' else '' }}">{{ s.name }}：{{ s.message }}{% if s.coverage %} {{ s.coverage }}{% endif %}</div>
+{%- endfor %}
+    </div>
+  </aside>
+
+  <main id="main">
+{#- Lede: summary sentence -#}
+{%- if chats or quiet_chats or mail_folders %}
+    <p class="lede">
+{%- if ns.chat_needs + ns.mail_needs > 0 -%}
+今天有 {{ ns.chat_needs + ns.mail_needs }} 則訊息或信件在等你回覆。
+{%- else -%}
+今天沒有需要你立即回覆的訊息。
+{%- endif -%}
+</p>
+    <p class="lede-sub">建議待辦就放在各對話和信件旁邊，看完直接決定保留、完成或刪除；全部看完再按最下面的「產生確認文字」。</p>
+{%- endif %}
+
+{#- System notices and new chats (always rendered, not just legacy) -#}
+{%- if v.coverage.batched %}
+    <p class="notice">本次資料分 {{ v.coverage.batches }} 批處理。</p>
+{%- endif %}
+{%- for n in v.notices %}
+    <p class="notice">{{ n }}</p>
+{%- endfor %}
+{%- if v.new_chats %}
+    <div class="new-chat"><strong>本次新增的 LINE 對話：</strong>{% for name in v.new_chats %}{{ name }}{% if not loop.last %}、{% endif %}{% endfor %}</div>
+{%- endif %}
+
+{#- ============================================================ -#}
+{#- 近三天行程 (compact, grouped by day) -#}
+{#- ============================================================ -#}
+{%- if v.events %}
+    <div class="events" id="events">
+      <h2>近三天行程</h2>
+{#- Group events by date portion of start (MM/DD) -#}
+{%- set ns.cur_day = "" -%}
+{%- for ev in v.events %}
+{%- set ev_day = ev.start[:5] if ev.start|length >= 5 else ev.start -%}
+{%- if ev_day != ns.cur_day %}
+{%- set ns.cur_day = ev_day -%}
+      <div class="ev-day">{{ ev_day }}</div>
+{%- endif %}
+      <div class="ev-item">
+        <span class="ev-time">{{ ev.start[6:] if ev.start|length > 6 else ev.start }} – {{ ev.end[6:] if ev.end|length > 6 else ev.end }}</span>
+        <span>{% if ev.href %}<a href="{{ ev.href }}" rel="noopener noreferrer">{{ ev.subject }}</a>{% else %}{{ ev.subject }}{% endif %}</span>
+{%- if ev.location %}
+        <span class="ev-loc">{{ ev.location }}</span>
+{%- endif %}
+      </div>
+{%- endfor %}
+    </div>
+{%- endif %}
+
+{#- ============================================================ -#}
+{#- ① LINE section -#}
+{#- ============================================================ -#}
+{%- if chats or quiet_chats %}
+    <section id="line" aria-labelledby="h-line">
+      <h2 id="h-line">LINE 對話整理</h2>
+      <p class="section-note">橫條上的點是訊息時間，橘色的點是需要你回覆的訊息。</p>
+
+{%- for c in chats %}
+{%- set safe_state = c.state if c.state in ("needs", "todo", "seen") else "" -%}
+      <article class="chat {{ safe_state }}" aria-labelledby="c{{ loop.index }}">
+        <div class="chat-head">
+          <h3 id="c{{ loop.index }}">{{ c.name }}</h3><span class="kind">{{ c.kind_label }}</span>
+{%- if safe_state == "needs" %}
+          <span class="state needs">{{ c.needs_reply|length }} 則待回</span>
+{%- elif safe_state == "todo" %}
+          <span class="state todo">有建議待辦</span>
+{%- else %}
+          <span class="state">已看過，無需處理</span>
+{%- endif %}
+        </div>
+{#- Pulse timeline SVG -#}
+{%- if c.pulse and c.pulse.dots %}
+        <svg class="pulse" viewBox="0 0 800 26" preserveAspectRatio="none" role="img" aria-label="這段期間 {{ c.msg_count|int }} 則訊息，{% if c.needs_reply %}{{ c.needs_reply|length }} 則需要回覆{% else %}沒有需要你回覆的訊息{% endif %}">
+          <line x1="0" y1="13" x2="800" y2="13" stroke="var(--rule)" stroke-width="2"/>
+{%- set normal_dots = [] -%}
+{%- set reply_dots = [] -%}
+{%- for d in c.pulse.dots -%}
+  {%- if d.reply -%}
+    {%- set _ = reply_dots.append(d) -%}
+  {%- else -%}
+    {%- set _ = normal_dots.append(d) -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- if normal_dots %}
+          <g fill="var(--ink-faint)">
+{%- for d in normal_dots -%}
+<circle cx="{{ "%.1f"|format(d.x|float) }}" cy="13" r="3"/>
+{%- endfor -%}
+</g>
+{%- endif %}
+{%- if reply_dots %}
+          <g fill="var(--signal)">
+{%- for d in reply_dots -%}
+<circle cx="{{ "%.1f"|format(d.x|float) }}" cy="13" r="6"/>
+{%- endfor -%}
+</g>
+{%- endif %}
+        </svg>
+        <div class="pulse-legend"><span>{{ c.pulse['from'] }}</span><span>{{ c.pulse.to }}</span></div>
+{%- endif %}
+{#- Chat body: digest left, todos right -#}
+        <div class="chat-body{% if not c.todos %} solo{% endif %}">
+          <div>
+{%- if c.bullets %}
+            <ul class="digest">
+{%- for b in c.bullets %}
+              <li>{{ b }}</li>
+{%- endfor %}
+            </ul>
+{%- endif %}
+{%- if c.needs_reply %}
+            <div class="reply">
+              <h4>需要你回覆</h4>
+{%- for nr in c.needs_reply %}
+              <p><span class="who">{{ nr.who }}</span> <span class="when">{{ nr.when }}</span><br>{{ nr.ask }}</p>
+{%- endfor %}
+            </div>
+{%- endif %}
+{%- if c.history %}
+            <details class="history">
+              <summary>過往重點（最近 {{ c.history|length }} 次）</summary>
+              <ol>
+{%- for h in c.history %}
+                <li><span>{{ h.date }}</span>{{ h.bullets|join("；") }}</li>
+{%- endfor %}
+              </ol>
+            </details>
+{%- endif %}
+          </div>
+{%- if c.todos %}
+          <aside class="chat-todos" aria-label="建議待辦">
+            <h4>建議待辦</h4>
+{%- for t in c.todos %}
+{%- set safe_pri = t.priority if t.priority in ("P0", "P1", "P2") else "P2" -%}
+            <div class="todo-row inline" id="t{{ t.no|int }}" data-no="{{ t.no|int }}" data-pri="{{ safe_pri }}">
+              <div class="title"><span class="pri {{ safe_pri }}">{{ safe_pri }}</span>#{{ t.no|int }} {{ t.title }}</div>
+{%- if t.get("reason") %}
+              <div class="why">{{ t.reason }}</div>
+{%- elif t.get("due") %}
+              <div class="why">截止 {{ t.due }}</div>
+{%- endif %}
+              <div class="controls" role="group" aria-label="#{{ t.no|int }} 的處理方式"></div>
+            </div>
+{%- endfor %}
+          </aside>
+{%- endif %}
+        </div>
+      </article>
+{%- endfor %}
+
+{#- Quiet chats (collapsed) -#}
+{%- if quiet_chats %}
+      <details class="quiet-list">
+        <summary>另外 {{ quiet_chats|length }} 個對話是閒聊或通知，不需要處理（展開看統整）</summary>
+        <dl class="quiet-digest">
+{%- for qc in quiet_chats %}
+          <div><dt>{{ qc.name }} <span>{{ qc.kind_label }}，{{ qc.msg_count }} 則</span></dt><dd>{{ qc.summary }}</dd></div>
+{%- endfor %}
+        </dl>
+      </details>
+{%- endif %}
+    </section>
+{%- else %}
+    <section id="line" aria-labelledby="h-line">
+      <h2 id="h-line">LINE 對話整理</h2>
+      <p class="section-note">本次分析期間沒有新的 LINE 訊息。</p>
+    </section>
+{%- endif %}
+
+{#- ============================================================ -#}
+{#- ② Mail section -#}
+{#- ============================================================ -#}
+{%- if mail_folders %}
+    <section id="mail" aria-labelledby="h-mail">
+      <h2 id="h-mail">信件整理</h2>
+      <p class="section-note">依資料夾分組，需要回覆的排最前面。</p>
+
+{%- for f in mail_folders %}
+      <div class="folder">
+        <h3>{{ f.folder_label }} <small>{{ f.mails|length }} 封值得注意</small></h3>
+{%- for m in f.mails %}
+        <div class="mail{% if m.category == 'reply' %} needs{% elif m.category == 'fyi' %} fyi{% endif %}">
+          <div class="from">{{ m['from'] }}<div class="time">{{ m.when }}</div></div>
+          <div class="subj">{{ m.subject }}</div>
+          <div class="tag">{% if m.category == "reply" %}需要回覆{% elif m.category == "action" %}需要處理{% else %}知道就好{% endif %}</div>
+          <div class="sum">{{ m.summary }}</div>
+{%- if m.todos %}
+          <div class="mail-todos">
+{%- for t in m.todos %}
+{%- set safe_pri = t.priority if t.priority in ("P0", "P1", "P2") else "P2" -%}
+            <div class="todo-row inline" id="t{{ t.no|int }}" data-no="{{ t.no|int }}" data-pri="{{ safe_pri }}">
+              <div class="title"><span class="pri {{ safe_pri }}">{{ safe_pri }}</span>#{{ t.no|int }} {{ t.title }}</div>
+              <div class="controls" role="group" aria-label="#{{ t.no|int }} 的處理方式"></div>
+            </div>
+{%- endfor %}
+          </div>
+{%- endif %}
+        </div>
+{%- endfor %}
+      </div>
+{%- endfor %}
+    </section>
+{%- else %}
+    <section id="mail" aria-labelledby="h-mail">
+      <h2 id="h-mail">信件整理</h2>
+      <p class="section-note">本次分析期間沒有值得注意的信件。</p>
+    </section>
+{%- endif %}
+
+{#- ============================================================ -#}
+{#- ③ Other todos + maybe-done -#}
+{#- ============================================================ -#}
+{%- if other_todo_groups is not none %}
+{#- Grouped view: P0 always visible, rest in collapsed <details> groups -#}
+{%- set ns.grouped_total = other_todo_p0|length -%}
+{%- for g in other_todo_groups -%}{%- set ns.grouped_total = ns.grouped_total + g.count -%}{%- endfor -%}
+{%- if ns.grouped_total > 0 or v.maybe_done %}
+    <section id="todos" aria-labelledby="h-todos">
+      <h2 id="h-todos">其他待辦（{{ ns.grouped_total }} 項）</h2>
+      <p class="section-note">之前留下還沒完成的待辦，以及 AI 認為可能已經做完的。</p>
+{%- for t in other_todo_p0 %}
+{{ todo_row(t) }}
+{%- endfor %}
+{%- for g in other_todo_groups %}
+      <details class="todo-group">
+        <summary>{{ g.label }}　{{ g.count }} 項{% if g.p1_count %}（P1 {{ g.p1_count }} 項）{% endif %}</summary>
+{%- for t in g.todos %}
+{{ todo_row(t) }}
+{%- endfor %}
+      </details>
+{%- endfor %}
+{%- if v.maybe_done %}
+      <h3 class="sub">AI 認為可能已經做完的</h3>
+{%- for t in v.maybe_done %}
+{{ todo_row(t, "maybe") }}
+{%- endfor %}
+{%- endif %}
+    </section>
+{%- endif %}
+{%- elif other_todos or v.maybe_done %}
+{#- Flat fallback (no grouped keys) -#}
+    <section id="todos" aria-labelledby="h-todos">
+      <h2 id="h-todos">其他待辦</h2>
+      <p class="section-note">之前留下還沒完成的待辦，以及 AI 認為可能已經做完的。</p>
+{%- for t in other_todos %}
+{{ todo_row(t) }}
+{%- endfor %}
+{%- if v.maybe_done %}
+      <h3 class="sub">AI 認為可能已經做完的</h3>
+{%- for t in v.maybe_done %}
+{{ todo_row(t, "maybe") }}
+{%- endfor %}
+{%- endif %}
+    </section>
+{%- endif %}
+
+{#- ============================================================ -#}
+{#- Legacy: old v1 sections (when no new keys) -#}
+{#- ============================================================ -#}
+{%- if not chats and not quiet_chats and not mail_folders and not other_todos and not v.maybe_done and other_todo_groups is none %}
+{#- Old-keys-only fallback: today table + events (notices/new_chats/maybe_done rendered above) -#}
+{%- if v.today %}
+    <h2>今天要處理</h2>
+    <table><thead><tr><th>#</th><th>優先</th><th>待辦</th><th>期限</th></tr></thead><tbody>
+{%- for item in v.today %}
+    <tr>
+      <td>{{ item.no }}</td>
+      <td>{{ item.priority }}</td>
+      <td>{{ item.title }}</td>
+      <td>{{ item.due if item.due else "—" }}</td>
+    </tr>
+{%- endfor %}
+    </tbody></table>
+{%- else %}
+    <p>目前沒有待辦事項。</p>
+{%- endif %}
+{#- Events already rendered in the 近三天行程 block above; no duplicate here. -#}
+{%- endif %}
+  </main>
 </div>
 
-{# --- Sources --- #}
-<h2>來源狀態</h2>
-<ul>
-{% for s in v.sources %}
-<li class="source-{{ s.status }}">
-{{ s.name }}：{{ s.message }}
-{% if s.coverage %}<span class="src-label">（{{ s.coverage }}）</span>{% endif %}
-</li>
-{% endfor %}
-</ul>
-
-{% if v.coverage.batched %}
-<p class="notice">本次資料分 {{ v.coverage.batches }} 批處理。</p>
-{% endif %}
-
-{# --- Notices --- #}
-{% for n in v.notices %}
-<p class="notice">{{ n }}</p>
-{% endfor %}
-
-{# --- New chats --- #}
-{% if v.new_chats %}
-<div class="new-chat">
-<strong>本次新增的 LINE 對話：</strong>
-{% for name in v.new_chats %}{{ name }}{% if not loop.last %}、{% endif %}{% endfor %}
+{#- Confirmation dock -#}
+<div class="dock" role="region" aria-label="確認待辦" id="app"{% if report_attr %} data-report="{{ report_attr }}"{% endif %}>
+  <div class="dock-inner">
+    <span class="count" id="count" aria-live="polite">{{ ns.all_todo_count }} 項待辦，目前 <b>0</b> 項有變更，其餘保留</span>
+    <button class="btn" id="gen" type="button">產生確認文字</button>
+    <div class="out" id="out">
+      <p class="hint">複製下面的文字，貼到 /agenda 對話送出，Claude 會照這段寫入待辦。</p>
+      <textarea id="txt" readonly aria-label="確認文字"></textarea>
+      <div class="out-actions">
+        <button class="btn" id="copy" type="button">複製</button>
+        <button class="btn ghost" id="fold" type="button">收起</button>
+        <span class="toast" id="toast" aria-live="polite"></span>
+      </div>
+    </div>
+  </div>
 </div>
-{% endif %}
 
-{# --- Today --- #}
-<h2>今天要處理</h2>
-{% if v.today %}
-<table>
-<thead><tr><th>#</th><th>優先</th><th>待辦</th><th>期限</th><th>延續</th><th>來源</th></tr></thead>
-<tbody>
-{% for item in v.today %}
-<tr>
-<td>{{ item.no }}</td>
-<td class="priority-{{ item.priority }}">{{ item.priority }}</td>
-<td>{{ item.title }} <span class="src-label">({{ item.todo_id }})</span></td>
-<td>{{ item.due if item.due else "—" }}</td>
-<td>{% if item.carry_days > 0 %}{{ item.carry_days }} 天{% else %}新{% endif %}</td>
-<td>{% for s in item.sources %}<span class="src-label">{% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}{{ s.label }}{% endif %}</span>{% if not loop.last %}、{% endif %}{% endfor %}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-{% else %}
-<p>目前沒有待辦事項。</p>
-{% endif %}
-
-{# --- Maybe done --- #}
-{% if v.maybe_done %}
-<h2>可能已完成</h2>
-<table>
-<thead><tr><th>#</th><th>待辦</th><th>判斷理由</th><th>來源</th></tr></thead>
-<tbody>
-{% for item in v.maybe_done %}
-<tr>
-<td>{{ item.no }}</td>
-<td>{{ item.title }} <span class="src-label">({{ item.todo_id }})</span></td>
-<td>{{ item.reason }}</td>
-<td>{% for s in item.sources %}<span class="src-label">{% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}{{ s.label }}{% endif %}</span>{% if not loop.last %}、{% endif %}{% endfor %}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-<p class="src-label">確認完成請說「{{ v.report_code }} 的 N 做完了」或「T-xxxx 做完了」。7 天未確認將自動摺疊。</p>
-{% endif %}
-
-{# --- Collapsed --- #}
-{% if v.collapsed %}
-<details>
-<summary>已摺疊的「可能已完成」（{{ v.collapsed | length }} 項，超過 7 天未確認）</summary>
-<table>
-<thead><tr><th>#</th><th>待辦</th><th>判斷理由</th></tr></thead>
-<tbody>
-{% for item in v.collapsed %}
-<tr>
-<td>{{ item.no }}</td>
-<td>{{ item.title }} <span class="src-label">({{ item.todo_id }})</span></td>
-<td>{{ item.reason }}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-<p class="src-label">要恢復請說「恢復 T-xxxx」。</p>
-</details>
-{% endif %}
-
-{# --- Events --- #}
-{% if v.events %}
-<h2>行程（今天＋未來 3 天）</h2>
-<table>
-<thead><tr><th>時間</th><th>主旨</th><th>地點</th></tr></thead>
-<tbody>
-{% for ev in v.events %}
-<tr>
-<td>{{ ev.start }} – {{ ev.end }}</td>
-<td>{% if ev.href %}<a href="{{ ev.href }}">{{ ev.subject }}</a>{% else %}{{ ev.subject }}{% endif %}</td>
-<td>{{ ev.location }}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-{% endif %}
-
-{# --- Skipped --- #}
-{% if v.skipped %}
-<details>
-<summary>已略過（依準則）（{{ v.skipped | length }} 項）</summary>
-<ul>
-{% for sk in v.skipped %}
-<li>{{ sk.summary }}{% for s in sk.sources %} <span class="src-label">{% if s.href %}<a href="{{ s.href }}">{{ s.label }}</a>{% else %}{{ s.label }}{% endif %}</span>{% endfor %}</li>
-{% endfor %}
-</ul>
-</details>
-{% endif %}
-
+<script>{{ digest_script }}</script>
 </body>
 </html>

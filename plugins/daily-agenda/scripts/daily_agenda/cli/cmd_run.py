@@ -13,10 +13,14 @@ from pathlib import Path
 from typing import Any
 
 from daily_agenda import (
-    analyze, bundle, collect, criteria, ledger, render, runtime, state, validate,
+    analyze, bundle, collect, criteria, history, ledger, render, runtime, state, validate,
 )
 from daily_agenda.line_source import LineSourceError
 from ._common import Deps, emit, require_consent
+
+# First run has no checkpoints; read this many days back (same as the
+# setup scan default) instead of collect()'s 14, which doubled first-day volume.
+_INITIAL_DAYS = 7
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +32,8 @@ def _build_src_index(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
     index: dict[str, dict[str, Any]] = {}
     for rec in records:
         sid = rec.get("src_id", "")
+        if not sid:
+            continue  # skip records without src_id (e.g. chat_history)
         kind = rec.get("kind", "")
         ut = rec.get("untrusted", {})
 
@@ -55,6 +61,144 @@ def _load_ctx(h: Path) -> list[dict[str, Any]]:
             return []
         return [json.loads(line) for line in text.splitlines() if line.strip()]
     except FileNotFoundError:
+        return []
+
+
+def _analyze_batch_with_retry(
+    bp: Path,
+    prompt: str,
+    cfg: dict[str, Any],
+    progress: Any,
+) -> analyze.AnalyzerResult:
+    """Run analysis on one batch.  Retry once on MODEL_OUTPUT_INVALID (C1).
+
+    Also checks that ``items`` is a list in the result — if not, treats it
+    as MODEL_OUTPUT_INVALID so the retry covers it.
+    """
+    model_name = cfg.get("analysis", {}).get("model")
+    timeout_s = cfg.get("analysis", {}).get("timeout_s", 600)
+    stdin_bytes = bp.read_bytes()
+
+    def _run_once() -> analyze.AnalyzerResult:
+        with progress.heartbeat():
+            ar = analyze.run_analyzer(
+                stdin_bytes, prompt, model=model_name, timeout_s=timeout_s,
+            )
+        # items must be a list — if not, this is a structural failure
+        if not isinstance(ar.output.get("items"), list):
+            raise analyze.AnalyzerError("MODEL_OUTPUT_INVALID")
+        return ar
+
+    try:
+        return _run_once()
+    except analyze.AnalyzerError as exc:
+        if exc.code != "MODEL_OUTPUT_INVALID":
+            raise
+        # Single retry on parse failure
+        return _run_once()
+
+
+def _normalise_bullets(raw: Any) -> list[str]:
+    """Normalise bullets: non-list → [], non-str entries dropped."""
+    if not isinstance(raw, list):
+        return []
+    return [b for b in raw if isinstance(b, str)]
+
+
+def _normalise_needs_reply(raw: Any) -> list[dict[str, Any]]:
+    """Normalise needs_reply: non-list → [], non-dict entries and entries
+    whose src_id is not a non-empty string dropped (they would otherwise
+    poison the set-based union and empty every digest)."""
+    if not isinstance(raw, list):
+        return []
+    return [nr for nr in raw if isinstance(nr, dict) and isinstance(nr.get("src_id"), str) and nr.get("src_id")]
+
+
+def _sweep_excluded_history(h: Path, cfg: dict[str, Any]) -> None:
+    """C4 retry: `exclude` may have failed to delete history rows (reported as
+    history_cleanup_failed); deleting again here is idempotent and cheap."""
+    for c in cfg.get("line", {}).get("excluded_chats", []):
+        try:
+            history.delete_by_chat_ref(h, c.get("ref", ""))
+        except Exception:
+            pass  # still non-fatal for the run; reported path is `exclude`
+
+
+def _merge_chat_digests(
+    batches: list[list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Merge chat_digests across batches per C2.
+
+    Same chat_ref in multiple batches: bullets concatenated then truncated to 5,
+    needs_reply union by src_id, quiet = all True.
+
+    Normalises each entry leniently before merging; wraps so any unexpected
+    exception degrades to empty digests instead of crashing.
+    """
+    try:
+        return _merge_chat_digests_inner(batches)
+    except Exception:
+        return []
+
+
+def _merge_chat_digests_inner(
+    batches: list[list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for batch in batches:
+        if not isinstance(batch, list):
+            continue
+        for d in batch:
+            if not isinstance(d, dict):
+                continue
+            cref = d.get("chat_ref", "")
+            if not isinstance(cref, str) or not cref:
+                continue
+            bullets = _normalise_bullets(d.get("bullets"))
+            nr = _normalise_needs_reply(d.get("needs_reply"))
+            if cref not in merged:
+                merged[cref] = {
+                    "chat_ref": cref,
+                    "bullets": list(bullets),
+                    "needs_reply": list(nr),
+                    "quiet": bool(d.get("quiet", False)),
+                }
+            else:
+                existing = merged[cref]
+                existing["bullets"].extend(bullets)
+                # needs_reply: union by src_id
+                seen_sids = {e.get("src_id") for e in existing["needs_reply"]}
+                for entry in nr:
+                    if entry.get("src_id") not in seen_sids:
+                        existing["needs_reply"].append(entry)
+                        seen_sids.add(entry.get("src_id"))
+                # quiet = all True
+                existing["quiet"] = existing["quiet"] and bool(d.get("quiet", False))
+
+    result: list[dict[str, Any]] = []
+    for d in merged.values():
+        d["bullets"] = d["bullets"][:5]
+        result.append(d)
+    return result
+
+
+def _merge_mail_digests(
+    batches: list[list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Merge mail_digests across batches per C2.  Dedup by src_id, last wins."""
+    try:
+        merged: dict[str, dict[str, Any]] = {}
+        for batch in batches:
+            if not isinstance(batch, list):
+                continue
+            for d in batch:
+                if not isinstance(d, dict):
+                    continue
+                sid = d.get("src_id", "")
+                if isinstance(sid, str) and sid:
+                    merged[sid] = dict(d)
+        return list(merged.values())
+    except Exception:
         return []
 
 
@@ -113,6 +257,7 @@ def handle(argv: list[str], deps: Deps) -> int:
         return emit({"ok": False, "code": "LOCKED"})
 
     try:
+        _sweep_excluded_history(h, cfg)
         return _run_pipeline(h, cfg, now, deps, noninteractive)
     finally:
         lock_ctx.__exit__(None, None, None)
@@ -173,7 +318,7 @@ def _run_pipeline(
     try:
         result = collect.collect(
             cfg, st, now=now, line=line_src, graph=graph_src, run_id=run_id,
-            progress=deps.progress,
+            progress=deps.progress, initial_days=_INITIAL_DAYS,
         )
     except collect.CollectError as exc:
         return emit({"ok": False, "code": exc.code})
@@ -189,6 +334,11 @@ def _run_pipeline(
     runs_dir.mkdir(parents=True, exist_ok=True)
 
     open_todos = [t for t in ldg if t["status"] in ("open", "maybe_done")]
+
+    # Load chat history for bundle context (C4 §B) — non-fatal
+    precomputed_history = bundle.load_chat_history(h, result.records, run_id)
+    history_sizes = bundle.compute_history_sizes(precomputed_history)
+
     # Account for profile + criteria overhead in batch sizing
     batch_bytes = cfg.get("analysis", {}).get("batch_bytes", 300_000)
     overhead = 0
@@ -197,7 +347,9 @@ def _run_pipeline(
     if crit_text:
         overhead += len(crit_text.encode("utf-8")) + 100
     effective_batch = max(batch_bytes - overhead, batch_bytes // 3)
-    batches = bundle.split_batches(result.records, effective_batch)
+    batches = bundle.split_batches(
+        result.records, effective_batch, history_sizes=history_sizes,
+    )
     if not batches:
         batches = [[]]  # At least one batch (may have zero records)
 
@@ -220,30 +372,39 @@ def _run_pipeline(
             bp, result=batch_result, criteria=crit_text, open_todos=open_todos,
             ctx=ctx_entries, profile_text=profile_text,
             batch_index=i + 1, batch_total=len(batches),
+            chat_history=precomputed_history,
         )
         bundle_paths.append(bp)
 
-    # Analyze — with progress events per batch
+    # Analyze — with progress events per batch, single retry on parse failure
     progress = deps.progress
     model_output: dict[str, Any]
     try:
         prompt = analyze.load_prompt("agenda")
         n_batches = len(bundle_paths)
         items: list[Any] = []
+        batch_chat_digests: list[list[dict[str, Any]]] = []
+        batch_mail_digests: list[list[dict[str, Any]]] = []
         for bi, bp in enumerate(bundle_paths, 1):
             progress.event("analyze_batch", i=bi, n=n_batches)
-            with progress.heartbeat():
-                ar = analyze.run_analyzer(
-                    bp.read_bytes(), prompt,
-                    model=cfg.get("analysis", {}).get("model"),
-                    timeout_s=cfg.get("analysis", {}).get("timeout_s", 600),
-                )
+            ar = _analyze_batch_with_retry(
+                bp, prompt, cfg, progress,
+            )
             progress.event("analyze_batch_done", i=bi, n=n_batches)
-            batch_items = ar.output.get("items")
-            if not isinstance(batch_items, list):
-                raise analyze.AnalyzerError("MODEL_OUTPUT_INVALID")
-            items.extend(batch_items)
-        model_output = {"schema_version": 1, "items": items}
+            # items is guaranteed to be a list by _analyze_batch_with_retry
+            items.extend(ar.output.get("items", []))
+            # Collect per-batch digests
+            batch_chat_digests.append(ar.output.get("chat_digests", []) if isinstance(ar.output.get("chat_digests"), list) else [])
+            batch_mail_digests.append(ar.output.get("mail_digests", []) if isinstance(ar.output.get("mail_digests"), list) else [])
+        # Merge digests across batches (C2)
+        merged_chat_digests = _merge_chat_digests(batch_chat_digests)
+        merged_mail_digests = _merge_mail_digests(batch_mail_digests)
+        model_output = {
+            "schema_version": 2,
+            "items": items,
+            "chat_digests": merged_chat_digests,
+            "mail_digests": merged_mail_digests,
+        }
     except analyze.AnalyzerError as exc:
         return emit({"ok": False, "code": exc.code})
 
@@ -263,7 +424,10 @@ def _run_pipeline(
     open_todo_ids = {t["id"] for t in open_todos}
 
     try:
-        val_result = validate.validate(model_output, bundle_src_ids, open_todo_ids)
+        val_result = validate.validate(
+            model_output, bundle_src_ids, open_todo_ids,
+            records=result.records,
+        )
     except validate.ModelOutputInvalid:
         return emit({"ok": False, "code": "MODEL_OUTPUT_INVALID"})
 
@@ -293,10 +457,29 @@ def _run_pipeline(
     if needs_line_trust:
         notices.append("LINE 更新到新版本，需要手動確認一次。")
 
+    # Attach chat_name from bundle records to validated digests
+    chat_names: dict[str, str] = {}
+    for rec in result.records:
+        if rec.get("kind") == "line_message":
+            cref = rec.get("chat_ref", "")
+            ut = rec.get("untrusted", {})
+            if cref and cref not in chat_names:
+                chat_names[cref] = ut.get("chat_name", "")
+    enriched_chat_digests = []
+    for d in val_result.chat_digests:
+        enriched = dict(d)
+        enriched["chat_name"] = chat_names.get(d.get("chat_ref", ""), "")
+        enriched_chat_digests.append(enriched)
+
     view = render.build_view(
         state=st, ledger=new_ldg, bundle_meta=meta, events=events,
         new_chat_names=new_chat_names, notices=notices, now=now,
         report_code=report_code, skipped=skipped, src_index=src_index,
+        records=result.records,
+        chat_digests=val_result.chat_digests,
+        mail_digests=val_result.mail_digests,
+        folder_labels=cfg.get("mail", {}).get("folder_labels", {}),
+        chat_history=precomputed_history,
     )
 
     # Render outputs
@@ -338,6 +521,16 @@ def _run_pipeline(
         h, state=new_st, ledger=new_ldg, outputs=outputs, publish_targets=publish_targets,
     )
     gen = state.commit_generation(h, staging)
+
+    # Write chat digest history (C4) — after successful commit, non-fatal
+    try:
+        history.insert_digests(
+            h, run_id, now.isoformat(),
+            enriched_chat_digests,
+            records=result.records,
+        )
+    except Exception:
+        pass  # Generation already committed; history failure is non-fatal
 
     publish_result: dict[str, Any] = {"status": "ok"}
     try:

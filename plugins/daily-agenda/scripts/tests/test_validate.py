@@ -77,9 +77,13 @@ class TestTopLevelRejection:
         with pytest.raises(ModelOutputInvalid):
             validate({"items": []}, BUNDLE_SRC_IDS, OPEN_TODO_IDS)
 
+    def test_schema_version_2_accepted(self) -> None:
+        result = validate({"schema_version": 2, "items": []}, BUNDLE_SRC_IDS, OPEN_TODO_IDS)
+        assert result.items == []
+
     def test_wrong_schema_version(self) -> None:
         with pytest.raises(ModelOutputInvalid):
-            validate({"schema_version": 2, "items": []}, BUNDLE_SRC_IDS, OPEN_TODO_IDS)
+            validate({"schema_version": 3, "items": []}, BUNDLE_SRC_IDS, OPEN_TODO_IDS)
 
     def test_missing_items(self) -> None:
         with pytest.raises(ModelOutputInvalid):
@@ -313,3 +317,179 @@ class TestValidateCriteriaDraft:
             validate_criteria_draft(
                 {"schema_version": 1, "criteria_markdown": "ok", "extra": 1}
             )
+
+
+# ---------------------------------------------------------------------------
+# Digest validation (C1 lenient)
+# ---------------------------------------------------------------------------
+
+_CHAT_REF_A = "chat:aabbccdd11223344aabbcc01"
+_CHAT_REF_B = "chat:aabbccdd11223344aabbcc02"
+
+_LINE_RECORDS: list[dict] = [
+    {"kind": "line_message", "chat_ref": _CHAT_REF_A, "ts": "2026-10-08T09:00:00+08:00",
+     "src_id": "line:chat:aa:message:m1", "is_self": False},
+    {"kind": "line_message", "chat_ref": _CHAT_REF_A, "ts": "2026-10-08T09:05:00+08:00",
+     "src_id": "line:chat:aa:message:m2", "is_self": True},
+    {"kind": "line_message", "chat_ref": _CHAT_REF_B, "ts": "2026-10-08T10:00:00+08:00",
+     "src_id": "line:chat:bb:message:m3", "is_self": False},
+]
+
+_MAIL_RECORDS: list[dict] = [
+    {"kind": "mail", "src_id": "mail:AAA"},
+    {"kind": "mail", "src_id": "mail:BBB"},
+]
+
+
+class TestChatDigestValidation:
+    def _v2_model(self, chat_digests: list | None = None, mail_digests: list | None = None) -> dict:
+        m: dict = {"schema_version": 2, "items": []}
+        if chat_digests is not None:
+            m["chat_digests"] = chat_digests
+        if mail_digests is not None:
+            m["mail_digests"] = mail_digests
+        return m
+
+    def test_valid_chat_digest(self) -> None:
+        digests = [{"chat_ref": _CHAT_REF_A, "bullets": ["point 1"], "needs_reply": [], "quiet": False}]
+        result = validate(self._v2_model(chat_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_LINE_RECORDS)
+        assert len(result.chat_digests) == 1
+        assert result.chat_digests[0]["chat_ref"] == _CHAT_REF_A
+
+    def test_missing_digests_treated_as_empty(self) -> None:
+        result = validate(self._v2_model(), BUNDLE_SRC_IDS, OPEN_TODO_IDS, records=_LINE_RECORDS)
+        assert result.chat_digests == []
+        assert result.mail_digests == []
+
+    def test_non_list_digests_treated_as_empty(self) -> None:
+        result = validate(self._v2_model(chat_digests="bad"), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_LINE_RECORDS)
+        assert result.chat_digests == []
+
+    def test_unknown_chat_ref_dropped(self) -> None:
+        digests = [{"chat_ref": "chat:nonexistent", "bullets": ["x"], "needs_reply": [], "quiet": False}]
+        result = validate(self._v2_model(chat_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_LINE_RECORDS)
+        assert result.chat_digests == []
+
+    def test_bullets_truncated_to_5(self) -> None:
+        digests = [{"chat_ref": _CHAT_REF_A, "bullets": [f"b{i}" for i in range(10)],
+                     "needs_reply": [], "quiet": False}]
+        result = validate(self._v2_model(chat_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_LINE_RECORDS)
+        assert len(result.chat_digests[0]["bullets"]) == 5
+
+    def test_bullet_string_truncated_to_80(self) -> None:
+        digests = [{"chat_ref": _CHAT_REF_A, "bullets": ["x" * 200],
+                     "needs_reply": [], "quiet": False}]
+        result = validate(self._v2_model(chat_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_LINE_RECORDS)
+        assert len(result.chat_digests[0]["bullets"][0]) == 80
+
+    def test_needs_reply_is_self_dropped(self) -> None:
+        # line:chat:aa:message:m2 is is_self=True
+        digests = [{"chat_ref": _CHAT_REF_A,
+                     "bullets": ["x"],
+                     "needs_reply": [{"src_id": "line:chat:aa:message:m2", "ask": "hey"}],
+                     "quiet": False}]
+        result = validate(self._v2_model(chat_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_LINE_RECORDS)
+        assert result.chat_digests[0]["needs_reply"] == []
+
+    def test_needs_reply_ask_truncated(self) -> None:
+        digests = [{"chat_ref": _CHAT_REF_A,
+                     "bullets": ["x"],
+                     "needs_reply": [{"src_id": "line:chat:aa:message:m1", "ask": "a" * 200}],
+                     "quiet": False}]
+        result = validate(self._v2_model(chat_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_LINE_RECORDS)
+        assert len(result.chat_digests[0]["needs_reply"][0]["ask"]) == 80
+
+    def test_non_dict_entry_dropped(self) -> None:
+        digests = ["bad", {"chat_ref": _CHAT_REF_A, "bullets": ["ok"], "needs_reply": [], "quiet": False}]
+        result = validate(self._v2_model(chat_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_LINE_RECORDS)
+        assert len(result.chat_digests) == 1
+
+    def test_items_still_validated_with_digests(self) -> None:
+        """Items validation is unchanged even when digests are present."""
+        model = self._v2_model(chat_digests=[])
+        model["items"] = [NEW_ITEM]
+        result = validate(model, BUNDLE_SRC_IDS, OPEN_TODO_IDS, records=_LINE_RECORDS)
+        assert len(result.items) == 1
+        assert result.rejected == []
+
+    def test_needs_reply_wrong_chat_ref_dropped(self) -> None:
+        """MEDIUM-2: needs_reply src_id that belongs to a DIFFERENT chat_ref → dropped."""
+        # _LINE_RECORDS: m1 and m2 are CHAT_REF_A, m3 is CHAT_REF_B
+        digests = [{
+            "chat_ref": _CHAT_REF_A,
+            "bullets": ["x"],
+            "needs_reply": [
+                {"src_id": "line:chat:aa:message:m1", "ask": "ok"},    # correct chat
+                {"src_id": "line:chat:bb:message:m3", "ask": "wrong"}, # CHAT_REF_B's message
+            ],
+            "quiet": False,
+        }]
+        result = validate(self._v2_model(chat_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_LINE_RECORDS)
+        assert len(result.chat_digests[0]["needs_reply"]) == 1
+        assert result.chat_digests[0]["needs_reply"][0]["src_id"] == "line:chat:aa:message:m1"
+
+
+class TestMailDigestValidation:
+    def _v2_model(self, mail_digests: list | None = None) -> dict:
+        m: dict = {"schema_version": 2, "items": []}
+        if mail_digests is not None:
+            m["mail_digests"] = mail_digests
+        return m
+
+    def test_valid_mail_digest(self) -> None:
+        digests = [{"src_id": "mail:AAA", "category": "reply", "summary": "Need response"}]
+        result = validate(self._v2_model(mail_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_MAIL_RECORDS)
+        assert len(result.mail_digests) == 1
+
+    def test_unknown_src_id_dropped(self) -> None:
+        digests = [{"src_id": "mail:NONEXIST", "category": "reply", "summary": "x"}]
+        result = validate(self._v2_model(mail_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_MAIL_RECORDS)
+        assert result.mail_digests == []
+
+    def test_invalid_category_dropped(self) -> None:
+        digests = [{"src_id": "mail:AAA", "category": "spam", "summary": "x"}]
+        result = validate(self._v2_model(mail_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_MAIL_RECORDS)
+        assert result.mail_digests == []
+
+    def test_summary_truncated(self) -> None:
+        digests = [{"src_id": "mail:AAA", "category": "fyi", "summary": "x" * 200}]
+        result = validate(self._v2_model(mail_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS,
+                          records=_MAIL_RECORDS)
+        assert len(result.mail_digests[0]["summary"]) == 120
+
+    def test_no_records_passes_through(self) -> None:
+        """When no records are provided, digest entries pass through (no filtering)."""
+        digests = [{"src_id": "mail:AAA", "category": "reply", "summary": "x"}]
+        result = validate(self._v2_model(mail_digests=digests), BUNDLE_SRC_IDS, OPEN_TODO_IDS)
+        # No records → no filtering context → entries pass through
+        assert len(result.mail_digests) == 1
+
+    def test_mail_only_records_drops_chat_digests(self) -> None:
+        """With mail-only records, chat digests should be dropped (no LINE messages)."""
+        model: dict = {"schema_version": 2, "items": [],
+                       "chat_digests": [{"chat_ref": "chat:fake", "bullets": ["x"], "needs_reply": [], "quiet": False}],
+                       "mail_digests": [{"src_id": "mail:AAA", "category": "reply", "summary": "x"}]}
+        result = validate(model, BUNDLE_SRC_IDS, OPEN_TODO_IDS, records=_MAIL_RECORDS)
+        assert result.chat_digests == []
+        assert len(result.mail_digests) == 1
+
+    def test_line_only_records_drops_mail_digests(self) -> None:
+        """With LINE-only records, mail digests should be dropped (no mail)."""
+        model: dict = {"schema_version": 2, "items": [],
+                       "chat_digests": [{"chat_ref": _CHAT_REF_A, "bullets": ["x"], "needs_reply": [], "quiet": False}],
+                       "mail_digests": [{"src_id": "mail:fake", "category": "reply", "summary": "x"}]}
+        result = validate(model, BUNDLE_SRC_IDS, OPEN_TODO_IDS, records=_LINE_RECORDS)
+        assert len(result.chat_digests) == 1
+        assert result.mail_digests == []

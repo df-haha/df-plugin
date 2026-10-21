@@ -1,6 +1,6 @@
 [project]
 name = "daily-agenda"
-version = "0.0.1.dev0"
+version = "0.0.2.dev0"
 description = "daily-agenda plugin local scripts"
 requires-python = ">=3.11"
 dependencies = [

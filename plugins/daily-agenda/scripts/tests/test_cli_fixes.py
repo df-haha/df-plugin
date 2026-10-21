@@ -274,10 +274,16 @@ class TestF7NewChatsRef:
         with patch("daily_agenda.analyze.run_analyzer") as mock:
             mock.return_value = AnalyzerResult(output={"schema_version": 1, "items": []}, ms=0)
             code, obj = _run_cli(["run"], deps, capsys)
+            assert obj["ok"] is True
+            # First run is the baseline: nothing is "new" yet.
+            assert obj["new_chats_count"] == 0
+            # A chat that appears later is new.
+            fake_line._chats.append(make_line_chat(ref="chat:ffeeddcc11223344aabbccdd", name="Later Group"))
+            code, obj = _run_cli(["run"], deps, capsys)
 
         assert obj["ok"] is True
         # F4b: run output has count + refs, not names
-        assert obj["new_chats_count"] > 0
+        assert obj["new_chats_count"] == 1
         assert isinstance(obj["new_chat_refs"], list)
         assert len(obj["new_chat_refs"]) > 0
         assert isinstance(obj["new_chat_refs"][0], str)
