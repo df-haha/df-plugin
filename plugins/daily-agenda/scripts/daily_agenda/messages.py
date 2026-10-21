@@ -34,6 +34,9 @@ _MESSAGES: dict[str, str] = {
     "STALE_REPORT": "你指的不是最新一份彙整，為避免改錯，請改用待辦代碼（T-xxxx）或重新確認。",
     "CONFIRM_INVALID": "確認內容有誤，請檢查後重新貼上（所有項目均未變更）。",
     "LOCKED": "已經有一個彙整正在執行，請稍後再試。",
+    "NO_OUTPUT_YET": "還沒有產生過彙整檔，請先執行 /agenda。",
+    "OUTPUT_MISSING": "最新的彙整檔已不在原位置（可能被移動或刪除），請重新執行 /agenda。",
+    "OPEN_FAILED": "無法用預設程式開啟彙整檔，請自行到輸出資料夾打開。",
     # environment
     "NODE_MISSING": "需要 Node.js 24 以上。請在 PowerShell 執行：winget install OpenJS.NodeJS.LTS",
     "NODE_TOO_OLD": "Node.js 版本太舊（需要 24 以上）。請在 PowerShell 執行：winget upgrade OpenJS.NodeJS.LTS",

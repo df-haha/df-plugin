@@ -18,6 +18,10 @@ from daily_agenda import (
 from daily_agenda.line_source import LineSourceError
 from ._common import Deps, emit, require_consent
 
+# First run has no checkpoints; read this many days back (same as the
+# setup scan default) instead of collect()'s 14, which doubled first-day volume.
+_INITIAL_DAYS = 7
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -301,7 +305,7 @@ def _run_pipeline(
     try:
         result = collect.collect(
             cfg, st, now=now, line=line_src, graph=graph_src, run_id=run_id,
-            progress=deps.progress,
+            progress=deps.progress, initial_days=_INITIAL_DAYS,
         )
     except collect.CollectError as exc:
         return emit({"ok": False, "code": exc.code})

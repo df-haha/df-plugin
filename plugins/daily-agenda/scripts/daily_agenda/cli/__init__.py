@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
         from . import cmd_consent, cmd_config, cmd_env, cmd_runtime, cmd_trust
         from . import cmd_line, cmd_collect, cmd_mail, cmd_criteria, cmd_ledger_ops
         from . import cmd_refine, cmd_schedule, cmd_uninstall, cmd_run
-        from . import cmd_progress, cmd_profile, cmd_docs, cmd_scan, cmd_raw
+        from . import cmd_progress, cmd_profile, cmd_docs, cmd_scan, cmd_raw, cmd_open
         from . import cmd_draft, cmd_confirm
 
         dispatch: dict[str, Any] = {
@@ -96,6 +96,7 @@ def main(argv: list[str] | None = None, *, deps: Deps | None = None) -> int:
             "confirm": cmd_confirm.handle,
             # progress: stream command (watch) is exempt from one-JSON contract
             "progress": cmd_progress.handle,
+            "open": cmd_open.handle,
         }
 
         handler = dispatch.get(command)

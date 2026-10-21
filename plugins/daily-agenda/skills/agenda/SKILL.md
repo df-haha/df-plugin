@@ -38,7 +38,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
    ```bash
    uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m daily_agenda progress watch --file "<路徑>"
    ```
-5. 背景指令完成時（harness 通知），**停止 Monitor**（如果還在跑），以背景指令的 stdout JSON 為權威結果（涵蓋 crash 或 kill 後無 terminal event 的情況）。
+5. 背景指令完成時（harness 通知），**停止 Monitor**（如果還在跑），以背景指令的 stdout JSON 為權威結果（涵蓋 crash 或 kill 後無 terminal event 的情況）。harness 的完成通知本身就帶著 stdout；**不要用 `tail`、`head`、`cat` 或 Read 去翻背景輸出檔**（路徑含 `~` 或特殊字元，鎖定時一定被擋，而且沒必要）。
 6. **如果 Monitor 不可用**（fallback，備援）：前景執行 `DA progress watch --file "<路徑>" --max-s 100`（`--max-s` 指定總秒數上限，到期自動結束 exit 3）。若 exit 3，重跑 watch（直到 exit 0 或 1 表示完成/失敗）。背景 Bash 完成通知到達時，停止 watch 並以 stdout JSON 為準。
 
 向使用者轉述進度時，只在階段變化時簡短說一句（例如「正在讀取 LINE 聊天室 35/170」「AI 分析第 2/4 批」），不要每個事件都說。
@@ -55,12 +55,13 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
    - `needs.line_trust: true`（LINE 更新到新版本）→ 用 AskUserQuestion：「LINE 更新到新版本了。要讓我確認一次新版本的 LINE 可以安全讀取嗎？（會檢查 LINE 程式的數位簽章，再試讀一則對話資訊）」選項「好（建議）」「這次先不讀 LINE」。好 → `DA trust probe`；成功就再跑一次 `DA run`。
 3. 回報給使用者（白話、先講結論）：
    - 「今天的彙整已產生：<outputs 路徑>（報表代碼 <report_code>）。」
+   - 讀取期間：用 `sources.line.from`／`to`、`sources.mail.from`／`to` 說「這次讀了 <from> 到 <to> 的 LINE 與信件」。第一次執行沒有上次進度，固定往回讀 7 天，之後每次接著上次讀到的地方。
    - 待辦數量摘要（今天要處理 N 項，其中 P0 有 X 項；可能已完成 M 項）。
    - 任何 `sources` 狀態不是 ok 的來源，轉述其 `message`（例如「LINE 這次沒讀到：請打開 LINE 視窗…；下次會補讀這段期間」）。
-   - `new_chats_count` > 0 → 「本次有 N 個新的 LINE 對話。要查看名稱並選擇排除嗎？（查看名稱會讓這個對話鎖定，之後只能用 daily-agenda 功能）」使用者要看 → 執行 `DA chats new`（會鎖定對話），把回傳的 `name`（被圍欄包住的第三方名稱）列給使用者看。使用者要排除 → 用對應的 `ref`（不是 name）呼叫 `DA exclude --add <ref> <ref> ...`（可一次給多個）。
+   - `new_chats_count` > 0（第一次執行一定是 0，所有對話都當成已知的基準）→ 「本次有 N 個新的 LINE 對話。要查看名稱並選擇排除嗎？（查看名稱會讓這個對話鎖定，之後只能用 daily-agenda 功能）」使用者要看 → 執行 `DA chats new`（會鎖定對話），把回傳的 `name`（被圍欄包住的第三方名稱）列給使用者看。使用者要排除 → 用對應的 `ref`（不是 name）呼叫 `DA exclude --add <ref> <ref> ...`（可一次給多個）。
    - `sources.mail.code` 是 `MAIL_FOLDER_MISSING` → 「有些選取的信箱資料夾已不存在（可能被刪除或改名了），那些資料夾的信件這次沒讀到。要更新信箱資料夾設定嗎？」使用者要更新 → 引導到 `/agenda-setup` → 只改信箱資料夾。
    - `rejected_items` > 0 → 一句話：「有 N 筆 AI 結果因為引用不到原始資料而被略過。」
-4. 提供開啟方式：在 Windows 上可用 `start "" "<路徑>"` 開啟（使用者同意再開）。
+4. 問使用者要不要開啟；要 → `DA open`（開最新一份 html；`--format md` 開 md）。不要用 `start`、`explorer`、`Invoke-Item`——對話鎖定時會被擋，`DA open` 是 daily-agenda 自己的指令，鎖定時也能用。
 5. 若 `needs.refine: true` → 進入 C。
 
 ## B. 標記完成／恢復（US-13）

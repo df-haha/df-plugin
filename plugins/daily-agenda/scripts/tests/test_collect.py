@@ -79,13 +79,27 @@ class TestLineCollection:
         chat = make_line_chat(ref="chat:aabbccddee112233aabbccdd", name="New Chat")
         msg = make_line_message(chat_ref="chat:aabbccddee112233aabbccdd")
         cfg = fake_cfg()
-        state = fake_state(known_chats=[])
+        state = fake_state(known_chats=[{"ref": "chat:000000000000000000000000", "name": "Old"}])
         line = FakeLine(chats=[chat], messages=[msg])
 
         result = collect(cfg, state, now=NOW, line=line, graph=None, run_id="r3")
 
         assert len(result.new_chats) == 1
         assert result.new_chats[0]["ref"] == "chat:aabbccddee112233aabbccdd"
+
+    def test_first_run_reports_no_new_chats(self) -> None:
+        """No baseline on the first run → every chat is 'known', none is 'new'
+        (otherwise the skill re-asks the exclusion question right after setup)."""
+        chats = [make_line_chat(ref=f"chat:{i:024x}", name=f"G{i}") for i in range(3)]
+        msg = make_line_message(chat_ref=chats[0]["chatRef"])
+        state = fake_state(known_chats=[])
+        assert not state.get("last_run")
+        line = FakeLine(chats=chats, messages=[msg])
+
+        result = collect(fake_cfg(), state, now=NOW, line=line, graph=None, run_id="r4")
+
+        assert result.new_chats == []
+        assert {c["ref"] for c in result.known_chats} == {c["chatRef"] for c in chats}
 
     def test_checkpoint_not_advanced_on_failure(self) -> None:
         """SC-9: Failed source must not advance checkpoint."""

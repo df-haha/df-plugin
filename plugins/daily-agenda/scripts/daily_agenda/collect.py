@@ -132,6 +132,10 @@ def _collect_line(
         c["ref"] for c in cfg.get("line", {}).get("excluded_chats", [])
     }
     known_refs = {c["ref"] for c in state.get("known_chats", [])}
+    # First run ever: there is no baseline to compare against, so nothing is
+    # "new" — every chat the user chose to read would otherwise be reported
+    # (and the skill would re-ask the exclusion question right after setup).
+    first_run = not known_refs and not state.get("last_run")
 
     # Paginate recentChats
     all_chats: list[dict[str, Any]] = []
@@ -152,7 +156,7 @@ def _collect_line(
         ref = chat.get("chatRef", "")
         if ref in excluded_refs:
             continue
-        if ref not in known_refs:
+        if ref not in known_refs and not first_run:
             new_chats.append({"ref": ref, "name": chat.get("chatName", "")})
         active_chats.append(chat)
 
