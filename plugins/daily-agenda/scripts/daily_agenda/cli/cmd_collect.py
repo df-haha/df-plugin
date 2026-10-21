@@ -202,9 +202,13 @@ def _emit_brief_listing(deps: Deps, chats: list[dict[str, Any]], excluded: list[
     for c in chats:
         n = len(items) + 1
         items.append({"n": n, "ref": c["ref"], "name": c["name"], "preserved": False})
-        date = (c.get("last_message_at") or "")[:10]
+        # Keep rows short: the whole listing must stay well under the size at
+        # which Claude Code stops showing tool output inline (~10KB; 171 chats
+        # measured 7.6KB with the longer "(group, 2026-10-08)" form).
+        date = (c.get("last_message_at") or "")[5:10]  # MM-DD
+        kind = "群" if c.get("type") == "group" else "個"
         tag = " [已排除]" if c["ref"] in excluded_refs else ""
-        lines.append(f"{n}. {_one_line(c['name'])} ({_one_line(c['type'])}, {date}){tag}")
+        lines.append(f"{n}. {_one_line(c['name'])} ({kind} {date}){tag}")
     active = {c["ref"] for c in chats}
     for c in excluded:
         if c["ref"] in active:
