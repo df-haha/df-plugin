@@ -139,3 +139,36 @@ def test_prompt_templates_exist_and_forbid_tools():
         assert "JSON" in text
     assert '"items"' in agenda
     assert '"criteria_markdown"' in criteria
+
+
+# ---------------------------------------------------------------------------
+# npm 版 claude.cmd：命令列參數會被 cmd.exe 在第一個換行截斷，prompt 送不完整
+# ---------------------------------------------------------------------------
+
+def _fake_which(table: dict[str, str]):
+    return lambda name: table.get(name)
+
+
+def test_resolve_claude_prefers_native_exe_over_cmd_shim():
+    which = _fake_which({
+        "claude.exe": r"C:\Users\u\.local\bin\claude.exe",
+        "claude": r"C:\Users\u\AppData\Roaming\npm\claude.cmd",
+    })
+    assert analyze.resolve_claude(which=which) == r"C:\Users\u\.local\bin\claude.exe"
+
+
+@pytest.mark.parametrize("shim", [r"C:\npm\claude.cmd", r"C:\npm\CLAUDE.CMD", r"C:\npm\claude.bat"])
+def test_resolve_claude_rejects_batch_shim(shim):
+    with pytest.raises(analyze.AnalyzerError) as e:
+        analyze.resolve_claude(which=_fake_which({"claude": shim}))
+    assert e.value.code == "CLAUDE_NPM_SHIM"
+
+
+def test_resolve_claude_posix_path_is_accepted():
+    assert analyze.resolve_claude(which=_fake_which({"claude": "/usr/bin/claude"})) == "/usr/bin/claude"
+
+
+def test_resolve_claude_missing():
+    with pytest.raises(analyze.AnalyzerError) as e:
+        analyze.resolve_claude(which=_fake_which({}))
+    assert e.value.code == "ANALYZER_FAILED"

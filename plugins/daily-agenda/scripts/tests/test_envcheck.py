@@ -64,6 +64,18 @@ def test_missing_flags_and_old_node(monkeypatch):
     assert all(c["message"] for c in report["checks"] if not c["ok"])
 
 
+def test_claude_npm_shim_is_rejected(monkeypatch):
+    """npm 版 claude.cmd 會截斷多行 prompt；第 1 步就擋下並指示改裝原生版。"""
+    runner = make_runner({"claude": (0, HELP_OK)})
+    monkeypatch.setattr(envcheck, "_which",
+                        lambda name: r"C:\npm\claude.cmd" if name == "claude" else None)
+    check = envcheck.check_claude(runner)
+    assert check["ok"] is False
+    assert check["code"] == "CLAUDE_NPM_SHIM"
+    assert "install.ps1" in check["message"]
+    assert runner.calls == []
+
+
 def test_missing_executables(monkeypatch):
     monkeypatch.setattr(envcheck, "_which", lambda name: None)
     monkeypatch.setattr(envcheck, "check_lock_hook", lambda **kw: envcheck._check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE"))

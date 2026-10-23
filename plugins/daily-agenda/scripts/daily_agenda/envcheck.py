@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
+from .analyze import AnalyzerError, resolve_claude
 from .messages import humanize
 
 REQUIRED_CLAUDE_FLAGS: tuple[str, ...] = (
@@ -62,7 +63,12 @@ def parse_node_major(text: str) -> int | None:
 
 
 def check_claude(runner: Runner) -> dict[str, Any]:
-    exe = _which("claude")
+    try:
+        exe: str | None = resolve_claude(which=_which)
+    except AnalyzerError as exc:
+        if exc.code == "CLAUDE_NPM_SHIM":
+            return _check("claude", False, "CLAUDE_NPM_SHIM")
+        exe = None
     proc = _run(runner, [exe, "--help"]) if exe else None
     if proc is None:
         return _check("claude", False, "CLAUDE_FLAGS_MISSING", missing=list(REQUIRED_CLAUDE_FLAGS))

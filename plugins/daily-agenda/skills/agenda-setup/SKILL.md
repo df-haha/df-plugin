@@ -71,6 +71,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
 1. `DA envcheck`。逐項把 `ok:false` 的 `message` 告訴使用者（裡面已有補救指令）。
    - `NOT_WINDOWS` → 說明只支援 Windows 原生 Claude Code，結束。
    - `CLAUDE_FLAGS_MISSING` → 請使用者更新 Claude Code 後重跑，結束。
+   - `CLAUDE_NPM_SHIM` → 轉述 `message`（含安裝指令），請使用者裝好官方版、**關掉 Claude Code 重新打開**後再執行 /agenda-setup，結束。不要在同一個對話重跑 `DA envcheck`（舊的 PATH 還在，結果不會變）。
    - `LOCK_HOOK_UNAVAILABLE` → **硬停止**：轉述 `message`（安全鎖無法執行），結束。不可跳過。
    - 缺 Node／uv → 給指令，請使用者裝好後說「好了」，再重跑 `DA envcheck`。
    - `LINE_NOT_RUNNING` → 請使用者打開 LINE 並登入；若使用者說不用 LINE，記下「只用 Outlook」，跳到第 3 步。

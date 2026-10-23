@@ -30,6 +30,7 @@ _MESSAGES: dict[str, str] = {
     "ANALYZER_FAILED": "AI 分析失敗，這次不產生彙整；資料進度不會前進，下次會重讀。",
     "ANALYZER_TIMEOUT": "AI 分析逾時，這次不產生彙整；下次會重讀。",
     "MODEL_OUTPUT_INVALID": "AI 回傳的格式不正確，這次不產生彙整；下次會重讀。",
+    "CRITERIA_OUTPUT_INVALID": "AI 回傳的格式不正確，判斷準則這次沒有建立。可以再試一次；如果一直失敗，請把這段訊息回報給負責人。",
     "PUBLISH_FAILED": "彙整檔寫到輸出資料夾失敗（資料已保存），下次執行會先補寫。",
     "STALE_REPORT": "你指的不是最新一份彙整，為避免改錯，請改用待辦代碼（T-xxxx）或重新確認。",
     "CONFIRM_INVALID": "確認內容有誤，請檢查後重新貼上（所有項目均未變更）。",
@@ -42,6 +43,7 @@ _MESSAGES: dict[str, str] = {
     "NODE_TOO_OLD": "Node.js 版本太舊（需要 24 以上）。請在 PowerShell 執行：winget upgrade OpenJS.NodeJS.LTS",
     "UV_MISSING": "需要 uv。請在 PowerShell 執行：powershell -ExecutionPolicy ByPass -c \"irm https://astral.sh/uv/install.ps1 | iex\"",
     "CLAUDE_FLAGS_MISSING": "Claude Code 版本太舊，缺少安全分析需要的功能，請更新 Claude Code。",
+    "CLAUDE_NPM_SHIM": "這台電腦的 Claude Code 是用 npm 安裝的版本（claude.cmd），分析時給 AI 的指示會被 Windows 截斷，無法使用。請在 PowerShell 執行：irm https://claude.ai/install.ps1 | iex 安裝官方版，裝完關掉 Claude Code 重新打開再試。",
     "NOT_WINDOWS": "本工具目前只支援 Windows 原生 Claude Code。",
     "LOCK_HOOK_UNAVAILABLE": "安全鎖無法執行（找不到 node 或檢查失敗），為了安全不能繼續設定。請安裝 Node.js 24 以上後重試。",
     "GRAPH_TRUNCATED": "這段期間的信件太多，超過一次可安全讀取的上限；為了不漏信，這次先不彙整信件，請把較舊的信整理或封存後再試。",
@@ -73,6 +75,11 @@ def humanize(code: str | None) -> str:
     if not code:
         return ""
     return _MESSAGES.get(code, f"發生未預期的狀況（代碼 {code}），請把這個代碼告訴維護者。")
+
+
+def criteria_code(code: str) -> str:
+    """Criteria draft/refine: the shared MODEL_OUTPUT_INVALID wording is about /agenda re-reading."""
+    return "CRITERIA_OUTPUT_INVALID" if code == "MODEL_OUTPUT_INVALID" else code
 
 
 def known_codes() -> frozenset[str]:
