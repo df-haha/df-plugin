@@ -11,6 +11,7 @@ from daily_agenda import analyze, criteria, state, validate
 from daily_agenda.fence import fence_untrusted
 from daily_agenda.fsutil import jsonl_line
 from daily_agenda.ledger import feedback_signals
+from daily_agenda.messages import criteria_code
 from ._common import Deps, emit, require_consent, validate_file_flag
 
 
@@ -154,9 +155,9 @@ def handle(argv: list[str], deps: Deps) -> int:
                 analyzer_output.output,
             )
         except analyze.AnalyzerError as exc:
-            return emit({"ok": False, "code": exc.code})
+            return emit({"ok": False, "code": criteria_code(exc.code)})
         except validate.ModelOutputInvalid:
-            return emit({"ok": False, "code": "MODEL_OUTPUT_INVALID"})
+            return emit({"ok": False, "code": "CRITERIA_OUTPUT_INVALID"})
 
         # Write outputs (no state commit — only apply/skip do that)
         draft_path = runs_dir / "criteria-draft.md"

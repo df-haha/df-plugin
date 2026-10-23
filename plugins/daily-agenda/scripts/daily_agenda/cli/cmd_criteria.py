@@ -7,6 +7,7 @@ from pathlib import Path
 
 from daily_agenda import criteria, state
 from daily_agenda.fence import fence_untrusted
+from daily_agenda.messages import criteria_code
 from daily_agenda.messages import humanize
 from ._common import Deps, emit, require_consent, validate_file_flag
 
@@ -312,9 +313,9 @@ def _draft_analyze(
             progress.event("analyze_batch_done", i=1, n=1)  # type: ignore[attr-defined]
             criteria_text = validate.validate_criteria_draft(analyzer_output.output)  # type: ignore[attr-defined]
         except analyze.AnalyzerError as exc:  # type: ignore[attr-defined]
-            return emit({"ok": False, "code": exc.code})
+            return emit({"ok": False, "code": criteria_code(exc.code)})
         except validate.ModelOutputInvalid:  # type: ignore[attr-defined]
-            return emit({"ok": False, "code": "MODEL_OUTPUT_INVALID"})
+            return emit({"ok": False, "code": "CRITERIA_OUTPUT_INVALID"})
 
         return _emit_draft(runs_dir, criteria_text, days, batches_skipped=0)
     else:
@@ -403,7 +404,7 @@ def _draft_map_reduce(
     """Map each batch → observations, reduce → final criteria.
 
     Policy (#7): skip-and-count malformed map batches instead of failing
-    everything.  If more than half of batches fail → MODEL_OUTPUT_INVALID.
+    everything.  If more than half of batches fail → CRITERIA_OUTPUT_INVALID.
     """
     from daily_agenda.fsutil import jsonl_line
 
@@ -435,11 +436,23 @@ def _draft_map_reduce(
             # Skip malformed batch (#7)
             batches_skipped += 1
         except analyze.AnalyzerError as exc:  # type: ignore[attr-defined]
-            return emit({"ok": False, "code": exc.code})
+            # Unparseable reply is malformed output too (#7); other codes abort
+            if exc.code != "MODEL_OUTPUT_INVALID":
+                return emit({"ok": False, "code": exc.code})
+            batches_skipped += 1
 
-    # If more than half of batches failed → fail entirely (#7)
-    if batches_skipped > n_batches // 2:
-        return emit({"ok": False, "code": "MODEL_OUTPUT_INVALID"})
+        # More than half failed → fail entirely (#7); stop now, later batches can't change it
+        if batches_skipped > n_batches // 2:
+            # Counts only — never model output — so a report can tell systematic from sporadic
+            return emit({
+                "ok": False, "code": "CRITERIA_OUTPUT_INVALID",
+                "message": (
+                    f"AI 回傳的格式不正確（共 {n_batches} 批，前 {idx} 批中有 {batches_skipped} 批失敗，"
+                    "已提前停止），判斷準則這次沒有建立。可以再試一次；如果一直失敗，請把這段訊息回報給負責人。"
+                ),
+                "batches_skipped": batches_skipped, "batches_attempted": idx,
+                "batches_total": n_batches,
+            })
 
     # Deduplicate and cap observations (#6)
     observations = _dedupe_observations(observations)
@@ -481,8 +494,8 @@ def _draft_map_reduce(
         progress.event("analyze_reduce_done", i=1, n=1)  # type: ignore[attr-defined]
         criteria_text = validate.validate_criteria_draft(reduce_output.output)  # type: ignore[attr-defined]
     except analyze.AnalyzerError as exc:  # type: ignore[attr-defined]
-        return emit({"ok": False, "code": exc.code})
+        return emit({"ok": False, "code": criteria_code(exc.code)})
     except validate.ModelOutputInvalid:  # type: ignore[attr-defined]
-        return emit({"ok": False, "code": "MODEL_OUTPUT_INVALID"})
+        return emit({"ok": False, "code": "CRITERIA_OUTPUT_INVALID"})
 
     return _emit_draft(runs_dir, criteria_text, days, batches_skipped=batches_skipped)

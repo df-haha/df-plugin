@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from daily_agenda.progress import Progress
-from daily_agenda.analyze import AnalyzerResult
+from daily_agenda.analyze import AnalyzerError, AnalyzerResult
 from daily_agenda import criteria, state
 from daily_agenda.cli import main
 from daily_agenda.cli._common import Deps
@@ -791,7 +791,7 @@ class TestCriteriaDraftBatching:
             code, obj = _run_cli(["criteria", "draft", "--days", "14"], deps, capsys)
 
         assert obj["ok"] is False
-        assert obj["code"] == "MODEL_OUTPUT_INVALID"
+        assert obj["code"] == "CRITERIA_OUTPUT_INVALID"
 
 
 # ---------------------------------------------------------------------------
@@ -1127,7 +1127,88 @@ class TestCriteriaMapSkipMalformed:
             code, obj = _run_cli(["criteria", "draft", "--days", "14"], deps, capsys)
 
         assert obj["ok"] is False
-        assert obj["code"] == "MODEL_OUTPUT_INVALID"
+        assert obj["code"] == "CRITERIA_OUTPUT_INVALID"
+
+
+    def _map_deps(self, tmp_path: Path) -> Deps:
+        h = _setup_home(tmp_path)
+        cfg = state.load_config(h)
+        cfg["analysis"]["batch_bytes"] = 50
+        state.save_config(h, cfg)
+        mail_items = [make_mail_item(msg_id=f"AAMk-{i}") for i in range(5)]
+        return Deps(
+            home=h,
+            now_factory=lambda: NOW,
+            plugin_root=Path(__file__).resolve().parents[2],
+            graph_factory=lambda: FakeGraph(mail_items=mail_items, calendar_items=[]),
+        )
+
+    def test_unparseable_batch_is_skipped_not_fatal(self, tmp_path: Path, capsys: Any) -> None:
+        """AI 回覆解析不出 JSON（AnalyzerError MODEL_OUTPUT_INVALID）也照 #7 跳過計數。"""
+        deps = self._map_deps(tmp_path)
+        calls = {"observe": 0, "reduce": 0}
+
+        def _first_unparseable(stdin_bytes: bytes, prompt: str, **kwargs: Any) -> AnalyzerResult:
+            if "criteria_observe" in prompt:
+                calls["observe"] += 1
+                if calls["observe"] == 1:
+                    raise AnalyzerError("MODEL_OUTPUT_INVALID")
+                return AnalyzerResult(output={"schema_version": 1, "observations": [{
+                    "category": "test", "pattern": "p", "frequency": "high",
+                    "priority_signal": "P1"}]}, ms=0)
+            calls["reduce"] += 1
+            return AnalyzerResult(output={"schema_version": 1, "criteria_markdown": "# G"}, ms=0)
+
+        with patch("daily_agenda.analyze.run_analyzer", side_effect=_first_unparseable), \
+             patch("daily_agenda.analyze.load_prompt", side_effect=lambda k: f"__KIND:{k}__"):
+            code, obj = _run_cli(["criteria", "draft", "--days", "14"], deps, capsys)
+
+        assert obj["ok"] is True
+        assert obj["batches_skipped"] == 1
+        assert calls["observe"] >= 3  # 第 1 批失敗後仍繼續跑後面的批次
+        assert calls["reduce"] == 1
+
+    def test_all_unparseable_reports_counts(self, tmp_path: Path, capsys: Any) -> None:
+        """全部批次都解析失敗 → CRITERIA_OUTPUT_INVALID，回報失敗批數（只有數字，不含內容）。"""
+        deps = self._map_deps(tmp_path)
+
+        calls = [0]
+
+        def _always_unparseable(stdin_bytes: bytes, prompt: str, **kwargs: Any) -> AnalyzerResult:
+            calls[0] += 1
+            raise AnalyzerError("MODEL_OUTPUT_INVALID")
+
+        with patch("daily_agenda.analyze.run_analyzer", side_effect=_always_unparseable), \
+             patch("daily_agenda.analyze.load_prompt", side_effect=lambda k: f"__KIND:{k}__"):
+            code, obj = _run_cli(["criteria", "draft", "--days", "14"], deps, capsys)
+
+        assert code == 1
+        assert obj["ok"] is False
+        assert obj["code"] == "CRITERIA_OUTPUT_INVALID"
+        total = obj["batches_total"]
+        assert total >= 3
+        # 失敗數一過半就停，不白跑剩下的批次
+        assert obj["batches_attempted"] == total // 2 + 1 == calls[0]
+        assert obj["batches_skipped"] == obj["batches_attempted"]
+        assert f"共 {total} 批" in obj["message"]
+        assert "提前停止" in obj["message"]
+        assert "下次會重讀" not in obj["message"]
+
+    def test_other_analyzer_errors_still_abort(self, tmp_path: Path, capsys: Any) -> None:
+        """非格式類錯誤（例如啟動到 npm 版 claude）維持立即中止，不白跑後面的批次。"""
+        deps = self._map_deps(tmp_path)
+        calls = [0]
+
+        def _shim(stdin_bytes: bytes, prompt: str, **kwargs: Any) -> AnalyzerResult:
+            calls[0] += 1
+            raise AnalyzerError("CLAUDE_NPM_SHIM")
+
+        with patch("daily_agenda.analyze.run_analyzer", side_effect=_shim), \
+             patch("daily_agenda.analyze.load_prompt", side_effect=lambda k: f"__KIND:{k}__"):
+            code, obj = _run_cli(["criteria", "draft", "--days", "14"], deps, capsys)
+
+        assert obj["code"] == "CLAUDE_NPM_SHIM"
+        assert calls[0] == 1
 
 
 # ---------------------------------------------------------------------------

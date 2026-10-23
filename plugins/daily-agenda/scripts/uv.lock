@@ -388,7 +388,7 @@ wheels = [
 
 [[package]]
 name = "daily-agenda"
-version = "0.0.2.dev0"
+version = "0.0.3.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "jinja2" },

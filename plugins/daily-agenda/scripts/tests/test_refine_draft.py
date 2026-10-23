@@ -520,7 +520,23 @@ class TestRefineDraftCLI:
             code, obj = _run_cli(["refine", "draft"], deps, capsys)
 
         assert obj["ok"] is False
-        assert obj["code"] == "MODEL_OUTPUT_INVALID"
+        assert obj["code"] == "CRITERIA_OUTPUT_INVALID"
+        assert "下次會重讀" not in obj["message"]
+
+    def test_unparseable_model_output(self, tmp_path: Path, capsys: Any) -> None:
+        """解析不出 JSON 也用判斷準則專用訊息，不說「下次會重讀」。"""
+        h = _setup_home(tmp_path)
+        todo = _make_todo(history=[_history_entry("open", "done", "user")])
+        _write_ledger(h, [todo])
+        deps = _deps(h)
+
+        from daily_agenda.analyze import AnalyzerError
+        with patch("daily_agenda.analyze.run_analyzer",
+                   side_effect=AnalyzerError("MODEL_OUTPUT_INVALID")):
+            code, obj = _run_cli(["refine", "draft"], deps, capsys)
+
+        assert obj["ok"] is False
+        assert obj["code"] == "CRITERIA_OUTPUT_INVALID"
 
     def test_analyzer_error_maps_code(self, tmp_path: Path, capsys: Any) -> None:
         h = _setup_home(tmp_path)

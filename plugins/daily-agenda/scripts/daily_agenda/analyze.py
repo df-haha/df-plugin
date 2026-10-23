@@ -42,6 +42,10 @@ PROMPT_FILES = {
 }
 _FENCE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 
+# A .cmd/.bat target runs through cmd.exe, which cuts an argument at its first
+# newline — the multi-line prompt would arrive as just its title line.
+_BATCH_SHIM_SUFFIXES = (".cmd", ".bat")
+
 Runner = Callable[..., subprocess.CompletedProcess]
 
 
@@ -60,11 +64,17 @@ class AnalyzerResult:
     usage: dict[str, Any] = field(default_factory=dict)
 
 
-def resolve_claude() -> str:
-    """Absolute path of the ``claude`` executable (handles Windows .exe/.cmd)."""
-    found = shutil.which("claude")
+def resolve_claude(which: Callable[[str], str | None] = shutil.which) -> str:
+    """Absolute path of the ``claude`` executable.
+
+    Prefers a native ``claude.exe`` anywhere on PATH; a lone npm ``claude.cmd``
+    shim is refused (``CLAUDE_NPM_SHIM``) because cmd.exe truncates the prompt.
+    """
+    found = which("claude.exe") or which("claude")
     if not found:
         raise AnalyzerError("ANALYZER_FAILED", "claude executable not found")
+    if found.lower().endswith(_BATCH_SHIM_SUFFIXES):
+        raise AnalyzerError("CLAUDE_NPM_SHIM")
     return found
 
 
