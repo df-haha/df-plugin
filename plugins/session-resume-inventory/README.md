@@ -32,6 +32,7 @@ python3 plugins/session-resume-inventory/scripts/restore.py --open-orca  # Orca 
 ```
 
 - 已在跑的 session 不會重複開。
+- 已收尾的 session 不開回，只列出指令：下過 `/session-close` 的，以及只用來盤點／存快照／復原 session 的。
 - 快照只有本人可讀（檔案 600、資料夾 700），因為會記錄啟動參數。
 - 依原啟動參數復原（白名單旗標，如 `--dangerously-skip-permissions`、`--model`）；其他參數列出不帶。
 - 只開回原本在 Orca、且路徑已登記在 Orca 的 session；其餘只列出指令。Windows Terminal 復原尚未支援。

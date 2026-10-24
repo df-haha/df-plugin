@@ -153,9 +153,148 @@ class PlanTests(unittest.TestCase):
         plan = rs.build_plan([self.snap(), self.snap()], live_sids=set(), worktrees={"/repo": "id:wt1"})
         self.assertEqual(len(plan["orca"]), 1)
 
+    def test_closed_session_not_reopened(self):
+        sessions = [self.snap(sid="closed"), self.snap(sid="open"), self.snap(sid="closed-live")]
+        plan = rs.build_plan(sessions, live_sids={"closed-live"}, worktrees={"/repo": "id:wt1"},
+                             not_needed={"closed": rs.REASON_CLOSED, "closed-live": rs.REASON_CLOSED})
+        self.assertEqual([(s["sid"], s["reason"]) for s in plan["not_needed"]], [("closed", rs.REASON_CLOSED)])
+        self.assertEqual([s["sid"] for s in plan["orca"]], ["open"])
+        self.assertEqual([s["sid"] for s in plan["already_live"]], ["closed-live"])
+
     def test_wsl_unc_path_normalized(self):
         self.assertEqual(rs.normalize_path("\\\\wsl.localhost\\Ubuntu\\home\\haha\\x"), "/home/haha/x")
         self.assertEqual(rs.normalize_path("/home/haha/x/"), "/home/haha/x")
+
+
+class SessionCloseTests(unittest.TestCase):
+    def write(self, path: Path, records: list[dict]) -> Path:
+        import json
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(json.dumps(r, ensure_ascii=False, separators=(",", ":")) for r in records) + "\n", encoding="utf-8")
+        return path
+
+    @staticmethod
+    def user(text, **kw):
+        return {"type": "user", "message": {"role": "user", "content": text}, **kw}
+
+    def test_claude_slash_command_marks_closed(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            t = self.write(Path(d) / "a.jsonl", [
+                self.user("修 bug"),
+                self.user("<command-message>session-close</command-message>\n<command-name>/session-close</command-name>"),
+            ])
+            self.assertEqual(rs.claude_skip_reason(t), rs.REASON_CLOSED)
+
+    def test_claude_skill_tool_call_marks_closed(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            t = self.write(Path(d) / "a.jsonl", [{"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "name": "Skill", "input": {"skill": "session-close"}}]}}])
+            self.assertEqual(rs.claude_skip_reason(t), rs.REASON_CLOSED)
+
+    def test_claude_mentions_and_sidechain_do_not_count(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            t = self.write(Path(d) / "a.jsonl", [
+                self.user("有輸入 /session-close 指令過的就不用打開了"),
+                {"type": "assistant", "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "<command-name>/session-close</command-name>"}]}},
+                self.user("<command-name>/session-close</command-name>", isSidechain=True),
+            ])
+            self.assertIsNone(rs.claude_skip_reason(t))
+
+    def test_claude_inventory_only_session_is_not_needed(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            t = self.write(Path(d) / "a.jsonl", [
+                self.user("<command-message>session-resume-inventory:session-resume-inventory</command-message>\n"
+                          "<command-name>/session-resume-inventory:session-resume-inventory</command-name>"),
+                self.user("<command-name>/model</command-name>"),
+                self.user("存session"),
+                self.user("Stop hook feedback: 缺逐項結果"),
+            ])
+            self.assertEqual(rs.claude_skip_reason(t), rs.REASON_INVENTORY_ONLY)
+
+    def test_claude_restore_session_with_bash_call_is_not_needed(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            t = self.write(Path(d) / "a.jsonl", [
+                self.user("復原 session"),
+                {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "tool_use", "name": "Bash",
+                    "input": {"command": "python3 /p/scripts/restore.py --apply"}}]}},
+                self.user("resume"),
+            ])
+            self.assertEqual(rs.claude_skip_reason(t), rs.REASON_INVENTORY_ONLY)
+
+    def test_claude_inventory_plus_real_work_is_reopened(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            t = self.write(Path(d) / "a.jsonl", [
+                self.user("<command-name>/session-resume-inventory</command-name>"),
+                self.user("存session"),
+                self.user("修改進這個skills內"),
+            ])
+            self.assertIsNone(rs.claude_skip_reason(t))
+            plain = self.write(Path(d) / "b.jsonl", [self.user("存session")])
+            self.assertIsNone(rs.claude_skip_reason(plain))
+
+    def test_other_slash_command_paste_or_shell_counts_as_work(self):
+        import tempfile
+        inventory = self.user("<command-name>/session-resume-inventory</command-name>")
+        work_records = [
+            self.user("<command-message>version-check</command-message>\n<command-name>/version-check</command-name>"),
+            self.user("\n\n<pasted_content id=\"x\">log</pasted_content>\n\n這什麼意思? 幫我修"),
+            self.user("<bash-input>git status</bash-input>"),
+        ]
+        with tempfile.TemporaryDirectory() as d:
+            for i, work in enumerate(work_records):
+                t = self.write(Path(d) / f"{i}.jsonl", [inventory, work, self.user("存session")])
+                self.assertIsNone(rs.claude_skip_reason(t), work["message"]["content"])
+
+    def test_mgmt_prompt_must_be_only_session_words(self):
+        for text in ("存session", "存SESSION", "復原 session", "回復session", "resume session", "resume",
+                     "把 session 開回來"):
+            self.assertTrue(rs.is_session_mgmt_prompt(text), text)
+        for text in ("記錄session然後幫我修bug", "修 session bug", "session 為什麼掛了"):
+            self.assertFalse(rs.is_session_mgmt_prompt(text), text)
+
+    def test_malformed_records_fail_open(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            projects, codex_root = Path(d) / "projects", Path(d) / "codex"
+            (projects / "-repo").mkdir(parents=True)
+            (projects / "-repo" / "c1.jsonl").write_text('{"type":"user","message":null}\n', encoding="utf-8")
+            (codex_root / "2026").mkdir(parents=True)
+            (codex_root / "2026" / "rollout-x1.jsonl").write_text('{"payload":null,"role":"user"}\n'
+                                                                    '{"x":1,"role":"user"}\n', encoding="utf-8")
+            sessions = [{"runtime": "claude", "sid": "c1"}, {"runtime": "codex", "sid": "x1"}]
+            self.assertEqual(rs.not_needed_sessions(sessions, projects, codex_root), {})
+
+    def test_codex_user_invocation_marks_closed(self):
+        import tempfile
+        def rec(text):
+            return {"type": "response_item", "payload": {"type": "message", "role": "user",
+                                                          "content": [{"type": "input_text", "text": text}]}}
+        with tempfile.TemporaryDirectory() as d:
+            closed = self.write(Path(d) / "c.jsonl", [rec("hi"), rec("$session-close")])
+            mention = self.write(Path(d) / "m.jsonl", [rec("說明一下 $session-close 是什麼")])
+            self.assertEqual(rs.codex_skip_reason(closed), rs.REASON_CLOSED)
+            self.assertIsNone(rs.codex_skip_reason(mention))
+
+    def test_not_needed_sessions_looks_up_transcripts(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            projects, codex_root = Path(d) / "projects", Path(d) / "codex"
+            self.write(projects / "-repo" / "c1.jsonl", [self.user("<command-name>/session-close</command-name>")])
+            self.write(projects / "-repo" / "c2.jsonl", [self.user("繼續")])
+            self.write(codex_root / "2026" / "rollout-x-x1.jsonl", [{"type": "response_item", "payload": {
+                "role": "user", "content": [{"type": "input_text", "text": "/session-close"}]}}])
+            sessions = [{"runtime": "claude", "sid": "c1"}, {"runtime": "claude", "sid": "c2"},
+                        {"runtime": "claude", "sid": "missing"}, {"runtime": "codex", "sid": "x1"},
+                        {"runtime": "codex", "sid": None}]
+            self.assertEqual(rs.not_needed_sessions(sessions, projects, codex_root),
+                             {"c1": rs.REASON_CLOSED, "x1": rs.REASON_CLOSED})
 
 
 if __name__ == "__main__":
