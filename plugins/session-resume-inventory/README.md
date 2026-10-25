@@ -26,11 +26,15 @@ python3 plugins/session-resume-inventory/scripts/inventory.py
 
 ```bash
 python3 plugins/session-resume-inventory/scripts/inventory.py --save   # 存到 ~/.claude/session-snapshots/
+python3 plugins/session-resume-inventory/scripts/picker.py build --mode save --notes notes.json  # 產生勾選頁
+python3 plugins/session-resume-inventory/scripts/picker.py apply --mode save --from-text pick.txt # 只留勾選的
 python3 plugins/session-resume-inventory/scripts/restore.py            # 預覽要開回哪些
 python3 plugins/session-resume-inventory/scripts/restore.py --apply    # 確認後在 Orca 開分頁
 python3 plugins/session-resume-inventory/scripts/restore.py --open-orca  # Orca 沒開時先啟動
 ```
 
+- 存快照後會產生一張勾選頁（HTML），依專案分組、每列一句在做什麼；使用者勾完按「複製選擇結果」貼回，快照就只留勾選的，完整版備份在 `session-snapshots/full/`。重勾會從完整版重新篩。
+- 復原時也可以用 `--mode restore` 產生勾選頁，篩選結果寫到 `session-snapshots/picked/`，原快照不動。
 - 已在跑的 session 不會重複開。
 - 已收尾的 session 不開回，只列出指令：下過 `/session-close` 的，以及只用來盤點／存快照／復原 session 的。
 - 快照只有本人可讀（檔案 600、資料夾 700），因為會記錄啟動參數。
