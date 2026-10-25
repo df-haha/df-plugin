@@ -34,13 +34,16 @@ INJECTED_PREFIXES = ("Stop hook feedback", "Another Claude session sent a messag
 INJECTED_TAGS = ("<task-notification", "<local-command-", "<system-reminder", "<bash-stdout", "<bash-stderr")
 COMMAND_NAME = re.compile(r"<command-name>(/[^<\s]+)</command-name>")
 IGNORED_COMMANDS = {"/model", "/clear", "/compact"}
-# Codex: user-role records Codex itself injects (AGENTS.md, <environment_context>, <user_instructions>).
-CODEX_INJECTED_PREFIXES = ("# AGENTS.md instructions", "<")
+# Codex: user-role records Codex itself injects. Other prompts starting with "<" (pasted XML/HTML) are work.
+CODEX_INJECTED_PREFIXES = ("# AGENTS.md instructions", "<environment_context", "<user_instructions", "<user_action",
+                           "<turn_aborted", "<permissions", "<no retained transcript")
 CODEX_TOOL_CALLS = {"function_call", "custom_tool_call", "local_shell_call"}
 # Short prompts made only of session-management words (存session / 復原 session / resume).
-SESSION_MGMT_WORDS = re.compile(r"存|記錄|盤點|清單|復原|回復|恢復|還原|開回來|開回|resume|restore|inventory", re.I)
-# The skill's own trigger phrases (關機前記錄 / 重開機前清單 / 開機後復原) carry these as context words.
-SESSION_MGMT_FILLER = re.compile(r"session|重開機前|關機前|開機後|重開機|關機|開機|一下|幫我|請|把|的|吧|[\W_]", re.I)
+SESSION_MGMT_WORDS = re.compile(r"存|記錄|盤點|清單|復原|回復|恢復|還原|開回來|開回|開著|在跑|resume|restore|inventory", re.I)
+# The skill's own trigger phrases (關機前記錄 / 重開機前清單 / 開著哪些 session / 有哪些 claude/codex 在跑 /
+# resume 指令) carry these as context words.
+SESSION_MGMT_FILLER = re.compile(r"session|claude|codex|重開機前|關機前|開機後|重開機|關機|開機|有哪些|哪些|指令|"
+                                 r"一下|幫我|請|把|的|吧|[\W_]", re.I)
 SESSION_MGMT_MAX_LEN = 20
 
 

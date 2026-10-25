@@ -260,7 +260,8 @@ class SessionCloseTests(unittest.TestCase):
             self.assertFalse(rs.is_session_mgmt_prompt(text), text)
 
     def test_documented_trigger_phrases_are_mgmt(self):
-        for text in ("關機前記錄", "重開機前清單", "存 session", "記錄 session"):
+        for text in ("關機前記錄", "重開機前清單", "存 session", "記錄 session", "開著哪些 session",
+                     "有哪些 claude/codex 在跑", "resume 指令", "session inventory"):
             self.assertTrue(rs.is_session_mgmt_prompt(text), text)
 
     def test_pasted_close_marker_is_work_not_close(self):
@@ -296,6 +297,16 @@ class SessionCloseTests(unittest.TestCase):
                 self.codex_user("順便幫我修 restore 的 bug"),
             ])
             self.assertIsNone(rs.codex_skip_reason(t2))
+            t4 = self.write(Path(d) / "r4.jsonl", [
+                self.codex_user("存session"), self.codex_tool("python3 scripts/inventory.py --save"),
+                self.codex_user("<xml>real work</xml>"),
+            ])
+            self.assertIsNone(rs.codex_skip_reason(t4))
+            t5 = self.write(Path(d) / "r5.jsonl", [
+                self.codex_user("<user_action>\n  <context>interrupted</context>"), self.codex_user("<turn_aborted>"),
+                self.codex_user("存session"), self.codex_tool("python3 scripts/inventory.py --save"),
+            ])
+            self.assertEqual(rs.codex_skip_reason(t5), rs.REASON_INVENTORY_ONLY)
             t3 = self.write(Path(d) / "r3.jsonl", [self.codex_user("存session")])
             self.assertIsNone(rs.codex_skip_reason(t3))
 
