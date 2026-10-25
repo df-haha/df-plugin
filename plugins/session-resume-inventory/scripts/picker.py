@@ -107,13 +107,18 @@ def write_private(path: Path, payload: dict) -> None:
     path.chmod(0o600)
 
 
+def build_source(snap_path: Path, mode: str) -> Path:
+    """Save mode lists every session again after a previous apply, so re-picking can bring one back."""
+    backup = snap_path.parent / "full" / snap_path.name
+    return backup if mode == "save" and backup.exists() else snap_path
+
+
 def apply_pick(snap_path: Path, prefixes: list[str], mode: str) -> Path:
     if not prefixes:
         sys.exit("沒有勾選任何 session（或貼回的不是頁面匯出的文字），快照維持原樣。")
     backup = snap_path.parent / "full" / snap_path.name
     # Re-picking after a save must start from the full list, not the already-filtered file.
-    source = backup if mode == "save" and backup.exists() else snap_path
-    snap = json.loads(source.read_text(encoding="utf-8"))
+    snap = json.loads(build_source(snap_path, mode).read_text(encoding="utf-8"))
     sessions = snap.get("sessions", [])
     chosen: list[dict] = []
     for p in prefixes:
@@ -160,7 +165,7 @@ def main() -> None:
 
     snap_path = opts.snapshot or latest_snapshot()
     if opts.cmd == "build":
-        snap = json.loads(snap_path.read_text(encoding="utf-8"))
+        snap = json.loads(build_source(snap_path, opts.mode).read_text(encoding="utf-8"))
         notes = json.loads(opts.notes.read_text(encoding="utf-8")) if opts.notes else {}
         rows = build_rows(snap.get("sessions", []), notes)
         out = opts.out or snap_path.parent / "picker" / f"{snap_path.stem}-{opts.mode}.html"

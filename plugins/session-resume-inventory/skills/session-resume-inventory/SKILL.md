@@ -29,13 +29,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/inventory.py"
 
 1. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/inventory.py" --save`：照常印出盤點報告，並把所有 session 存到 `~/.claude/session-snapshots/<時間>.json`。記下報告尾端「已存快照」那行的路徑。
 2. **寫摘要檔**：在 scratchpad 寫一份 JSON，鍵是 session ID 前 8 碼，值是 `{"proj": 專案顯示名, "st": 狀態, "desc": 一兩句白話}`。
-   - `desc` 寫「在做什麼＋目前停在哪、等使用者什麼」，不放 session ID。腳本的起頭／最新訊息不夠判斷時，讀該 transcript 最後一則助理回覆再改寫。
+   - `desc` 寫「在做什麼＋目前停在哪、等使用者什麼」，不放 session ID。同名的 session（例如兩個都叫 `ai-copilot-ef`）一定要寫出彼此的差異，頁面上不顯示 ID，使用者只能靠內容分辨。腳本的起頭／最新訊息不夠判斷時，讀該 transcript 最後一則助理回覆再改寫。
    - `st` 只能是 `wait`（等使用者決定）、`going`（進行中）、`done`（已收尾）。`done` 預設不勾。
    - 沒寫到的 session 會退回顯示最新一句使用者訊息；狀態是 busy／shell 的標「進行中」，其餘標「未分類」，兩者都預設勾選。
    - 不可復原的 session（沒有 ID 或對話紀錄）不會出現在勾選頁，篩過的快照也不會留它們；完整版在 `full/`。
 3. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/picker.py" build --mode save --snapshot <第 1 步的路徑> --notes <摘要檔>`，產生勾選頁 HTML（預設放在 `session-snapshots/picker/`）。
 4. 打開勾選頁給使用者看：在 Orca 裡（`$ORCA_TERMINAL_HANDLE` 有值）且有 `~/.claude/scripts/orca-open-html.sh` 就用它開；否則把 HTML 路徑放在回覆正文，請使用者自己開。回覆裡說明：勾好按「複製選擇結果」，把文字貼回來。
-5. 使用者貼回後，把貼上的文字原樣寫進 scratchpad 的文字檔，跑 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/picker.py" apply --mode save --snapshot <第 1 步的路徑> --from-text <文字檔>`。快照就只留勾選的，完整版備份在 `session-snapshots/full/`；使用者改主意就再貼一次重跑，會從完整版重新篩。
+5. 使用者貼回後，把貼上的文字原樣寫進 scratchpad 的文字檔，跑 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/picker.py" apply --mode save --snapshot <第 1 步的路徑> --from-text <文字檔>`。快照就只留勾選的，完整版備份在 `session-snapshots/full/`；使用者改主意就重跑第 3～5 步，`build` 與 `apply` 都會從完整版重新列、重新篩，之前沒勾的也能再勾回來。
 6. 回覆時轉述「已篩選快照」那行、保留幾個，以及重開機警告（busy／shell 的 session 會中斷當前那一輪）。
 
 勾選頁的匯出文字每列帶 session ID 前 8 碼，同名 session（例如兩個都叫 `ai-copilot-ef`）靠它區分。對不到或對到多筆時 `apply` 會停下來，請使用者重新匯出。

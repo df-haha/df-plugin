@@ -101,6 +101,14 @@ class ApplyTests(unittest.TestCase):
             self.assertEqual([s["name"] for s in kept], ["proj-b", "other"])
             self.assertEqual(len(json.loads((d / "full" / snap.name).read_text(encoding="utf-8"))["sessions"]), 4)
 
+    def test_save_build_after_apply_shows_full_list(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t); snap = write_snap(d)
+            pk.apply_pick(snap, ["aaaa1111"], mode="save")
+            src = pk.build_source(snap, mode="save")
+            self.assertEqual(src, d / "full" / snap.name)
+            self.assertEqual(pk.build_source(snap, mode="restore"), snap)
+
     def test_restore_mode_writes_separate_file(self):
         with tempfile.TemporaryDirectory() as t:
             d = Path(t); snap = write_snap(d)
