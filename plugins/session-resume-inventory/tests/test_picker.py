@@ -109,6 +109,29 @@ class ApplyTests(unittest.TestCase):
             self.assertEqual(src, d / "full" / snap.name)
             self.assertEqual(pk.build_source(snap, mode="restore"), snap)
 
+    def test_explicit_empty_selection_saves_empty(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t); snap = write_snap(d)
+            text = "存 session 選擇結果\n要存 0 個：\n- 無\n\n不存 3 個：\n- a（aaaa1111）\n"
+            self.assertEqual(pk.parse_picked(text), [])
+            self.assertTrue(pk.is_explicit_empty(text))
+            pk.apply_pick(snap, [], mode="save", allow_empty=True)
+            self.assertEqual(json.loads(snap.read_text(encoding="utf-8"))["sessions"], [])
+            self.assertFalse(pk.is_explicit_empty("隨便貼的文字"))
+
+    def test_fresh_snapshot_ignores_stale_backup(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t); snap = write_snap(d)
+            pk.apply_pick(snap, ["aaaa1111"], mode="save")
+            # A new inventory --save reuses the same path: only one session this time.
+            snap.write_text(json.dumps({"saved_at": "t2", "sessions": [SESSIONS[1]]}), encoding="utf-8")
+            self.assertEqual(pk.build_source(snap, mode="save"), snap)
+            pk.apply_pick(snap, ["bbbb2222"], mode="save")
+            full = json.loads((d / "full" / snap.name).read_text(encoding="utf-8"))["sessions"]
+            self.assertEqual([s["name"] for s in full], ["proj-b"])
+            with self.assertRaises(SystemExit):
+                pk.apply_pick(snap, ["aaaa1111"], mode="save")  # 舊備份的 session 不能再被選到
+
     def test_restore_mode_writes_separate_file(self):
         with tempfile.TemporaryDirectory() as t:
             d = Path(t); snap = write_snap(d)

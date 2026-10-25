@@ -35,7 +35,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/inventory.py"
    - 不可復原的 session（沒有 ID 或對話紀錄）不會出現在勾選頁，篩過的快照也不會留它們；完整版在 `full/`。
 3. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/picker.py" build --mode save --snapshot <第 1 步的路徑> --notes <摘要檔>`，產生勾選頁 HTML（預設放在 `session-snapshots/picker/`）。
 4. 打開勾選頁給使用者看：在 Orca 裡（`$ORCA_TERMINAL_HANDLE` 有值）且有 `~/.claude/scripts/orca-open-html.sh` 就用它開；否則把 HTML 路徑放在回覆正文，請使用者自己開。回覆裡說明：勾好按「複製選擇結果」，把文字貼回來。
-5. 使用者貼回後，把貼上的文字原樣寫進 scratchpad 的文字檔，跑 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/picker.py" apply --mode save --snapshot <第 1 步的路徑> --from-text <文字檔>`。快照就只留勾選的，完整版備份在 `session-snapshots/full/`；使用者改主意就重跑第 3～5 步，`build` 與 `apply` 都會從完整版重新列、重新篩，之前沒勾的也能再勾回來。
+5. 使用者貼回後，把貼上的文字原樣寫進 scratchpad 的文字檔，跑 `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/picker.py" apply --mode save --snapshot <第 1 步的路徑> --from-text <文字檔>`。快照就只留勾選的，完整版備份在 `session-snapshots/full/`；使用者改主意就重跑第 3～5 步，`build` 與 `apply` 都會從完整版重新列、重新篩，之前沒勾的也能再勾回來。使用者按「全不選」匯出（「要存 0 個」）時，快照會存成空的，開機後不會開回任何 session。
 6. 回覆時轉述「已篩選快照」那行、保留幾個，以及重開機警告（busy／shell 的 session 會中斷當前那一輪）。
 
 勾選頁的匯出文字每列帶 session ID 前 8 碼，同名 session（例如兩個都叫 `ai-copilot-ef`）靠它區分。對不到或對到多筆時 `apply` 會停下來，請使用者重新匯出。

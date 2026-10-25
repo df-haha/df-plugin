@@ -107,17 +107,37 @@ def write_private(path: Path, payload: dict) -> None:
     path.chmod(0o600)
 
 
+def is_explicit_empty(text: str) -> bool:
+    """The page export for "nothing ticked" (要存 0 個／要開回 0 個), as opposed to unrelated text."""
+    return any(re.search(rf"^{m['on']}\s*0\s*個", text, re.M) for m in MODES.values())
+
+
+def is_filtered(snap_path: Path) -> bool:
+    try:
+        return "picked_from" in json.loads(snap_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def build_source(snap_path: Path, mode: str) -> Path:
-    """Save mode lists every session again after a previous apply, so re-picking can bring one back."""
+    """In save mode a snapshot we already filtered is listed again from its full/ backup, so re-picking
+    can bring a session back. A fresh snapshot (no picked_from mark) is always its own source, even if a
+    stale backup with the same name is lying around."""
     backup = snap_path.parent / "full" / snap_path.name
-    return backup if mode == "save" and backup.exists() else snap_path
+    if mode == "save" and backup.exists() and is_filtered(snap_path):
+        return backup
+    return snap_path
 
 
-def apply_pick(snap_path: Path, prefixes: list[str], mode: str) -> Path:
-    if not prefixes:
-        sys.exit("沒有勾選任何 session（或貼回的不是頁面匯出的文字），快照維持原樣。")
+def apply_pick(snap_path: Path, prefixes: list[str], mode: str, allow_empty: bool = False) -> Path:
+    if not prefixes and not allow_empty:
+        sys.exit("沒有讀到任何 session ID，請確認貼回的是頁面匯出的文字。快照維持原樣。")
     backup = snap_path.parent / "full" / snap_path.name
-    # Re-picking after a save must start from the full list, not the already-filtered file.
+    if mode == "save" and not is_filtered(snap_path):
+        # First pick on this snapshot: (re)write the backup so it always matches the fresh save.
+        backup.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        shutil.copy2(snap_path, backup)
+        backup.chmod(0o600)
     snap = json.loads(build_source(snap_path, mode).read_text(encoding="utf-8"))
     sessions = snap.get("sessions", [])
     chosen: list[dict] = []
@@ -129,10 +149,6 @@ def apply_pick(snap_path: Path, prefixes: list[str], mode: str) -> Path:
     keep = {id(s) for s in chosen}
     out = dict(snap, sessions=[s for s in sessions if id(s) in keep], picked_from=snap_path.name)
     if mode == "save":
-        if not backup.exists():
-            backup.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            shutil.copy2(snap_path, backup)
-            backup.chmod(0o600)
         write_private(snap_path, out)
         return snap_path
     target = snap_path.parent / "picked" / snap_path.name
@@ -175,7 +191,7 @@ def main() -> None:
         return
     text = sys.stdin.read() if str(opts.from_text) == "-" else (
         opts.from_text.read_text(encoding="utf-8") if opts.from_text else opts.sids)
-    out = apply_pick(snap_path, parse_picked(text), opts.mode)
+    out = apply_pick(snap_path, parse_picked(text), opts.mode, allow_empty=is_explicit_empty(text))
     kept = len(json.loads(out.read_text(encoding="utf-8"))["sessions"])
     if opts.mode == "save":
         print(f"已篩選快照：{out}（保留 {kept} 個；完整版備份在 {snap_path.parent / 'full' / snap_path.name}）")
