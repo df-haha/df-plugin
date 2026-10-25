@@ -114,10 +114,13 @@ class ApplyTests(unittest.TestCase):
             d = Path(t); snap = write_snap(d)
             text = "存 session 選擇結果\n要存 0 個：\n- 無\n\n不存 3 個：\n- a（aaaa1111）\n"
             self.assertEqual(pk.parse_picked(text), [])
-            self.assertTrue(pk.is_explicit_empty(text))
+            self.assertTrue(pk.is_explicit_empty(text, "save"))
+            self.assertFalse(pk.is_explicit_empty(text, "restore"))  # 模式不符
+            self.assertFalse(pk.is_explicit_empty("要存 0 個：\n", "save"))  # 不完整
+            self.assertFalse(pk.is_explicit_empty("存 session 選擇結果\n要存 0 個：\n- 無\n", "save"))  # 缺不存段
             pk.apply_pick(snap, [], mode="save", allow_empty=True)
             self.assertEqual(json.loads(snap.read_text(encoding="utf-8"))["sessions"], [])
-            self.assertFalse(pk.is_explicit_empty("隨便貼的文字"))
+            self.assertFalse(pk.is_explicit_empty("隨便貼的文字", "save"))
 
     def test_fresh_snapshot_ignores_stale_backup(self):
         with tempfile.TemporaryDirectory() as t:

@@ -107,9 +107,11 @@ def write_private(path: Path, payload: dict) -> None:
     path.chmod(0o600)
 
 
-def is_explicit_empty(text: str) -> bool:
-    """The page export for "nothing ticked" (要存 0 個／要開回 0 個), as opposed to unrelated text."""
-    return any(re.search(rf"^{m['on']}\s*0\s*個", text, re.M) for m in MODES.values())
+def is_explicit_empty(text: str, mode: str) -> bool:
+    """A complete page export for this mode with nothing ticked: its title line, then "要存 0 個" (or
+    要開回), then the "不存 N 個" section. Partial or wrong-mode text never authorizes an empty snapshot."""
+    m = MODES[mode]
+    return re.search(rf"^{m['title']}.*\n{m['on']}\s*0\s*個：[\s\S]*^{m['off']}\s*\d+\s*個", text, re.M) is not None
 
 
 def is_filtered(snap_path: Path) -> bool:
@@ -191,7 +193,7 @@ def main() -> None:
         return
     text = sys.stdin.read() if str(opts.from_text) == "-" else (
         opts.from_text.read_text(encoding="utf-8") if opts.from_text else opts.sids)
-    out = apply_pick(snap_path, parse_picked(text), opts.mode, allow_empty=is_explicit_empty(text))
+    out = apply_pick(snap_path, parse_picked(text), opts.mode, allow_empty=bool(opts.from_text) and is_explicit_empty(text, opts.mode))
     kept = len(json.loads(out.read_text(encoding="utf-8"))["sessions"])
     if opts.mode == "save":
         print(f"已篩選快照：{out}（保留 {kept} 個；完整版備份在 {snap_path.parent / 'full' / snap_path.name}）")
