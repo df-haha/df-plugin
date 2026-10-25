@@ -45,8 +45,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/inventory.py" --save
 復原規則（腳本已實作）：
 - **已在跑的 session 一律略過**：同時比對 session 狀態檔與程序啟動參數裡的 `--resume <id>`，停在信任確認畫面的分頁也算已在跑，不會開第二份。
 - **已收尾的 session 不開回**，列在「已收尾、不開回」區並附 resume 指令，使用者要開再手動開：
-  - 下過 `/session-close`：Claude 對話紀錄裡有使用者打的 `/session-close` 指令或 `Skill(session-close)` 呼叫；Codex 是使用者訊息以 `$session-close`／`/session-close` 開頭。不看 `.jsonl.close` 記號檔（背景採集完就會消失）。
-  - 只做 session 盤點／存快照／復原：用過本 skill（`/session-resume-inventory`、`Skill` 或跑 `inventory.py`／`restore.py`），且使用者打的每句話都只由 session 管理字眼組成（「存session」「復原 session」「resume」這類，20 字以內）。打過其他斜線指令（`/model`、`/clear`、`/compact` 除外）、貼過內容、跑過 `!` 指令，或做過任何別的事，就照常開回；讀紀錄出錯時也照常開回。
+  - 下過 `/session-close`：Claude 對話紀錄裡有使用者打的 `/session-close` 指令（只認真正的指令紀錄，貼上的內容裡出現同樣字樣不算）或 `Skill(session-close)` 呼叫；Codex 是使用者訊息以 `$session-close`／`/session-close` 開頭。不看 `.jsonl.close` 記號檔（背景採集完就會消失）。
+  - 只做 session 盤點／存快照／復原：用過本 skill（`/session-resume-inventory`、`Skill`、Codex 的 `$session-resume-inventory`，或跑 `inventory.py`／`restore.py`），且使用者打的每句話都只由 session 管理字眼組成（「存session」「復原 session」「關機前記錄」「重開機前清單」「resume」這類，20 字以內）。Claude 與 Codex 都適用。打過其他斜線指令（`/model`、`/clear`、`/compact` 除外）、貼過內容、跑過 `!` 指令，或做過任何別的事，就照常開回；讀紀錄出錯時也照常開回。
 - **照原啟動參數復原**：`--dangerously-skip-permissions`、`--model` 等白名單旗標會帶回 resume 指令；白名單外的參數列為「未保留參數」讓使用者自己判斷。
 - **只開回原本就在 Orca、且路徑已登記在 Orca 的 session**（以 worktree `id:` 指定位置）。路徑沒登記的只列出指令，**不自動 `orca repo add`**；原本不在 Orca 的（terminal／tmux）目前只列出指令，由使用者手動開。
 - 沒帶 `--dangerously-skip-permissions` 的 session 開在未信任的資料夾時，Claude 會先停在信任確認畫面，提醒使用者到該分頁按確認。

@@ -23,7 +23,8 @@ from inventory import (CLAUDE_PROJECTS, CODEX_SESSIONS, SNAPSHOT_DIR, argv_resum
 TITLE_LEN = 40
 REASON_CLOSED = "下過 /session-close"
 REASON_INVENTORY_ONLY = "只做 session 盤點／存快照／復原"
-SESSION_CLOSE_CMD = "<command-name>/session-close</command-name>"
+# A real slash-command record starts with these tags; the same tags inside pasted text are just text.
+COMMAND_RECORD_TAGS = ("<command-message>", "<command-name>")
 INVENTORY_SKILL = "session-resume-inventory"
 INVENTORY_SCRIPTS = ("inventory.py", "restore.py")
 # Injected user records that are not something the user typed. Other `<...>` records (pasted text,
@@ -33,9 +34,13 @@ INJECTED_PREFIXES = ("Stop hook feedback", "Another Claude session sent a messag
 INJECTED_TAGS = ("<task-notification", "<local-command-", "<system-reminder", "<bash-stdout", "<bash-stderr")
 COMMAND_NAME = re.compile(r"<command-name>(/[^<\s]+)</command-name>")
 IGNORED_COMMANDS = {"/model", "/clear", "/compact"}
+# Codex: user-role records Codex itself injects (AGENTS.md, <environment_context>, <user_instructions>).
+CODEX_INJECTED_PREFIXES = ("# AGENTS.md instructions", "<")
+CODEX_TOOL_CALLS = {"function_call", "custom_tool_call", "local_shell_call"}
 # Short prompts made only of session-management words (存session / 復原 session / resume).
-SESSION_MGMT_WORDS = re.compile(r"存|記錄|盤點|復原|回復|恢復|還原|開回來|開回|resume|restore|inventory", re.I)
-SESSION_MGMT_FILLER = re.compile(r"session|一下|幫我|請|把|的|吧|[\W_]", re.I)
+SESSION_MGMT_WORDS = re.compile(r"存|記錄|盤點|清單|復原|回復|恢復|還原|開回來|開回|resume|restore|inventory", re.I)
+# The skill's own trigger phrases (關機前記錄 / 重開機前清單 / 開機後復原) carry these as context words.
+SESSION_MGMT_FILLER = re.compile(r"session|重開機前|關機前|開機後|重開機|關機|開機|一下|幫我|請|把|的|吧|[\W_]", re.I)
 SESSION_MGMT_MAX_LEN = 20
 
 
@@ -91,14 +96,14 @@ def claude_skip_reason(transcript: Path) -> str | None:
                 if rec.get("type") != "user" or rec.get("isMeta"):
                     continue
                 text = record_text(content)
-                if SESSION_CLOSE_CMD in text:
-                    return REASON_CLOSED
                 stripped = text.lstrip()
                 if not stripped or stripped.startswith(INJECTED_PREFIXES):
                     continue
-                command = COMMAND_NAME.search(text)
+                command = COMMAND_NAME.search(text) if stripped.startswith(COMMAND_RECORD_TAGS) else None
                 if command:
                     name = command.group(1)
+                    if name.split(":")[-1] == "/session-close" or name.endswith(":session-close"):
+                        return REASON_CLOSED
                     if name.split(":")[0] == f"/{INVENTORY_SKILL}":
                         used_inventory = True
                     elif name not in IGNORED_COMMANDS:
@@ -114,22 +119,41 @@ def claude_skip_reason(transcript: Path) -> str | None:
 
 
 def codex_skip_reason(rollout: Path) -> str | None:
-    """A Codex session needs no reopening once the user invoked $session-close (or /session-close)."""
+    """Why a Codex session needs no reopening: the user invoked $session-close (or /session-close), or
+    the session only ran the inventory/restore scripts for session-management prompts. Any other user
+    prompt means real work, and the session is reopened."""
+    used_inventory = False
+    prompts: list[str] = []
     try:
         with rollout.open(encoding="utf-8", errors="replace") as fh:
             for line in fh:
-                if '"role":"user"' not in line:
-                    continue
                 try:
                     payload = json.loads(line).get("payload") or {}
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+                if not isinstance(payload, dict):
+                    continue
+                kind = payload.get("type")
+                if kind in CODEX_TOOL_CALLS:
+                    call = json.dumps(payload, ensure_ascii=False)
+                    used_inventory |= INVENTORY_SKILL in call or any(s in call for s in INVENTORY_SCRIPTS)
+                    continue
+                if payload.get("role") != "user" or kind not in (None, "message"):
                     continue
                 for c in payload.get("content") or []:
                     text = (c.get("text", "") if isinstance(c, dict) else "").strip()
                     if text.startswith(("$session-close", "/session-close")):
                         return REASON_CLOSED
+                    if not text or text.startswith(CODEX_INJECTED_PREFIXES):
+                        continue
+                    if text.startswith((f"${INVENTORY_SKILL}", f"/{INVENTORY_SKILL}")):
+                        used_inventory = True
+                        continue
+                    prompts.append(text)
     except OSError:
         return None
+    if used_inventory and all(is_session_mgmt_prompt(p) for p in prompts):
+        return REASON_INVENTORY_ONLY
     return None
 
 

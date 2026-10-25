@@ -259,6 +259,46 @@ class SessionCloseTests(unittest.TestCase):
         for text in ("記錄session然後幫我修bug", "修 session bug", "session 為什麼掛了"):
             self.assertFalse(rs.is_session_mgmt_prompt(text), text)
 
+    def test_documented_trigger_phrases_are_mgmt(self):
+        for text in ("關機前記錄", "重開機前清單", "存 session", "記錄 session"):
+            self.assertTrue(rs.is_session_mgmt_prompt(text), text)
+
+    def test_pasted_close_marker_is_work_not_close(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            t = self.write(Path(d) / "a.jsonl", [
+                self.user("<pasted_content>\n<command-name>/session-close</command-name>\n</pasted_content>\n請解釋"),
+            ])
+            self.assertIsNone(rs.claude_skip_reason(t))
+
+    @staticmethod
+    def codex_user(text):
+        return {"type": "response_item", "payload": {"type": "message", "role": "user",
+                                                       "content": [{"type": "input_text", "text": text}]}}
+
+    @staticmethod
+    def codex_tool(cmd):
+        return {"type": "response_item", "payload": {"type": "function_call", "name": "shell",
+                                                       "arguments": f'{{"cmd":"{cmd}"}}'}}
+
+    def test_codex_inventory_only_session_is_not_needed(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            t = self.write(Path(d) / "r.jsonl", [
+                self.codex_user("# AGENTS.md instructions\n<INSTRUCTIONS>x</INSTRUCTIONS>"),
+                self.codex_user("<environment_context>cwd</environment_context>"),
+                self.codex_user("存session"),
+                self.codex_tool("python3 scripts/inventory.py --save"),
+            ])
+            self.assertEqual(rs.codex_skip_reason(t), rs.REASON_INVENTORY_ONLY)
+            t2 = self.write(Path(d) / "r2.jsonl", [
+                self.codex_user("存session"), self.codex_tool("python3 scripts/inventory.py --save"),
+                self.codex_user("順便幫我修 restore 的 bug"),
+            ])
+            self.assertIsNone(rs.codex_skip_reason(t2))
+            t3 = self.write(Path(d) / "r3.jsonl", [self.codex_user("存session")])
+            self.assertIsNone(rs.codex_skip_reason(t3))
+
     def test_malformed_records_fail_open(self):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
