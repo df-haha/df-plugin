@@ -12,13 +12,14 @@ import argparse
 import json
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from inventory import (CLAUDE_PROJECTS, CODEX_SESSIONS, SNAPSHOT_DIR, argv_resume_sid, collect_claude, collect_codex,  # noqa: E402
-                       is_claude_main, is_codex_main, live_pids, normalize_path, orca_exe, proc_args,
-                       run_full)
+from inventory import (CLAUDE_PROJECTS, CODEX_SESSIONS, IS_WINDOWS, SNAPSHOT_DIR, argv_resume_sid, collect_claude,  # noqa: E402
+                       collect_codex, is_claude_main, is_codex_main, is_windows_path, live_pids, normalize_path,
+                       orca_exe, proc_args, run_full, utf8_stdout)
 
 TITLE_LEN = 40
 REASON_CLOSED = "下過 /session-close"
@@ -50,7 +51,9 @@ SESSION_MGMT_MAX_LEN = 20
 def resume_command(session: dict) -> str:
     head = ["claude", "--resume", session["sid"]] if session["runtime"] == "claude" \
         else ["codex", "resume", session["sid"]]
-    return shlex.join(head + list(session.get("flags") or []))
+    parts = head + list(session.get("flags") or [])
+    # The command is typed into whatever shell the Orca host runs; quote for that shell's rules.
+    return subprocess.list2cmdline(parts) if IS_WINDOWS else shlex.join(parts)
 
 
 def is_session_mgmt_prompt(text: str) -> bool:
@@ -199,19 +202,23 @@ def build_plan(sessions: list[dict], live_sids: set[str], worktrees: dict[str, s
             plan["already_live"].append(s)
         elif sid in not_needed:
             plan["not_needed"].append({**s, "reason": not_needed[sid]})
-        elif not s.get("in_orca"):
+        elif not s.get("in_orca") and not is_windows_path(s.get("cwd") or ""):
             plan["terminal"].append(s)
         elif normalize_path(s["cwd"]) in worktrees:
+            # A Windows snapshot cannot tell whether the session ran inside Orca (no process env),
+            # so any Windows session whose folder is a registered Orca worktree is reopened there.
             plan["orca"].append({**s, "selector": worktrees[normalize_path(s["cwd"])]})
-        else:
+        elif s.get("in_orca"):
             plan["unregistered"].append(s)
+        else:
+            plan["terminal"].append(s)
     return plan
 
 
 def orca_json(args: list[str], timeout: int = 30) -> dict:
     exe = orca_exe()
     if not exe:
-        return {"ok": False, "error": {"message": "Orca CLI（orca-ide）不在 PATH"}}
+        return {"ok": False, "error": {"message": "Orca CLI（orca-ide；Windows 為 orca.exe）不在 PATH"}}
     out, err = run_full([exe, *args, "--json"], timeout)
     try:
         return json.loads(out)
@@ -310,6 +317,7 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true", help="實際在 Orca 開分頁")
     parser.add_argument("--open-orca", action="store_true", help="只啟動 Orca 並等它就緒")
     opts = parser.parse_args()
+    utf8_stdout()
 
     if opts.open_orca:
         res = orca_json(["open"], timeout=180)

@@ -89,8 +89,9 @@ class ApplyTests(unittest.TestCase):
             full = d / "full" / snap.name
             self.assertEqual(len(json.loads(full.read_text(encoding="utf-8"))["sessions"]), 4)
             self.assertEqual(sorted(p.name for p in d.glob("*.json")), [snap.name])  # restore 只看得到篩過的
-            self.assertEqual(snap.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(full.stat().st_mode & 0o777, 0o600)
+            if sys.platform != "win32":  # POSIX permission bits do not apply on Windows
+                self.assertEqual(snap.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(full.stat().st_mode & 0o777, 0o600)
 
     def test_save_mode_repick_starts_from_full_list(self):
         with tempfile.TemporaryDirectory() as t:
