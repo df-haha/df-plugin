@@ -16,9 +16,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/inventory.py"
 
 `CLAUDE_PLUGIN_ROOT` 沒有值時，從本檔位置往上三層就是 plugin 根目錄（`plugins/session-resume-inventory/`，內含 `scripts/`）。
 
-需求：Linux／WSL（讀 `/proc`）、Python 3.9+；tmux 與 Orca 沒裝時該區自動略過。
+需求：Linux／WSL（讀 `/proc`）或原生 Windows（PowerShell 列程序；指令改用 `python`）、Python 3.9+；tmux 與 Orca 沒裝時該區自動略過。Windows 只看得到 Windows 側的 session，Codex 只認 `codex resume <id>` 啟動的，也查不到 session 在不在 Orca——報告的 Evidence 行會寫明。
 
-腳本只讀 `/proc`、`~/.claude/sessions/<pid>.json`、Claude transcript、Codex rollout、git metadata、`tmux list-panes`、`orca-ide terminal list --json`，輸出下方格式的報告。跑完後由 main loop 做兩件事：
+腳本只讀 `/proc`（Windows 改用 `Get-CimInstance Win32_Process`）、`~/.claude/sessions/<pid>.json`、Claude transcript、Codex rollout、git metadata、`tmux list-panes`、`orca-ide terminal list --json`，輸出下方格式的報告。跑完後由 main loop 做兩件事：
 
 1. **補 work 摘要**：腳本的 work 欄只是「起頭／最新」使用者訊息原文，不夠判斷時再讀該 transcript 尾段，改寫成一兩句「目標＋目前階段」。
 2. **把完整報告放在最終回覆正文**（不要只留在 shell 輸出）。
@@ -80,7 +80,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/inventory.py"
    - 沒有 rollout 的 TUI 列為 `empty / not resumable`，不捏造 resume 指令。
    - 需要查 `~/.codex/state_5.sqlite` 而沒有 `sqlite3` 時，用 Python `sqlite3` 模組以 `file:...?mode=ro` 唯讀開啟，不為盤點安裝套件。
 5. 每個 cwd：確認路徑存在；Git repo 用 `git branch --show-current` 取分支，比對 `--absolute-git-dir` 與 `--git-common-dir` 區分 linked worktree 與主 checkout。
-6. Orca：只用 `orca-ide`（不信任裸 `orca`，Linux 上常是 GNOME 螢幕閱讀器）。先 `orca-ide status` 與 `orca-ide terminal list --help` 確認語法再用；指令失敗就記下錯誤、停止呼叫 Orca，改用 process 環境變數＋Git 佐證，並標「Orca CLI 驗證不可用」。
+6. Orca：Linux／WSL 只用 `orca-ide`（不信任裸 `orca`，Linux 上常是 GNOME 螢幕閱讀器）；原生 Windows 用 Orca 桌面版附的 `orca.exe`。先 `orca-ide status` 與 `orca-ide terminal list --help` 確認語法再用；指令失敗就記下錯誤、停止呼叫 Orca，改用 process 環境變數＋Git 佐證，並標「Orca CLI 驗證不可用」。
 7. 報告前對所有 PID、transcript、rollout、路徑、分支再做一次存在檢查，數字一律以這次快照為準。
 
 ## 狀態說明（放在表之前）

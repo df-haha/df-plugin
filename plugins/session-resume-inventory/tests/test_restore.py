@@ -38,7 +38,9 @@ class RestoreFlagsTests(unittest.TestCase):
 
     def test_resume_command_quotes(self):
         cmd = rs.resume_command({"runtime": "claude", "sid": "abc", "flags": ["--model", "opus 4"]})
-        self.assertEqual(cmd, "claude --resume abc --model 'opus 4'")
+        # Quoted for the shell the Orca host runs: cmd/PowerShell rules on Windows, POSIX elsewhere.
+        expected = 'claude --resume abc --model "opus 4"' if sys.platform == "win32" else "claude --resume abc --model 'opus 4'"
+        self.assertEqual(cmd, expected)
         cmd = rs.resume_command({"runtime": "codex", "sid": "x1", "flags": ["--yolo"]})
         self.assertEqual(cmd, "codex resume x1 --yolo")
 
@@ -67,15 +69,17 @@ class CodexReviewFixTests(unittest.TestCase):
         self.assertEqual(inv.normalize_path("\\\\wsl.localhost\\Ubuntu\\home\\a"), "/home/a")
         self.assertEqual(inv.argv_resume_sid(["/v/vendor/codex", "resume", "019a"]), "019a")
 
+    @unittest.skipIf(sys.platform == "win32", "bare orca.exe is the Orca ADE CLI on Windows and is accepted there")
     def test_orca_exe_never_falls_back_to_bare_orca(self):
         import shutil
         orig = shutil.which
-        shutil.which = lambda name: "/usr/bin/orca" if name == "orca" else None
+        shutil.which = lambda name, path=None: "/usr/bin/orca" if name == "orca" else None
         try:
             self.assertIsNone(inv.orca_exe())
         finally:
             shutil.which = orig
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX permission bits do not apply on Windows")
     def test_snapshot_is_owner_only(self):
         import tempfile, stat
         with tempfile.TemporaryDirectory() as d:
@@ -100,6 +104,7 @@ class CodexReviewRound2Tests(unittest.TestCase):
     def test_codex_resume_last_has_no_id(self):
         self.assertIsNone(inv.argv_resume_sid(["/v/vendor/codex", "resume", "-m", "x", "--last"]))
 
+    @unittest.skipIf(sys.platform == "win32", "POSIX permission bits do not apply on Windows")
     def test_custom_save_path_leaves_parent_permissions_alone(self):
         import tempfile, stat
         with tempfile.TemporaryDirectory() as d:

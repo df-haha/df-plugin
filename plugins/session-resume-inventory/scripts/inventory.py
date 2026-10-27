@@ -6,22 +6,36 @@ Never mutates any session. Emits the grouped plain-text report defined in SKILL.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 from collections import defaultdict
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 HOME = Path.home()
 CLAUDE_SESSIONS = HOME / ".claude" / "sessions"
 CLAUDE_PROJECTS = HOME / ".claude" / "projects"
 CODEX_SESSIONS = HOME / ".codex" / "sessions"
 CODEX_INDEX = HOME / ".codex" / "session_index.jsonl"
-CODEX_SKIP_SUBCMDS = {"app-server", "mcp-server", "exec", "login", "logout"}
+CODEX_SKIP_SUBCMDS = {"app-server", "exec-server", "mcp-server", "exec", "login", "logout"}
+# Helper processes that reuse the `claude` binary but are not an interactive session.
+CLAUDE_HELPER_FLAGS = {"--output-format", "-p", "--print", "--chrome-native-host"}
 HINT_LEN = 110
 SNAPSHOT_DIR = HOME / ".claude" / "session-snapshots"
+
+# Linux/WSL read /proc; Windows gets one process snapshot from PowerShell (no per-process env or
+# cwd there, so those fall back to the session state file / rollout metadata).
+IS_WINDOWS = os.name == "nt"
+WIN_PROCESS_LIST = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process | "
+                    "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress")
+PROCESS_EVIDENCE = "PowerShell Win32_Process 程序快照" if IS_WINDOWS else "/proc 程序快照"
+_win_procs: dict[int, list[str]] | None = None
+win_procs_note = ""
 
 # Launch flags carried over when restoring (1A: restore as originally launched). Anything
 # outside these lists is reported as dropped instead of being guessed at.
@@ -54,26 +68,68 @@ SESSION_FLAGS = {
 def run_full(cmd: list[str], timeout: int = 20) -> tuple[str, str]:
     """Return (stdout, stderr); failures to launch or time out are reported in stderr."""
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # Every tool we call (git, tmux, orca, the UTF-8-forced PowerShell list) emits UTF-8; never
+        # let the Windows locale code page (cp950…) decode it and raise on a Chinese path.
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             timeout=timeout)
         return res.stdout, res.stderr
     except (OSError, subprocess.TimeoutExpired) as exc:
         return "", f"{type(exc).__name__}: {exc}"
+
+
+def utf8_stdout() -> None:
+    """Reports carry Chinese text and ✅／❌; on Windows a piped stdout defaults to the locale code page."""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    except (AttributeError, ValueError):
+        pass
 
 
 def run(cmd: list[str], timeout: int = 20) -> str:
     return run_full(cmd, timeout)[0]
 
 
+def which_on_path(name: str) -> str | None:
+    """`shutil.which` restricted to PATH: on Windows the default lookup also searches the current
+    directory first, which would let a planted `orca.exe` in the repo be picked up."""
+    found = shutil.which(name, path=os.environ.get("PATH", os.defpath))
+    if found and IS_WINDOWS and Path(found).resolve().parent == Path.cwd().resolve():
+        return None
+    return found
+
+
+def powershell_exe() -> str:
+    """Absolute path, so a `powershell.exe` dropped in the current directory is never run."""
+    return str(PureWindowsPath(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell"
+               / "v1.0" / "powershell.exe")
+
+
 def orca_exe() -> str | None:
-    """Only the Orca ADE CLI. Bare `orca` is not trusted: on Linux it is often GNOME's screen reader."""
-    return shutil.which("orca-ide")
+    """Only the Orca ADE CLI. Bare `orca` is not trusted on Linux (often GNOME's screen reader);
+    on Windows the desktop app ships it as `orca.exe`, so it is accepted there."""
+    return which_on_path("orca-ide") or (which_on_path("orca") if IS_WINDOWS else None)
+
+
+def exe_name(arg0: str) -> str:
+    """Lower-cased basename of argv[0] without `.exe`, for either path flavour (`/v/bin/claude`,
+    `C:\\...\\Claude.EXE`); Windows file names are case-insensitive."""
+    name = re.split(r"[\\/]", arg0)[-1].lower()
+    return name[:-4] if name.endswith(".exe") else name
+
+
+def is_windows_path(path: str) -> bool:
+    return bool(re.match(r"^[A-Za-z]:[\\/]", path))
 
 
 def normalize_path(path: str) -> str:
-    """Map Orca's `\\\\wsl.localhost\\<distro>\\...` form back to a POSIX path."""
+    """Map Orca's `\\\\wsl.localhost\\<distro>\\...` form back to a POSIX path; fold case and
+    separators for Windows drive paths so `D:/x` and `d:\\x\\` compare equal."""
     if path.startswith("\\\\wsl"):
         parts = path.lstrip("\\").split("\\")
         path = "/" + "/".join(parts[2:])
+    elif is_windows_path(path):
+        folded = os.path.normpath(path).replace("/", "\\").lower().rstrip("\\")
+        return folded + "\\" if len(folded) == 2 else folded  # keep `d:\` a root, not drive-relative `d:`
     return path.rstrip("/") or "/"
 
 
@@ -103,7 +159,7 @@ def split_codex_resume(rest: list[str]) -> tuple[str | None, list[str]]:
 def argv_resume_sid(args: list[str]) -> str | None:
     """Session ID a process was launched to resume, read straight from its argv."""
     rest = args[1:]
-    if Path(args[0]).name == "codex":
+    if exe_name(args[0]) == "codex":
         return split_codex_resume(rest[1:])[0] if rest[:1] == ["resume"] else None
     for i, arg in enumerate(rest):
         if arg.startswith("--resume="):
@@ -113,7 +169,45 @@ def argv_resume_sid(args: list[str]) -> str | None:
     return None
 
 
+def win_split(cmdline: str) -> list[str]:
+    """Split a Win32 command line with the OS's own rules (CommandLineToArgvW), not POSIX shlex."""
+    if not cmdline:
+        return []
+    shell32, kernel32 = ctypes.windll.shell32, ctypes.windll.kernel32  # type: ignore[attr-defined]
+    shell32.CommandLineToArgvW.restype = ctypes.POINTER(ctypes.c_wchar_p)
+    shell32.CommandLineToArgvW.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int)]
+    argc = ctypes.c_int()
+    argv = shell32.CommandLineToArgvW(cmdline, ctypes.byref(argc))
+    if not argv:
+        return []
+    try:
+        return [argv[i] for i in range(argc.value)]
+    finally:
+        kernel32.LocalFree(argv)
+
+
+def win_procs(refresh: bool = False) -> dict[int, list[str]]:
+    """PID → argv for every process, from one PowerShell call; cached until `refresh`."""
+    global _win_procs, win_procs_note
+    if _win_procs is None or refresh:
+        out, err = run_full([powershell_exe(), "-NoProfile", "-NonInteractive", "-Command", WIN_PROCESS_LIST], timeout=60)
+        try:
+            data = json.loads(out or "[]")
+        except json.JSONDecodeError:
+            data = []
+        if isinstance(data, dict):
+            data = [data]
+        if not data:
+            # An empty list means PowerShell failed, not that nothing is running; say so in the report.
+            win_procs_note = f"（PowerShell 列程序失敗，結果不可信：{truncate(err or out) or '無輸出'}）"
+        _win_procs = {int(p["ProcessId"]): win_split(p.get("CommandLine") or "")
+                      for p in data if isinstance(p, dict) and p.get("ProcessId") is not None}
+    return _win_procs
+
+
 def proc_args(pid: int) -> list[str]:
+    if IS_WINDOWS:
+        return win_procs().get(pid, [])
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
@@ -122,6 +216,8 @@ def proc_args(pid: int) -> list[str]:
 
 
 def proc_env(pid: int) -> dict[str, str]:
+    if IS_WINDOWS:
+        return {}  # Win32_Process exposes no environment; Orca handles are not detectable here.
     try:
         raw = Path(f"/proc/{pid}/environ").read_bytes().decode(errors="replace")
     except OSError:
@@ -130,6 +226,8 @@ def proc_env(pid: int) -> dict[str, str]:
 
 
 def proc_cwd(pid: int) -> str:
+    if IS_WINDOWS:
+        return "尚未驗證"  # no cheap cwd lookup on Windows; callers prefer the state file / rollout cwd
     try:
         return os.readlink(f"/proc/{pid}/cwd")
     except OSError:
@@ -137,6 +235,8 @@ def proc_cwd(pid: int) -> str:
 
 
 def live_pids() -> list[int]:
+    if IS_WINDOWS:
+        return list(win_procs(refresh=True))
     return [int(p.name) for p in Path("/proc").iterdir() if p.name.isdigit()]
 
 
@@ -183,13 +283,15 @@ def restore_flags(runtime: str, args: list[str]) -> tuple[list[str], list[str]]:
 
 
 def is_claude_main(args: list[str]) -> bool:
-    if not args or Path(args[0]).name != "claude":
+    if not args or exe_name(args[0]) != "claude":
         return False
-    return "--output-format" not in args and "-p" not in args and "--print" not in args
+    return not CLAUDE_HELPER_FLAGS.intersection(args)
 
 
 def is_codex_main(args: list[str]) -> bool:
-    if not args or Path(args[0]).name != "codex" or "/vendor/" not in args[0]:
+    """The native Codex binary under the npm package's vendor/ dir (either separator). The Codex
+    desktop app's own codex.exe lives elsewhere and only runs app-server / exec-server."""
+    if not args or exe_name(args[0]) != "codex" or "/vendor/" not in args[0].replace("\\", "/").lower():
         return False
     return not (len(args) > 1 and args[1] in CODEX_SKIP_SUBCMDS)
 
@@ -364,7 +466,7 @@ def collect_tmux() -> dict[str, list[str]]:
 def collect_orca(agent_handles: set[str]) -> tuple[dict[str, list[dict]], str]:
     exe = orca_exe()
     if not exe:
-        return {}, "Orca CLI（orca-ide）不在 PATH（尚未驗證）"
+        return {}, "Orca CLI（orca-ide；Windows 為 orca.exe）不在 PATH（尚未驗證）"
     out, err = run_full([exe, "terminal", "list", "--json"], timeout=30)
     try:
         terms = json.loads(out)["result"]["terminals"]
@@ -435,6 +537,7 @@ def main() -> None:
     parser.add_argument("--save", nargs="?", const="", metavar="PATH",
                         help="另存快照 JSON 供 restore.py 使用（預設 ~/.claude/session-snapshots/<時間>.json）")
     opts = parser.parse_args()
+    utf8_stdout()
     pids = live_pids()
     claude = collect_claude(pids)
     codex = collect_codex(pids)
@@ -442,15 +545,24 @@ def main() -> None:
     handles = {h for e in claude.values() for h in e["orca"]} | {e["orca"] for e in codex.values() if e.get("orca")}
     orca, orca_note = collect_orca(handles)
 
+    # Group on the normalized path so `D:\X` and Orca's `d:/x` land in one section; show the first
+    # spelling seen (on POSIX normalization only strips a trailing slash).
     by_path: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+    shown: dict[str, str] = {}
+
+    def key_of(path: str) -> str:
+        key = normalize_path(path)
+        shown.setdefault(key, path.rstrip("/\\") or path)
+        return key
+
     for e in claude.values():
-        by_path[e["cwd"]]["claude"].append(e)
+        by_path[key_of(e["cwd"])]["claude"].append(e)
     for e in codex.values():
-        by_path[e["cwd"]]["codex"].append(e)
+        by_path[key_of(e["cwd"])]["codex"].append(e)
     for path, panes in tmux.items():
-        by_path[path]["tmux"] = panes
+        by_path[key_of(path)]["tmux"] = panes
     for path, terms in orca.items():
-        by_path[path]["orca"] = terms
+        by_path[key_of(path)]["orca"] = terms
 
     # Fresh existence check right before reporting; drop sessions whose processes exited.
     alive = set(live_pids())
@@ -459,8 +571,9 @@ def main() -> None:
             group[rt] = [e for e in group[rt] if any(p in alive for p in e["pids"])]
     counts = defaultdict(int)
     lines: list[str] = []
-    for path in sorted(by_path):
-        group = by_path[path]
+    for key in sorted(by_path):
+        group = by_path[key]
+        path = shown[key]
         branch, kind = git_info(path)
         lines += [f"# {path}", "", f"Branch: {branch}" + (f"（{kind}）" if kind == "linked worktree" else ""), ""]
         if group["claude"]:
@@ -519,14 +632,16 @@ def main() -> None:
         f"Snapshot: {datetime.now().astimezone():%Y-%m-%d %H:%M:%S %Z}",
         f"Counts: Claude Code {counts['claude']}（{status_bits}）／Codex {counts['codex']}／"
         f"tmux pane {counts['tmux_panes']}／其他 Orca terminal {counts['orca_other']}",
-        "Evidence: /proc 程序快照、~/.claude/sessions/<pid>.json＋transcript、Codex 開啟中的 rollout fd、git metadata、"
-        + orca_note,
+        f"Evidence: {PROCESS_EVIDENCE}{win_procs_note}、~/.claude/sessions/<pid>.json＋transcript、"
+        + ("Codex 只認 `codex resume <id>` 參數（Windows 讀不到開啟中的 rollout）" if IS_WINDOWS
+           else "Codex 開啟中的 rollout fd")
+        + "、git metadata、" + orca_note,
         "",
     ]
     risky = [f"{e.get('name') or e['sid']}（{e['status']}）" for e in claude.values() if e["status"] in ("busy", "shell")]
     # Codex exposes no busy/idle state, so every live Codex session is flagged conservatively.
     risky += [f"Codex {e.get('name') or e['sid']}（狀態無法判斷）" for e in codex.values()
-              if e.get("sid") and any(p in set(live_pids()) for p in e["pids"])]
+              if e.get("sid") and any(p in alive for p in e["pids"])]
     footer = ["重開機警告：" + ("、".join(risky) + " 正在執行中，重開會中斷當前 turn／shell 指令，重開後要檢查結果或重跑。" if risky
                               else "目前沒有 busy／shell 的 Claude session，也沒有開著的 Codex session；idle 不代表任務已完成。")]
     if opts.save is not None:

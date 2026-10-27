@@ -40,6 +40,7 @@ python3 plugins/session-resume-inventory/scripts/restore.py --open-orca  # Orca 
 - 快照只有本人可讀（檔案 600、資料夾 700），因為會記錄啟動參數。
 - 依原啟動參數復原（白名單旗標，如 `--dangerously-skip-permissions`、`--model`）；其他參數列出不帶。
 - 只開回原本在 Orca、且路徑已登記在 Orca 的 session；其餘只列出指令。Windows Terminal 復原尚未支援。
+- Windows 的快照查不到 session 原本在不在 Orca，所以只要 session 的資料夾是 Orca 已登記的 Windows worktree 就開回；不在 Orca 的只列指令。Windows session 不會開進 WSL 的 worktree。
 
 ## 測試
 
@@ -49,10 +50,17 @@ cd plugins/session-resume-inventory && python3 -m unittest discover -s tests
 
 ## 需求
 
-- Linux 或 WSL（讀 `/proc`；原生 Windows／macOS 不支援）
+- Linux／WSL（讀 `/proc`）或原生 Windows（PowerShell 列程序）；macOS 不支援
 - Python 3.9+
-- tmux、Orca（`orca-ide`）為選配，沒裝時該區自動略過
+- tmux、Orca（Linux 用 `orca-ide`；Windows 用 Orca 桌面版附的 `orca.exe`）為選配，沒裝時該區自動略過
+
+### Windows 的差異
+
+- 只看得到 Windows 這一側開的 session；WSL 裡的要在 WSL 跑本工具。
+- Codex 只認 `codex resume <id>` 啟動的 session；直接 `codex` 開的 TUI 查不到它在寫哪個 rollout，列為 `empty / not resumable`。
+- 讀不到程序的環境變數，所以不知道 session 原本在不在 Orca（復原規則見上）。
+- 盤點報告裡 `work` 欄一樣來自 transcript；`note` 不會有 Orca handle。
 
 ## 資料來源
 
-`/proc`、`~/.claude/sessions/<pid>.json`、`~/.claude/projects/**/<sessionId>.jsonl`、`~/.codex/sessions/**/rollout-*.jsonl`、`~/.codex/session_index.jsonl`、git metadata、`tmux list-panes`、`orca-ide terminal list --json`。
+`/proc`（Windows 改用 `Get-CimInstance Win32_Process`）、`~/.claude/sessions/<pid>.json`、`~/.claude/projects/**/<sessionId>.jsonl`、`~/.codex/sessions/**/rollout-*.jsonl`、`~/.codex/session_index.jsonl`、git metadata、`tmux list-panes`、`orca-ide terminal list --json`（Windows 為 `orca.exe`）。

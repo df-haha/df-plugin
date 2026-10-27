@@ -166,6 +166,10 @@ def latest_snapshot() -> Path:
 
 
 def main() -> None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Windows piped stdout defaults to the locale code page
+    except (AttributeError, ValueError):
+        pass
     parser = argparse.ArgumentParser(description="用 HTML 勾選頁挑要存／要開回的 session")
     sub = parser.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("build", help="產生勾選頁")
