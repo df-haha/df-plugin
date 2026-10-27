@@ -95,6 +95,32 @@ class WindowsRestorePlanTests(unittest.TestCase):
         self.assertEqual([s["sid"] for s in plan["unregistered"]], ["u"])
 
 
+class SearchPathTests(unittest.TestCase):
+    def test_powershell_is_absolute_under_systemroot(self):
+        orig = os.environ.get("SystemRoot")
+        os.environ["SystemRoot"] = r"X:\Win"
+        try:
+            self.assertEqual(inv.powershell_exe(), r"X:\Win\System32\WindowsPowerShell\v1.0\powershell.exe")
+        finally:
+            if orig is None:
+                del os.environ["SystemRoot"]
+            else:
+                os.environ["SystemRoot"] = orig
+
+    def test_orca_lookup_never_uses_current_directory(self):
+        import shutil
+        seen = {}
+        orig_which, orig_win = shutil.which, inv.IS_WINDOWS
+        shutil.which = lambda name, path=None: seen.setdefault(name, path) and None
+        try:
+            inv.IS_WINDOWS = True
+            inv.orca_exe()
+            self.assertIn("orca", seen)
+            self.assertIsNotNone(seen["orca"])  # explicit PATH → shutil.which does not prepend os.curdir
+        finally:
+            shutil.which, inv.IS_WINDOWS = orig_which, orig_win
+
+
 class WindowsProcessListTests(unittest.TestCase):
     def test_powershell_failure_is_flagged_not_silent(self):
         orig = (inv.IS_WINDOWS, inv.run_full, inv._win_procs, inv.win_procs_note)

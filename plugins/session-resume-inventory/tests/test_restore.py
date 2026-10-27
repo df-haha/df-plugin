@@ -73,7 +73,7 @@ class CodexReviewFixTests(unittest.TestCase):
     def test_orca_exe_never_falls_back_to_bare_orca(self):
         import shutil
         orig = shutil.which
-        shutil.which = lambda name: "/usr/bin/orca" if name == "orca" else None
+        shutil.which = lambda name, path=None: "/usr/bin/orca" if name == "orca" else None
         try:
             self.assertIsNone(inv.orca_exe())
         finally:

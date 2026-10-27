@@ -15,7 +15,7 @@ import subprocess
 import sys
 from collections import defaultdict
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 HOME = Path.home()
 CLAUDE_SESSIONS = HOME / ".claude" / "sessions"
@@ -89,10 +89,25 @@ def run(cmd: list[str], timeout: int = 20) -> str:
     return run_full(cmd, timeout)[0]
 
 
+def which_on_path(name: str) -> str | None:
+    """`shutil.which` restricted to PATH: on Windows the default lookup also searches the current
+    directory first, which would let a planted `orca.exe` in the repo be picked up."""
+    found = shutil.which(name, path=os.environ.get("PATH", os.defpath))
+    if found and IS_WINDOWS and Path(found).resolve().parent == Path.cwd().resolve():
+        return None
+    return found
+
+
+def powershell_exe() -> str:
+    """Absolute path, so a `powershell.exe` dropped in the current directory is never run."""
+    return str(PureWindowsPath(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "WindowsPowerShell"
+               / "v1.0" / "powershell.exe")
+
+
 def orca_exe() -> str | None:
     """Only the Orca ADE CLI. Bare `orca` is not trusted on Linux (often GNOME's screen reader);
     on Windows the desktop app ships it as `orca.exe`, so it is accepted there."""
-    return shutil.which("orca-ide") or (shutil.which("orca") if IS_WINDOWS else None)
+    return which_on_path("orca-ide") or (which_on_path("orca") if IS_WINDOWS else None)
 
 
 def exe_name(arg0: str) -> str:
@@ -175,7 +190,7 @@ def win_procs(refresh: bool = False) -> dict[int, list[str]]:
     """PID → argv for every process, from one PowerShell call; cached until `refresh`."""
     global _win_procs, win_procs_note
     if _win_procs is None or refresh:
-        out, err = run_full(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", WIN_PROCESS_LIST], timeout=60)
+        out, err = run_full([powershell_exe(), "-NoProfile", "-NonInteractive", "-Command", WIN_PROCESS_LIST], timeout=60)
         try:
             data = json.loads(out or "[]")
         except json.JSONDecodeError:
