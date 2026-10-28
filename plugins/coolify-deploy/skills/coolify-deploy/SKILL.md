@@ -1,6 +1,6 @@
 ---
 name: coolify-deploy
-description: Use when editing or authoring a Coolify docker-compose.yml, Dockerfile, env/secrets, SERVICE_URL/SERVICE_FQDN magic env, deploy webhooks, rollback flow, custom domains, TLS configuration, or Seq logging service (self-hosted PaaS + Docker Compose). For reading build/runtime logs or debugging WHY a deploy failed, use coolify-logs instead; for DB-related deploys (migrations, role isolation, Adminer, readonly access) use coolify-db. Triggers on phrases like "compose 寫不出來"、"Dockerfile 怎麼寫"、"SERVICE_URL"、"網域綁定"、"TLS / Let's Encrypt"、"rollback"、"webhook 設定"、"env 注入"、"加 Seq"、"NODE_ENV build 失敗"。
+description: Use when editing or authoring a Coolify docker-compose.yml, Dockerfile, env/secrets, SERVICE_URL/SERVICE_FQDN magic env, deploy webhooks, rollback flow, custom domains, TLS configuration, Seq logging, or deployment resource safety (RAM, swap, disk, concurrent builds, container limits, OOM prevention) for self-hosted Coolify + Docker Compose. For reading build/runtime logs or diagnosing WHY a deploy failed, use coolify-logs instead; resource-safety incidents may require both skills. For DB-related deploys use coolify-db. Triggers include "compose 寫不出來"、"Dockerfile 怎麼寫"、"SERVICE_URL"、"網域綁定"、"rollback"、"env 注入"、"NODE_ENV build 失敗"、"RAM 爆掉"、"OOM"、"swap"、"資源限制"、"部署卡在 exporting layers"。
 ---
 
 # Coolify Deploy
@@ -65,6 +65,7 @@ Coolify(自架,於自架機器拉 git)
 12. **`NODE_ENV=production` 禁放 compose `environment:`**:Coolify 會把 compose 的 `environment:` **同時**展開成 build-time `--build-arg`,`NODE_ENV=production` 注入 builder stage 會讓 `npm ci` 跳過 devDependencies,導致 `tsc` / `vite` / `next` 等 build 工具找不到(exit 127)。`NODE_ENV=production` 應**只在 Dockerfile runtime stage 用 `ENV` 設定**(見 `references/dockerfile-frontend.md` + `references/env-management.md`)。
 13. **Multi-service compose 禁同 `mount_path` 的 bind mount**:Coolify `file_storages` 表對 `(application_id, mount_path)` 有 unique-like 限制——同 app 內若兩 service 想各自 bind mount 到同一容器路徑,**後加的會被靜默 drop**。改 **build-time `COPY` 進該 service 自家的 Dockerfile** 繞過(見 `references/compose.md` Quirk 3,DB init scripts 應用見 coolify-db skill)。
 14. **production 禁 `ports`,本機 dev 走 override**:本機若需要對 DB 開 port 給 IDE / 工具用,寫進 `docker-compose.override.yml`(與 `docker-compose.yml` 同目錄,**Coolify 預設不讀 override**——這是設計上的安全分離)。production 主檔保持 `expose` only,override.yml 只在 `docker compose up` 在本機跑時自動疊加。
+15. **deploy 前先做資源 admission check**:當 build、runtime、DB 共用一台 host 時,必讀 `references/resource-safety.md`;先確認 RAM / swap / disk / OOM 歷史 / 部署佇列,再啟動單一 deploy。Runtime `mem_limit` **不會**限制 `docker build`;swap 也不等於 RAM。
 
 ## 兩種對外曝露機制(可並存)
 
@@ -88,6 +89,7 @@ Coolify(自架,於自架機器拉 git)
 | 寫 frontend Dockerfile(Vite / Next 範例棧、`NODE_ENV` builder 覆寫) | `references/dockerfile-frontend.md` |
 | Coolify env 注入、build/runtime、機密、APP_ENV 分層、fail-fast、部署前 checklist | `references/env-management.md` |
 | 分支策略 / webhook / migration 時機 / 部署後驗證 / 兩條回滾路徑 / Scheduled Task / ENTRYPOINT vs command 互咬 / bootstrap | `references/deploy-and-rollback.md` |
+| 部署前 RAM / swap / disk 檢查、concurrent builds、compose 資源限制、OOM 預防與中止門檻 | `references/resource-safety.md` |
 | Log / Metric / Sentry / healthcheck 端點 | `references/observability.md` |
 | 自訂網域 / TLS / HSTS / CORS / cookie domain / preview env | `references/domains-and-tls.md` |
 | DB 角色隔離 / one-shot migration / Adminer / 唯讀存取 / 跨版本搬遷 | → **coolify-db** skill |
@@ -103,6 +105,7 @@ scaffold 工具通常不產部署檔;未補完就 push 會在 build 階段失敗
 - [ ] Coolify 端 env 注入(`DATABASE_URL` 或 `POSTGRES_*`、`JWT_SECRET_KEY`、`CORS_ORIGINS`… 見 `env-management.md`)
 - [ ] CLI + 至少一把 read token + Claude permission 範本(走 **coolify-setup** skill)
 - [ ] 部署失敗時讀 build log 的能力(走 **coolify-logs** skill)
+- [ ] 共用 host 已跑 `resource-safety.md` preflight;8 GiB 級主機的 concurrent builds 設為 1
 
 驗收 3 步:
 

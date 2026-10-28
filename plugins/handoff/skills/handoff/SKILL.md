@@ -112,8 +112,9 @@ EOF
 # 在 prompt 內把 <HANDOFF_PATH> 取代成實際絕對路徑
 sed -i "s|<HANDOFF_PATH>|$HANDOFF_PATH|" /tmp/codex-handoff-prompt.txt
 
-# 2) 用 script 包出假 TTY 跑 codex（依 ~/.codex/config.toml 預設模型/effort，不帶 --model）
-script -qc 'codex exec --skip-git-repo-check --sandbox read-only - < /tmp/codex-handoff-prompt.txt' /tmp/codex-handoff-review.log </dev/null
+# 2) 用 script 包出假 TTY 跑 codex。模型/effort 走 -p claude-review（讀 ~/.codex/claude-review.config.toml，
+#    與 TUI /model 會回寫的 config.toml 分離；2026-09-08 起），不帶 --model
+script -qc 'codex exec -p claude-review --skip-git-repo-check --sandbox read-only - < /tmp/codex-handoff-prompt.txt' /tmp/codex-handoff-review.log </dev/null
 
 # 3) 剝 ANSI escape codes 取乾淨文字
 sed -e 's/\x1b\[[0-9;]*m//g' /tmp/codex-handoff-review.log

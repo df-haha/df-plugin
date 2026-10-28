@@ -2,8 +2,9 @@
 // AI Review Runner - shared execution engine for Claude Code and Codex plugins.
 // It invokes external reviewer CLIs (Codex, Antigravity, Claude Code) in print mode
 // and writes each result to a temporary markdown file.
-// Codex model/effort defaults live in ~/.codex/config.toml; flags are only
-// injected when CODEX_MODEL / CODEX_EFFORT are explicitly set.
+// Codex model/effort defaults live in ~/.codex/claude-review.config.toml (isolated from
+// the TUI /model picker, which rewrites config.toml). CODEX_MODEL / CODEX_EFFORT env
+// still override; if the profile file is missing we fall back to config.toml defaults.
 "use strict";
 
 const fs = require("fs");
@@ -12,13 +13,14 @@ const { execFileSync } = require("child_process");
 
 const COOLDOWN_MS = 60_000;
 const MAX_PROMPT_CHARS = 8000;
-// 預設 10 分鐘 = Claude Code Bash tool 同步等待上限；可用 AI_REVIEW_TIMEOUT_MS 覆寫。
-// 更長的審查請改走 run_in_background + 事後 Read 結果檔（見 SKILL.md）。
-const DEFAULT_TIMEOUT_MS = 600_000;
-const DEFAULT_CLAUDE_MODEL = "claude-opus-4-6[1m]";
-const DEFAULT_CLAUDE_EFFORT = "max";
+// 預設 9 分鐘，保留 60 秒讓 Claude Code Bash tool 在 600 秒同步上限前
+// 收割輸出與回報。更長的審查請明確覆寫 AI_REVIEW_TIMEOUT_MS，並改走
+// run_in_background + 事後 Read 結果檔（見 SKILL.md）。
+const DEFAULT_TIMEOUT_MS = 540_000;
+const DEFAULT_CLAUDE_MODEL = "claude-opus-4-6";
+const DEFAULT_CLAUDE_EFFORT = "high";
 const DEFAULT_CLAUDE_PERMISSION_MODE = "plan";
-const DEFAULT_AGY_MODEL = "3.5-flash";
+const DEFAULT_AGY_MODEL = "Gemini 3.7 Flash (High)";
 const CLAUDE_PERMISSION_MODES = new Set([
   "acceptEdits",
   "auto",
@@ -42,6 +44,29 @@ function sanitizeModel(model) {
 
 function sanitizeEffort(effort) {
   return (effort || "").replace(/[^a-zA-Z-]/g, "").trim();
+}
+
+// 2026-09-08: Claude 端 Codex 模型單一來源改為 ~/.codex/claude-review.config.toml，
+// 因為 Codex TUI 的 /model 會回寫 config.toml 頂層 model（09-07 曾靜默切回 gpt-5.6-sol）。
+// 呼叫時解析（非模組載入時），讓測試能用 CODEX_HOME 切換有無 profile 檔
+function codexReviewProfilePath() {
+  return path.join(
+    process.env.CODEX_HOME || path.join(process.env.HOME || "/tmp", ".codex"),
+    "claude-review.config.toml"
+  );
+}
+const CODEX_SAFE_VALUE = /^[A-Za-z0-9._\-\[\]]+$/;
+
+function loadCodexReviewProfile() {
+  const out = { model: "", effort: "" };
+  let text;
+  try { text = fs.readFileSync(codexReviewProfilePath(), "utf8"); } catch { return out; }
+  for (const line of text.split("\n")) {
+    const m = line.match(/^\s*(model|model_reasoning_effort)\s*=\s*"([^"]*)"/);
+    if (!m || !CODEX_SAFE_VALUE.test(m[2])) continue;
+    if (m[1] === "model") out.model = m[2]; else out.effort = m[2];
+  }
+  return out;
 }
 
 function reviewTimeoutMs() {
@@ -83,14 +108,16 @@ function buildInvocation(reviewer, model = "", options = {}) {
       ? ["review", "--uncommitted"]
       : ["exec", "--ephemeral", "--skip-git-repo-check"];
     // 注意：codex review 沒有 -m 旗標，model 一律走 -c config override（review/exec 皆支援）
-    const selectedModel = sanitizeModel(model);
+    const profile = loadCodexReviewProfile();
+    const selectedModel = sanitizeModel(model) || profile.model;
     if (selectedModel) args.push("-c", `model="${selectedModel}"`);
-    const effort = sanitizeEffort(options.effort);
+    const effort = sanitizeEffort(options.effort) || profile.effort;
     if (effort) args.push("-c", `model_reasoning_effort="${effort}"`);
     return {
       command: "codex",
       args,
       label: "Codex",
+      resolved: `model=${selectedModel || "(config.toml 預設)"} effort=${effort || "(config.toml 預設)"} source=${sanitizeModel(model) ? "env" : profile.model ? codexReviewProfilePath() : "config.toml（profile 缺檔）"}`,
       // codex review 的 --uncommitted 與 positional prompt 互斥，code 模式不附加 prompt
       omitPrompt: isCodeMode,
     };
@@ -102,9 +129,10 @@ function buildInvocation(reviewer, model = "", options = {}) {
 
   if (normalized === "claude") {
     const permissionMode = normalizeClaudePermissionMode(options.claudePermissionMode);
+    const effort = sanitizeEffort(options.effort) || DEFAULT_CLAUDE_EFFORT;
     const args = ["-p", "--output-format", "text", "--permission-mode", permissionMode];
     if (selectedModel) args.push("--model", selectedModel);
-    args.push("--effort", DEFAULT_CLAUDE_EFFORT);
+    args.push("--effort", effort);
     return {
       command: "claude",
       args,
@@ -219,6 +247,48 @@ function formatExecError(error, label) {
   return body || `${label} 執行錯誤，但沒有輸出 stdout/stderr。`;
 }
 
+function runInvocationWithRetry({
+  reviewer,
+  invocation,
+  cliArgs,
+  projectDir,
+  timeoutMs,
+  execFileSyncFn = execFileSync,
+  nowFn = Date.now,
+  onRetry = () => {},
+}) {
+  const startedAt = nowFn();
+  const maxAttempts = normalizeReviewer(reviewer) === "claude" ? 2 : 1;
+  let attempts = 0;
+
+  while (attempts < maxAttempts) {
+    attempts += 1;
+    const elapsedMs = Math.max(0, nowFn() - startedAt);
+    const remainingMs = Math.max(1, timeoutMs - elapsedMs);
+
+    try {
+      const output = execFileSyncFn(invocation.command, cliArgs, {
+        cwd: projectDir,
+        timeout: remainingMs,
+        encoding: "utf8",
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      return { ok: true, output: output || "", errorText: "", attempts };
+    } catch (error) {
+      const errorText = formatExecError(error, invocation.label);
+      const afterAttemptRemainingMs = Math.max(0, timeoutMs - Math.max(0, nowFn() - startedAt));
+      const canRetry = attempts < maxAttempts
+        && /(^|\n)Request timed out(?:\n|$)/i.test(errorText)
+        && afterAttemptRemainingMs >= 30_000;
+
+      if (!canRetry) return { ok: false, output: "", errorText, attempts };
+      onRetry({ attempts, remainingMs: afterAttemptRemainingMs });
+    }
+  }
+
+  return { ok: false, output: "", errorText: `${invocation.label} 執行失敗。`, attempts };
+}
+
 function runReviewer({ reviewer, mode, projectDir, planPath, question, model, effort }) {
   checkCooldown(reviewer);
 
@@ -236,22 +306,22 @@ function runReviewer({ reviewer, mode, projectDir, planPath, question, model, ef
   console.log(`REVIEWER: ${reviewer}`);
   console.log(`MODE: ${mode}${model ? ` (model: ${model})` : ""}${effort ? ` (effort: ${effort})` : ""}`);
   console.log(`OUTPUT: ${outputFile}`);
+  if (invocation.resolved) console.log(`CODEX: ${invocation.resolved}`);
   console.log(`EXECUTING: ${invocation.label} ...`);
 
   const cliArgs = invocation.omitPrompt ? invocation.args : [...invocation.args, prompt];
-  let failed = false;
-  try {
-    const output = execFileSync(invocation.command, cliArgs, {
-      cwd: projectDir,
-      timeout: timeoutMs,
-      encoding: "utf8",
-      maxBuffer: 10 * 1024 * 1024,
-    });
-    fs.writeFileSync(outputFile, output || "", "utf8");
-  } catch (error) {
-    failed = true;
-    fs.writeFileSync(outputFile, formatExecError(error, invocation.label), "utf8");
-  }
+  const result = runInvocationWithRetry({
+    reviewer,
+    invocation,
+    cliArgs,
+    projectDir,
+    timeoutMs,
+    onRetry: ({ remainingMs }) => {
+      console.log(`RETRY: ${invocation.label} request timed out；剩餘 ${Math.ceil(remainingMs / 1000)} 秒，原 provider 重試一次。`);
+    },
+  });
+  const failed = !result.ok;
+  fs.writeFileSync(outputFile, result.ok ? result.output : result.errorText, "utf8");
 
   if (failed) {
     console.log(`WARNING: ${invocation.label} 執行失敗（非零 exit 或逾時），錯誤訊息已寫入 ${outputFile}`);
@@ -299,5 +369,6 @@ module.exports = {
   sanitizeEffort,
   reviewTimeoutMs,
   normalizeClaudePermissionMode,
+  runInvocationWithRetry,
   runReviewer,
 };

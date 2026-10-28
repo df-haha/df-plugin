@@ -1,7 +1,7 @@
 {
   "name": "coolify-deploy",
-  "version": "2.0.0",
-  "description": "Coolify deployment toolkit for Docker Compose services, database migrations, logs, and CLI setup.",
+  "version": "2.1.0+codex.20260821040532",
+  "description": "Coolify deployment toolkit for Docker Compose services, resource-safe builds, database migrations, logs, and CLI setup.",
   "author": {
     "name": "df-haha"
   },
@@ -14,8 +14,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Coolify Deploy",
-    "shortDescription": "Guide Coolify deploys, DB migration flows, logs, and CLI setup",
-    "longDescription": "Coolify deployment workflow for Docker Compose applications. It bundles four skills: coolify-deploy for compose, Dockerfile, env, TLS, and rollback guidance; coolify-db for role isolation and migrations; coolify-logs for build and runtime log debugging; and coolify-setup for CLI, token, and permission setup.",
+    "shortDescription": "Guide resource-safe Coolify deploys, DB flows, logs, and CLI setup",
+    "longDescription": "Coolify deployment workflow for Docker Compose applications. It bundles four skills: coolify-deploy for compose, Dockerfile, env, TLS, rollback, and host resource admission; coolify-db for role isolation and migrations; coolify-logs for build, runtime, OOM, and disk-failure debugging; and coolify-setup for CLI, token, and permission setup.",
     "developerName": "df-haha",
     "category": "Development",
     "capabilities": [
@@ -24,9 +24,10 @@
       "Write"
     ],
     "defaultPrompt": [
-      "用 coolify-deploy 幫我寫 docker-compose.yml",
-      "用 coolify-logs 看這次 Coolify 部署為什麼失敗",
-      "用 coolify-db 規劃 Postgres migration 與唯讀存取"
+      "\u7528 coolify-deploy \u5e6b\u6211\u5beb docker-compose.yml",
+      "\u7528 coolify-deploy \u6aa2\u67e5\u9019\u53f0\u4e3b\u6a5f\u662f\u5426\u6709\u8db3\u5920 RAM \u5b89\u5168\u90e8\u7f72",
+      "\u7528 coolify-logs \u770b\u9019\u6b21 Coolify \u90e8\u7f72\u70ba\u4ec0\u9ebc\u5931\u6557",
+      "\u7528 coolify-db \u898f\u5283 Postgres migration \u8207\u552f\u8b80\u5b58\u53d6"
     ],
     "brandColor": "#0F766E"
   }

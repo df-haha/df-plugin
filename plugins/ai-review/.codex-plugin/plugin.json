@@ -1,6 +1,6 @@
 {
   "name": "ai-review",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "AI 二次審查 - 使用 Claude Code CLI 或 Antigravity CLI 對程式碼、計畫或技術決策進行獨立審查（Codex 宿主外審用；runner 另支援 Codex reviewer 供 Claude Code 宿主）。",
   "author": {
     "name": "df-haha"
@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "AI Review",
     "shortDescription": "Run Claude Code or Antigravity as independent reviewers.",
-    "longDescription": "AI 二次審查 workflow for code, plans, and technical decisions. It packages a shared skill and local runner that can invoke Codex CLI, Claude Code CLI, or Antigravity CLI (reviewer picked by host, so the reviewer is never the host itself). Defaults: Claude Code uses claude-opus-4-6[1m] with max effort; Antigravity uses 3.5-flash; Codex follows ~/.codex/config.toml.",
+    "longDescription": "AI 二次審查 workflow for code, plans, and technical decisions. It packages a shared skill and local runner that can invoke Codex CLI, Claude Code CLI, or Antigravity CLI (reviewer picked by host, so the reviewer is never the host itself). Defaults: Claude Code uses claude-opus-4-6 with high effort; Antigravity uses Gemini 3.7 Flash (High); Codex follows ~/.codex/config.toml.",
     "developerName": "df-haha",
     "category": "Development",
     "capabilities": [

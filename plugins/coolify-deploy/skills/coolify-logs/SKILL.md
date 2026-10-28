@@ -1,6 +1,6 @@
 ---
 name: coolify-logs
-description: Use when reading Coolify build/runtime logs, debugging deploy failures, using the Coolify CLI (`coolify app logs`、`coolify deploy get`、`coolify deploy list`、`--format json`、`--context`), wiring a "deploy failed → auto-fetch log" monitor, or following the two-token discipline for `read:sensitive` API tokens. Triggers on phrases like "看 build log"、"部署失敗為什麼"、"coolify app logs"、"看不到 log"、"service 沒有 logs 指令"、"coolify 沒有 exec"、"撈 log monitor"、"read:sensitive token"、"one-shot 跑完看不到結果"。
+description: Use when reading Coolify build/runtime/host logs, debugging deploy failures or stalls, diagnosing Docker OOM/disk exhaustion/context-canceled cascades, using the Coolify CLI (`coolify app logs`、`coolify deploy get`、`coolify deploy list`、`--format json`、`--context`), wiring a "deploy failed → auto-fetch log" monitor, or following the two-token discipline for `read:sensitive` API tokens. Triggers include "看 build log"、"部署失敗為什麼"、"卡在 exporting layers"、"OOM"、"no space left on device"、"context canceled"、"server 重開"、"coolify app logs"、"看不到 log"、"one-shot 跑完看不到結果"。
 ---
 
 # Coolify Logs
@@ -26,6 +26,7 @@ Coolify 的 log 看似簡單（Web UI 一個 Logs 頁），但**從 CLI / API �
 | 想知道 `coolify app logs` / `coolify deploy list` / `coolify deploy get` 每個 flag 怎麼用、context 怎麼切、`--format json` 配 `jq` 的 pipeline、service 沒 logs 怎麼辦 | `references/cli-commands.md` |
 | 部署失敗要撈 build log：為什麼一般 token 讀不到、`read:sensitive` token 的風險、two-token least-privilege 模型、`scripts/coolify-logs.py` 用法、「失敗自動撈 log」monitor 流程 | `references/deployment-logs.md` |
 | One-shot service / migrate container 跑完看不到 log | 本檔下方「One-shot service 驗證」 + `references/cli-commands.md` |
+| build 卡住、server 失聯、OOM / disk full / Docker 級聯錯誤 | **coolify-deploy** `references/resource-safety.md` |
 
 ## One-shot service 驗證
 
@@ -42,10 +43,13 @@ Coolify 的 deployment 綠燈反映的是 **healthcheck 結果** —— 對長�
 ## Debug 流程（部署出問題）
 
 ```
-1. 開 Coolify UI → Application Deployments 頁，看最新一筆狀態
+1. 先用 CLI / API 看最新一筆 deployment 狀態（UI 只在當次明確授權時使用）
        │
        ├─ Building... → 等
        ├─ Failed at build step → 看 build log（read:sensitive token + coolify-logs.py drop-hidden）
+       ├─ 長時間無新 log / exporting layers 卡住 / server 失聯
+       │      → 同時查 host RAM、swap、disk、kernel OOM、Docker daemon log
+       │      → 勿把 context canceled / broken pipe 當成第一根因
        ├─ Failed at healthcheck → 看 runtime log（coolify app logs <uuid>），對照 healthcheck 設定
        └─ Success but feature broken → runtime log + DB schema 雙路徑：
               ├─ runtime log 有 stack trace → 應用層 bug
@@ -53,6 +57,8 @@ Coolify 的 deployment 綠燈反映的是 **healthcheck 結果** —— 對長�
 ```
 
 → build log 看 `references/deployment-logs.md`、runtime log 看 `references/cli-commands.md`、DB 層走姊妹 skill **coolify-db**。
+
+**根因排序**:如果 kernel 先出現 `Out of memory: Killed process` 或 filesystem 先出現 `no space left on device`,後續大量 `context canceled`、`closed fifo`、`broken pipe`通常是系統失穩後的次生錯誤。以最早的 host 資源錯誤為根因,不要反過來追每個 container image warning。
 
 ## scripts/coolify-logs.py 概覽
 

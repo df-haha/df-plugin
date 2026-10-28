@@ -53,13 +53,13 @@ claude --version  # Claude Code CLI（Codex 宿主時的 reviewer）
 任何模式都可以加：
 
 - `--model <name>` 指定 reviewer 使用的模型。
-- `--effort <level>` 指定 reasoning effort（**僅 codex 生效**，如 `low`/`medium`/`high`/`xhigh`/`max`/`ultra`）。
+- `--effort <level>` 指定 reasoning effort（Codex 與 Claude Code 生效；未指定時各用下方預設）。
 
 預設模型：
 
 - Codex：**不帶參數**，由 `~/.codex/config.toml` 的 `model` 與 `model_reasoning_effort` 決定（集中管理，勿在此硬編碼）。
-- Antigravity：`3.5-flash`。
-- Claude Code：`claude-opus-4-6[1m]`，並固定加 `--effort max`。
+- Antigravity：`Gemini 3.7 Flash (High)`（依 Agy CLI 1.1.15 實機 model list）。
+- Claude Code：`claude-opus-4-6` + `--effort high`。高風險審查可明確指定 `--effort max`；需要 1m context 時再明確指定 `--model 'claude-opus-4-6[1m]'`。
 
 Claude 權限模式（僅 `REVIEWER=claude`）：
 
@@ -111,7 +111,7 @@ Claude 權限模式（僅 `REVIEWER=claude`）：
 
 ## 執行審查
 
-用 Bash 執行（timeout 600000ms —— Bash tool 同步等待上限；runner 內部預設同為 600s，可用 `AI_REVIEW_TIMEOUT_MS` 覆寫，agy 的 `--print-timeout` 會由同一值換算）。
+用 Bash 執行（timeout 600000ms —— Bash tool 同步等待上限；runner 內部預設 540s，保留 60s 收割與回報，可用 `AI_REVIEW_TIMEOUT_MS` 覆寫，agy 的 `--print-timeout` 會由同一值換算）。
 
 建議使用 `AI_REVIEW_*` 環境變數；runner 仍相容舊的 `CODEX_*` 變數（`CODEX_MODE`/`CODEX_MODEL`/`CODEX_EFFORT`/`CODEX_QUESTION`）。
 `AI_REVIEW_MODEL` / `AI_REVIEW_EFFORT` 空字串時不注入參數，使用上述 provider 預設。`AI_REVIEW_CLAUDE_PERMISSION_MODE` 空字串時使用 `plan`。
@@ -146,11 +146,13 @@ AI_REVIEW_MODE=code REVIEWER=both PROJECT_DIR="$(pwd)" AI_REVIEW_MODEL="" AI_REV
 
 runner 會輸出一或多行 `SUCCESS: 結果已寫入 <path>`。用 Read 讀取每個結果檔。
 
+Claude Code reviewer 若回傳精確的 `Request timed out`，runner 會在同一個 540s 總預算內、使用同一 provider 自動重試一次。它不會靜默改用其他 reviewer。
+
 - `COOLDOWN:` → 告知等待。
 - `WARNING:` → 該 reviewer 執行失敗或無產出（結果檔內有錯誤訊息可讀），可能是參數、認證、模型、權限或逾時問題。
 - `ERROR:` → 先修正參數或 runner 路徑，再重跑。
 
-**超長審查（預估 >10 分鐘，如 ultra effort + 大 diff）**：Bash tool 同步等待上限是 600000ms，改用 `run_in_background` 執行同一指令（並設更大的 `AI_REVIEW_TIMEOUT_MS`，如 `1800000`），完成後從 stdout 取結果檔路徑再 Read。
+**超長審查（預估 >9 分鐘，如 max/ultra effort + 大 diff）**：Bash tool 同步等待上限是 600000ms，改用 `run_in_background` 執行同一指令（並設更大的 `AI_REVIEW_TIMEOUT_MS`，如 `1800000`），完成後從 stdout 取結果檔路徑再 Read。
 
 ## 多輪對審
 
