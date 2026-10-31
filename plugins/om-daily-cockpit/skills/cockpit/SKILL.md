@@ -121,6 +121,18 @@ mode=quick 也跑本節（兩個 read call 很便宜，且個人待辦正是晨�
 
 ---
 
+## Phase 3.L：教訓看板注入（Lesson Loop，唯讀）
+
+若 `~/.claude/scripts/lesson_board.py` 存在（tenant 自備，隨 user-scope harness 安裝；plugin 不打包）：
+1. 跑 `python3 ~/.claude/scripts/lesson_board.py --since <上一份 daily_proposal 的日期>`（找不到上一份就 `--days 1`）。
+2. 輸出原樣嵌入報告「🧪 教訓看板」小節：上半「等你審」（聚類草表、已提案、已核准未落地、應升 hook），下半「沙箱自動落地」（自上次 /hi 起的落地／到期／否決事件、容量、鎖狀態）。
+3. 全部唯讀：本節**禁止**跑 `lesson_autoland.py land/revert/expire` 或改登記簿；主管要否決沙箱條目，在 Phase 4「💡 待確認提案」列出指令由主管自己跑。
+4. 腳本不存在或 exit≠0 → 跳過本節，不報錯、不影響其他模組。
+
+mode=quick 也跑本節（一個 read-only script，晨間正是看「昨晚 AI 自動改了什麼規則」的時點）。
+
+---
+
 ## Phase 4：報告產出
 
 存檔至 `{config.paths.daily_proposal_dir}/daily_proposal_{YYYY-MM-DD}.md`。署名/語氣用 `config.identity`。
@@ -147,6 +159,7 @@ mode=quick 也跑本節（兩個 read call 很便宜，且個人待辦正是晨�
 ## 📋 標案機會（僅 tender 啟用）
 
 ## 📌 個人待辦（cc-memory-hi 有資料時才顯示）
+## 🧪 教訓看板（lesson_board.py 存在時才顯示；等你審 ＋ 沙箱自動落地結果）
 （cc_task_list 前 5 筆；overdue/today 皆 0 則省略整節）
 
 ## 💡 待確認提案
