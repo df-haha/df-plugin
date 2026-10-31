@@ -20,7 +20,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Skill, ToolSearch, TaskCreat
 
 1. 載入 config（`--config` 或 `OM_DAILY_COCKPIT_CONFIG`），`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/oc_core/config.py --validate <cfg>`。
 2. 取用：`identity`（署名/語氣）、`team.members`、`email.*`、`paths.*`、`modules.*`。
-3. `mode=quick` → 只跑 Phase 1.1 + 1.5 + 1.6 + 3.X + 3.H + 4（核心）；`mode=full` → 加所有 `modules.*.enabled=true` 區塊。
+3. `mode=quick` → 只跑 Phase 1.1 + 1.5 + 1.6 + 3.X + 3.H + 3.L + 4（核心）；`mode=full` → 加所有 `modules.*.enabled=true` 區塊。
 
 ---
 
@@ -113,11 +113,23 @@ python3 "$SCC" {daily_proposal_dir}/team_coaching_cards_{target_date}.md \
 
 若 session 有 `mcp__cc-memory-hi__*` 工具：
 1. 呼 `cc_task_stats`（**不帶任何 project 參數**——instance 已 forced `__personal__`）取得 today / overdue / open 統計。
-2. overdue > 0 或 today > 0 時，呼 `cc_task_list`（status=open，**同樣不帶 project 參數**）列出前 5 筆，整理成「📌 個人待辦」小節放在駕駛艙摘要最末。
+2. overdue > 0 或 today > 0 時，呼 `cc_task_list`（status=open，**同樣不帶 project 參數**）列出前 5 筆，整理成「📌 個人待辦」小節，放在「💡 待確認提案」之前（「🧪 教訓看板」接在其後）。
 3. 全部唯讀：本節**禁止**呼叫任何 cc_task_create / cc_task_update / cc_task_set_reminder / cc_task_snooze / cc_memory_save / cc_memory_delete；該 instance 本身也會拒絕（雙層保險）。
 4. 工具不存在（未註冊／離線）→ 跳過本節，不報錯、不影響其他模組。
 
 mode=quick 也跑本節（兩個 read call 很便宜，且個人待辦正是晨間最需要的）。
+
+---
+
+## Phase 3.L：教訓看板注入（Lesson Loop，唯讀）
+
+若 `~/.claude/scripts/lesson_board.py` 存在（tenant 自備，隨 user-scope harness 安裝；plugin 不打包）：
+1. 跑 `python3 ~/.claude/scripts/lesson_board.py --since <上一份 daily_proposal 的日期>`（找不到上一份就 `--days 1`）。
+2. 輸出原樣嵌入報告：腳本第一行 `## 🧪 教訓看板（Lesson Loop，唯讀）` 就是本節標題，報告不另加標題。內容為上半「等你審」（聚類草表、已提案、已核准未落地、應升 hook），下半「沙箱自動落地」（自上次 /hi 起的落地／到期／否決事件、容量、鎖狀態）。
+3. 全部唯讀：本節**禁止**跑 `lesson_autoland.py land/revert/expire` 或改登記簿；主管要否決沙箱條目，在本節末尾以純文字附 `python3 ~/.claude/scripts/lesson_autoland.py revert <id>` 供主管自己跑；**不得列進「💡 待確認提案」表**（該表「全部確認」會由 Claude 執行）。
+4. 腳本不存在 → 靜默跳過（tenant 可選）。exit≠0 → 跳過本節、不中斷其他模組，並在「🔧 執行紀錄」記一行（見錯誤降級表）。
+
+mode=quick 也跑本節（一個 read-only script，晨間正是看「昨晚 AI 自動改了什麼規則」的時點）。
 
 ---
 
@@ -149,6 +161,9 @@ mode=quick 也跑本節（兩個 read call 很便宜，且個人待辦正是晨�
 ## 📌 個人待辦（cc-memory-hi 有資料時才顯示）
 （cc_task_list 前 5 筆；overdue/today 皆 0 則省略整節）
 
+## 🧪 教訓看板（Lesson Loop，唯讀）
+（lesson_board.py 輸出原樣嵌入，標題由腳本第一行提供；腳本不存在則省略整節；revert 指令以純文字附在本節末）
+
 ## 💡 待確認提案
 | # | 操作 | 內容 |
 > 說「確認 1、2」或「全部確認」執行
@@ -168,6 +183,7 @@ mode=quick 也跑本節（兩個 read call 很便宜，且個人待辦正是晨�
 | team-daily-fetcher 附件下載 | `mail_download_attachment` ERROR | 只用 body 分析，跳過附件歸檔 | 「⚠️ 附件下載失敗，改用 body 分析」|
 | coaching directive 寄送（send-side COM） | Outlook Desktop 未啟動 | 跳過自動寄信，提示手動確認 | 「⚠️ Outlook COM 不可用，coaching 寄信需 Outlook Desktop 已啟動」|
 | intel/tender script | script error | 查既有 / 跳過該區 | 「⚠️ {模組}爬蟲不可用」|
+| lesson_board.py | exit≠0 | 跳過「🧪 教訓看板」 | 「⚠️ 教訓看板腳本錯誤」|
 | tracking_files 讀取 | Read error | 對齊度顯示「—」 | 「⚠️ tracking 檔讀取失敗」|
 
 ## 確認機制
