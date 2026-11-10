@@ -28,7 +28,9 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 | 參數 | 說明 | 預設 |
 |---|---|---|
 | `--apply` | 實際寫入；沒帶就是試跑 | 試跑 |
-| `--max-writes N` | 單次最多寫幾筆，超過的下次再補 | 20 |
+| `--max-writes N` | 單次最多新增＋完成幾筆，超過的下次再補（已存在的不算） | 20 |
+| `--only T-1,T-2` | 只建立這些 agenda 代碼 | 全部 |
+| `--exclude T-3` | 這些代碼這次不建立 | — |
 | `--priorities P0,P1` | 只收這些優先級 | P0,P1,P2 |
 | `--da-home PATH` | daily-agenda 資料夾 | 自動找 |
 | `--endpoint URL` | Work Hub MCP 端點 | `WORKHUB_INBOX_ENDPOINT` |
@@ -43,7 +45,7 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 | 已完成、不處理 | PM 對應待辦勾完成 |
 | 可能已完成 | 不寫入，只列筆數 |
 
-使用者在 PM 改過的內容不會被覆蓋；PM 勾完成不回寫 agenda。去重鍵是 `agenda:<代碼>:<建立時間>`（agenda 代碼是 4 碼隨機數字，單用可能重複）。
+使用者在 PM 改過的內容不會被覆蓋；PM 勾完成不回寫 agenda；在 PM 取消的待辦不會被重建（伺服器去重含已取消）。去重鍵是 `agenda:<代碼>:<建立時間>`（agenda 代碼是 4 碼隨機數字，單用可能重複）。
 
 ## 安全
 

@@ -115,6 +115,47 @@ test("--apply：單筆寫入失敗不中斷其餘，結束碼 3", async () => {
   assert.equal(report.results.failed, 1);
 });
 
+test("--apply：去重命中（已取消或已完成的舊待辦）不佔寫入上限", async () => {
+  const client = fakeClient();
+  const original = client.callTool;
+  client.callTool = async (name, args) => {
+    if (name === "pm_create_personal_task" && args.external_id.includes("T-1")) return { id: 1, deduplicated: true };
+    return original(name, args);
+  };
+  const home = makeHome([row("T-1", { priority: "P0" }), row("T-2"), row("T-3")]);
+  const { out } = await run(["sync", "--source", "daily-agenda", "--apply", "--max-writes", "1", "--json"], client, home);
+  const report = JSON.parse(out);
+  assert.equal(report.results.deduplicated, 1);
+  assert.equal(report.results.created, 1);
+  assert.equal(report.results.deferred, 1);
+});
+
+test("--only／--exclude：用代碼挑選或排除要建立的項目", async () => {
+  const home = makeHome([row("T-1001"), row("T-1002"), row("T-1003")]);
+  const only = JSON.parse((await run(["sync", "--source", "daily-agenda", "--only", "T-1001,T-1003", "--json"], fakeClient(), home)).out);
+  assert.deepEqual(only.create.map((c) => c.agendaId).sort(), ["T-1001", "T-1003"]);
+  const excl = JSON.parse((await run(["sync", "--source", "daily-agenda", "--exclude", "T-1002", "--json"], fakeClient(), home)).out);
+  assert.deepEqual(excl.create.map((c) => c.agendaId).sort(), ["T-1001", "T-1003"]);
+  assert.equal(excl.counts.excluded, 1);
+});
+
+test("parseArgs：--only 代碼格式不符報錯", () => {
+  assert.throws(() => parseArgs(["sync", "--only", "T-1;rm"]), /代碼/);
+});
+
+test("文字輸出：標題去除控制字元與換行並加引號，沒帶 --show-titles 不顯示對話名稱", async () => {
+  const state = { known_chats: [{ ref: "chat:ab12", name: "機密群組" }] };
+  const home = makeHome([row("T-1", { title: "第一行\n\u001b[31m紅字\u0007", src_ids: ["line:chat:ab12:m:1"] })]);
+  fs.writeFileSync(path.join(home, "gen", "1", "state.json"), JSON.stringify(state));
+  const hidden = (await run(["sync", "--source", "daily-agenda"], fakeClient(), home)).out;
+  assert.ok(!hidden.includes("機密群組"));
+  assert.ok(!hidden.includes("紅字"));
+  const shown = (await run(["sync", "--source", "daily-agenda", "--show-titles"], fakeClient(), home)).out;
+  assert.ok(shown.includes("機密群組"));
+  assert.ok(shown.includes("\"第一行 [31m紅字\""));
+  assert.ok(!/[\u0000-\u001f\u007f]/.test(shown.replace(/\n/g, "")));
+});
+
 test("讀不到 agenda 資料：結束碼 2，不呼叫 Work Hub", async () => {
   const client = fakeClient();
   const { code } = await run(["sync", "--source", "daily-agenda"], client, path.join(os.tmpdir(), "no-such-da-home"));

@@ -25,7 +25,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/inbox-sync.js" sync --source daily-agenda --
 
 `CLAUDE_PLUGIN_ROOT` 沒有值時，從本檔位置往上三層就是 plugin 根目錄。
 
-常用參數：`--priorities P0,P1`（只收這些優先級，預設 P0–P2）、`--da-home <路徑>`（daily-agenda 資料夾，預設自動找）、`--endpoint <URL>`、`--json`（機器可讀，不含標題）。
+常用參數：`--priorities P0,P1`（只收這些優先級，預設 P0–P2）、`--only T-1234,T-5678`／`--exclude T-1234`（依使用者指定的代碼挑選或排除；代碼是 agenda 產生的，可以放進參數）、`--da-home <路徑>`（daily-agenda 資料夾，預設自動找）、`--endpoint <URL>`、`--json`（機器可讀，不含標題）。
 
 結束碼：0 成功；1 參數或設定錯誤（含金鑰無效）；2 讀不到 daily-agenda 資料；3 有寫入失敗。
 

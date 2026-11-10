@@ -44,14 +44,21 @@ plugin 以「來源轉接器（source adapter）」為單位擴充；v1 只有 `
 4. 使用者在 Work Hub 改標題、日期、勾完成：v1 不回寫 agenda，也不被覆蓋。
 5. ledger 已不存在的項目：不動。
 
-去重：Work Hub 端以 `source`＋`external_id` 去重（同鍵重送回 `deduplicated:true`）；每筆寫入另帶 `idempotency_key = workhub-inbox:<動作>:<external_id 雜湊>`。
+去重：Work Hub 端以 `source`＋`external_id` 去重，**含已完成與已取消的待辦**（marketing-pm-system `src/server/workhub/service.js:1696`），同鍵重送回 `deduplicated:true`、不建新列；每筆寫入另帶 `idempotency_key = workhub-inbox:<動作>:<external_id 雜湊>`。
+
+已取消的待辦：`pm_list_personal_tasks` 的 `all`／`completed` 檢視都不回傳已取消列，所以規劃階段會把它算進「建立」，送出後由伺服器去重擋下（回 `deduplicated`）。因此使用者在 PM 取消一筆待辦，之後不會被重建；它會留在「建立」清單直到過了 7 天新鮮度。
+
+寫入上限（`--max-writes`）只算真的新增與完成；去重命中不算寫入、不佔名額。
 
 ## 5. 介面
 
 ```
 node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
-     [--priorities P0,P1] [--endpoint URL] [--da-home PATH] [--json]
+     [--priorities P0,P1] [--only T-1234,...] [--exclude T-1234,...]
+     [--endpoint URL] [--da-home PATH] [--show-titles] [--json]
 ```
+
+- `--only`／`--exclude`：以 agenda 代碼挑選或排除「建立」的項目（只接受 `T-` 加 4 碼數字），完成同步不受影響。被排除的項目下次執行仍會出現；要永久不收，到 PM 建立後取消即可。
 
 - 預設 dry-run，輸出動作摘要（建立／完成／可能已完成／略過筆數，及每筆的 agenda 代碼、優先級、期限）。
 - `--json`：機器可讀輸出，供排程與測試。

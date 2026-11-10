@@ -66,9 +66,14 @@ function idempotencyKey(action, externalId) {
   return `workhub-inbox:${action}:${createHash("sha256").update(externalId).digest("hex").slice(0, 32)}`;
 }
 
+/** 不可信文字：空白壓成單一空格、去掉控制字元（含 ANSI 跳脫的 ESC）、截長。 */
+function safeText(text, max) {
+  const flat = String(text ?? "").split(/\s+/).filter(Boolean).join(" ").replace(/\p{Cc}/gu, "");
+  return [...flat].slice(0, max).join("");
+}
+
 function cleanTitle(title) {
-  const flat = String(title).split(/\s+/).filter(Boolean).join(" ") || "（無標題）";
-  return [...flat].slice(0, TITLE_MAX).join("");
+  return safeText(title, TITLE_MAX) || "（無標題）";
 }
 
 /** 收件匣項目 → pm_create_personal_task 參數。v1 不設提醒。 */
@@ -76,7 +81,7 @@ function buildCreateArgs(item) {
   const args = {
     idempotency_key: idempotencyKey("create", item.externalId),
     title: cleanTitle(item.title),
-    description: `來源：${item.sourceName}｜daily-agenda 代碼 ${item.agendaId}\n由 AI 整理自外部訊息，內容僅供參考。`,
+    description: `來源：${safeText(item.sourceName, 120)}｜daily-agenda 代碼 ${item.agendaId}\n由 AI 整理自外部訊息，內容僅供參考。`,
     priority: item.priority,
     workflow_state: "active",
     source: item.source,
@@ -94,4 +99,4 @@ function buildCompleteArgs({ item, taskId }) {
   return { idempotency_key: idempotencyKey("complete", item.externalId), task_id: taskId };
 }
 
-module.exports = { buildCompleteArgs, buildCreateArgs, idempotencyKey, planSync };
+module.exports = { buildCompleteArgs, buildCreateArgs, idempotencyKey, planSync, safeText };

@@ -7,21 +7,22 @@
 // 環境變數：WORKHUB_INBOX_ENDPOINT、WORKHUB_INBOX_API_KEY（金鑰只從環境變數讀，不寫檔、不印出）。
 
 const { AgendaSourceError, loadAgenda, resolveDaHome, taipeiDate, toInboxItems } = require("./lib/agenda.js");
-const { buildCompleteArgs, buildCreateArgs, planSync } = require("./lib/plan.js");
+const { buildCompleteArgs, buildCreateArgs, planSync, safeText } = require("./lib/plan.js");
 const { WorkhubError, createClient } = require("./lib/workhub-client.js");
 
 const SOURCES = new Set(["daily-agenda"]);
 const VALID_PRIORITIES = new Set(["P0", "P1", "P2"]);
 const PM_SOURCES = ["line", "outlook"];
 const EXIT = { ok: 0, usage: 1, source: 2, partial: 3 };
+const AGENDA_ID = /^T-\d{4}$/;
 
 class UsageError extends Error {}
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (command !== "sync") throw new UsageError("用法：inbox-sync.js sync --source daily-agenda [--apply] ...");
-  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], endpoint: null, daHome: null, json: false, showTitles: false };
-  const takesValue = { "--source": "source", "--max-writes": "maxWrites", "--priorities": "priorities", "--endpoint": "endpoint", "--da-home": "daHome" };
+  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], endpoint: null, daHome: null, json: false, showTitles: false, only: null, exclude: [] };
+  const takesValue = { "--source": "source", "--max-writes": "maxWrites", "--priorities": "priorities", "--endpoint": "endpoint", "--da-home": "daHome", "--only": "only", "--exclude": "exclude" };
   const flags = { "--apply": "apply", "--json": "json", "--show-titles": "showTitles" };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
@@ -32,6 +33,11 @@ function parseArgs(argv) {
   if (!SOURCES.has(opts.source)) throw new UsageError(`不支援的來源：${opts.source}（目前只有 daily-agenda）`);
   if (typeof opts.priorities === "string") opts.priorities = opts.priorities.split(",").map((p) => p.trim()).filter(Boolean);
   if (!opts.priorities.length || opts.priorities.some((p) => !VALID_PRIORITIES.has(p))) throw new UsageError("優先級只接受 P0、P1、P2");
+  for (const key of ["only", "exclude"]) {
+    if (typeof opts[key] !== "string") continue;
+    opts[key] = opts[key].split(",").map((s) => s.trim()).filter(Boolean);
+    if (opts[key].some((id) => !AGENDA_ID.test(id))) throw new UsageError(`--${key} 只接受 agenda 代碼（例 T-1234，逗號分隔）`);
+  }
   opts.maxWrites = Number(opts.maxWrites);
   if (!Number.isInteger(opts.maxWrites) || opts.maxWrites < 0) throw new UsageError("--max-writes 要是 0 以上的整數");
   return opts;
@@ -49,8 +55,13 @@ async function applyPlan(client, plan, maxWrites) {
     ...plan.complete.map((c) => ({ kind: "complete", tool: "pm_complete_personal_task", args: buildCompleteArgs(c), item: c.item })),
     ...plan.create.map((item) => ({ kind: "create", tool: "pm_create_personal_task", args: buildCreateArgs(item), item })),
   ];
-  const results = { created: 0, deduplicated: 0, completed: 0, failed: 0, deferred: Math.max(0, queue.length - maxWrites), failures: [] };
-  for (const action of queue.slice(0, maxWrites)) {
+  // 上限只算真的新增或完成；去重命中（同鍵的舊待辦，含已取消）不算寫入，不佔名額。
+  const results = { created: 0, deduplicated: 0, completed: 0, failed: 0, deferred: 0, failures: [] };
+  for (const [index, action] of queue.entries()) {
+    if (results.created + results.completed >= maxWrites) {
+      results.deferred = queue.length - index;
+      break;
+    }
     try {
       const out = await client.callTool(action.tool, action.args);
       if (action.kind === "complete") results.completed += 1;
@@ -64,12 +75,20 @@ async function applyPlan(client, plan, maxWrites) {
   return results;
 }
 
+/** --only／--exclude 只篩「建立」；完成同步不受影響。 */
+function selectCreates(plan, opts) {
+  const only = opts.only ? new Set(opts.only) : null;
+  const exclude = new Set(opts.exclude);
+  const create = plan.create.filter((i) => (!only || only.has(i.agendaId)) && !exclude.has(i.agendaId));
+  return { ...plan, create, excluded: plan.create.length - create.length };
+}
+
 function summarize(opts, plan) {
   return {
     mode: opts.apply ? "apply" : "dry-run",
     source: opts.source,
     priorities: opts.priorities,
-    counts: { create: plan.create.length, complete: plan.complete.length, maybeDone: plan.maybeDone.length, ...plan.skipped },
+    counts: { create: plan.create.length, complete: plan.complete.length, maybeDone: plan.maybeDone.length, excluded: plan.excluded, ...plan.skipped },
     create: plan.create.map((i) => ({ agendaId: i.agendaId, priority: i.agendaPriority, due: i.due, source: i.sourceLabel })),
     complete: plan.complete.map((c) => ({ agendaId: c.item.agendaId, taskId: c.taskId })),
   };
@@ -80,13 +99,15 @@ function renderText(report, plan, opts) {
   const lines = [
     `workhub-inbox ${report.mode}（來源 ${report.source}，優先級 ${report.priorities.join("/")}）`,
     `預計建立 ${c.create}、勾完成 ${c.complete}；可能已完成 ${c.maybeDone}（不寫入，請到 agenda 確認）`,
-    `略過：PM 已有 ${c.exists}、優先級不符 ${c.priority}、過期或太舊 ${c.stale}`,
+    `略過：PM 已有 ${c.exists}、優先級不符 ${c.priority}、過期或太舊 ${c.stale}、指定排除 ${c.excluded}`,
   ];
   if (plan.create.length) {
-    lines.push("", "預計建立：");
+    lines.push("", opts.showTitles ? "預計建立（標題與對話名稱是外部內容，只供檢視）：" : "預計建立：");
     for (const i of plan.create) {
-      const title = opts.showTitles ? `  ${i.title}` : "";
-      lines.push(`- ${i.agendaId}  ${i.agendaPriority}  期限 ${i.due || "—"}  ${i.sourceName}${title}`);
+      // 標題與對話名稱是第三方內容：去控制字元、截長，標題用引號包住，避免被當成輸出的一部分或指令。
+      const where = opts.showTitles ? safeText(i.sourceName, 60) : i.sourceLabel;
+      const title = opts.showTitles ? `  ${JSON.stringify(safeText(i.title, 200))}` : "";
+      lines.push(`- ${i.agendaId}  ${i.agendaPriority}  期限 ${i.due || "—"}  ${where}${title}`);
     }
   }
   if (report.results) {
@@ -140,7 +161,7 @@ async function main(argv, deps = {}) {
     return err instanceof WorkhubError && [401, 403].includes(err.status) ? EXIT.usage : EXIT.partial;
   }
 
-  const plan = planSync({ items, existing, today: taipeiDate(deps.now || new Date()), priorities: opts.priorities });
+  const plan = selectCreates(planSync({ items, existing, today: taipeiDate(deps.now || new Date()), priorities: opts.priorities }), opts);
   const report = summarize(opts, plan);
   if (opts.apply) report.results = await applyPlan(client, plan, opts.maxWrites);
   print(opts.json ? JSON.stringify(report, null, 2) : renderText(report, plan, opts));
