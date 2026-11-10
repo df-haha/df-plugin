@@ -37,11 +37,12 @@ function fakeClient(existing = []) {
   };
 }
 
-function run(argv, client, home) {
+function run(argv, client, home, stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "wi-state-"))) {
   const out = [];
   const code = main(argv, {
     client,
     daHome: home,
+    stateDir,
     now: new Date("2026-11-10T03:00:00Z"),
     print: (s) => out.push(s),
   });
@@ -99,6 +100,83 @@ test("--apply：先完成再建立，完成的 task_id 對得上", async () => {
   assert.equal(w[0].name, "pm_complete_personal_task");
   assert.equal(w[0].args.task_id, 7);
   assert.equal(w[1].name, "pm_create_personal_task");
+});
+
+test("--apply：失敗的寫入也算進上限（結果不確定時可能已寫入）", async () => {
+  const client = fakeClient();
+  client.callTool = (orig => async (name, args) => {
+    if (name === "pm_create_personal_task") { client.calls.push({ name, args }); throw new Error("socket hang up"); }
+    return orig(name, args);
+  })(client.callTool);
+  const { code, out } = await run(["sync", "--source", "daily-agenda", "--apply", "--max-writes", "2", "--json"], client, makeHome([row("T-1"), row("T-2"), row("T-3")]));
+  assert.equal(code, 3);
+  assert.equal(writes(client).length, 2);
+  assert.equal(JSON.parse(out).results.deferred, 1);
+});
+
+test("--apply：寫入時遇到 401 立刻停止，結束碼 1", async () => {
+  const { WorkhubError } = require("../scripts/lib/workhub-client.js");
+  const client = fakeClient();
+  client.callTool = (orig => async (name, args) => {
+    if (name === "pm_create_personal_task") { client.calls.push({ name, args }); throw new WorkhubError("HTTP 401", { status: 401 }); }
+    return orig(name, args);
+  })(client.callTool);
+  const { code } = await run(["sync", "--source", "daily-agenda", "--apply", "--json"], client, makeHome([row("T-1"), row("T-2")]));
+  assert.equal(code, 1);
+  assert.equal(writes(client).length, 1);
+});
+
+test("對照檔：建立後記下 task id，清單查不到時仍能勾完成", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "wi-state-"));
+  await run(["sync", "--source", "daily-agenda", "--apply", "--json"], fakeClient(), makeHome([row("T-1")]), stateDir);
+  const map = JSON.parse(fs.readFileSync(path.join(stateDir, "agenda-map.json"), "utf8"));
+  const key = "agenda:T-1:2026-11-09T08:00:00+08:00";
+  assert.equal(map.tasks[key].taskId, 100);
+  // 隔天 agenda 標 done，但清單（超過 500 筆）查不到這筆
+  const client = fakeClient([]);
+  const { out } = await run(["sync", "--source", "daily-agenda", "--apply", "--json"], client, makeHome([row("T-1", { status: "done" })]), stateDir);
+  const done = writes(client).filter((c) => c.name === "pm_complete_personal_task");
+  assert.equal(done.length, 1);
+  assert.equal(done[0].args.task_id, 100);
+  assert.equal(JSON.parse(out).results.completed, 1);
+  const after = JSON.parse(fs.readFileSync(path.join(stateDir, "agenda-map.json"), "utf8"));
+  assert.equal(after.tasks[key].completed, true);
+});
+
+test("對照檔：已記為完成的不再送完成；清單顯示已取消的以清單為準", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "wi-state-"));
+  const keyA = "agenda:T-1:2026-11-09T08:00:00+08:00";
+  const keyB = "agenda:T-2:2026-11-09T08:00:00+08:00";
+  fs.writeFileSync(path.join(stateDir, "agenda-map.json"), JSON.stringify({ version: 1, tasks: { [keyA]: { taskId: 5, completed: true }, [keyB]: { taskId: 6, completed: false } } }));
+  const client = fakeClient([{ id: 6, source: "outlook", external_id: keyB, workflow_state: "cancelled", completed_at: null }]);
+  await run(["sync", "--source", "daily-agenda", "--apply", "--json"], client, makeHome([row("T-1", { status: "done" }), row("T-2", { status: "done" })]), stateDir);
+  assert.equal(writes(client).length, 0);
+});
+
+test("stateDirFor：不同端點用不同子資料夾，開發與正式環境的對照檔不會混用", () => {
+  const { stateDirFor } = require("../scripts/inbox-sync.js");
+  const a = stateDirFor("/base", "https://dev.example/mcp");
+  const b = stateDirFor("/base", "https://prod.example/mcp");
+  assert.notEqual(a, b);
+  assert.equal(a, stateDirFor("/base", "https://dev.example/mcp"));
+  assert.ok(a.startsWith(path.join("/base", "")));
+});
+
+test("dry-run 不寫對照檔", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "wi-state-"));
+  await run(["sync", "--source", "daily-agenda", "--json"], fakeClient(), makeHome([row("T-1")]), stateDir);
+  assert.equal(fs.existsSync(path.join(stateDir, "agenda-map.json")), false);
+});
+
+test("只認 agenda: 開頭的既有待辦（其他來源同 id 不會被當成自己的）", async () => {
+  const client = fakeClient([{ id: 9, source: "line", external_id: "T-1", workflow_state: "active", completed_at: null }]);
+  const { out } = await run(["sync", "--source", "daily-agenda", "--json"], client, makeHome([row("T-1")]));
+  assert.equal(JSON.parse(out).counts.create, 1);
+});
+
+test("摘要：有延後筆數時提醒可能過期", async () => {
+  const { out } = await run(["sync", "--source", "daily-agenda", "--apply", "--max-writes", "1"], fakeClient(), makeHome([row("T-1"), row("T-2")]));
+  assert.match(out, /超過上限.*7 天/);
 });
 
 test("--apply：單筆寫入失敗不中斷其餘，結束碼 3", async () => {

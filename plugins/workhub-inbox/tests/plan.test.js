@@ -151,9 +151,9 @@ test("buildCreateArgs：無期限不帶 due_at，標題壓空白並截到 300 �
   assert.equal([...args.title].length, 300);
 });
 
-test("buildCreateArgs：標題去掉控制字元", () => {
-  const args = buildCreateArgs(item({ title: "a\u0000b\u001b[2Jc\u0085d" }));
-  assert.equal(args.title, "ab[2Jcd");
+test("buildCreateArgs：標題去掉控制字元與格式控制字元（右至左覆寫等）", () => {
+  const args = buildCreateArgs(item({ title: "a\u0000b\u001b[2Jc\u0085d‮e​f" }));
+  assert.equal(args.title, "ab[2Jcdef");
 });
 
 test("idempotencyKey：同動作同鍵穩定，不同動作不同", () => {

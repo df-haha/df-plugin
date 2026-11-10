@@ -28,7 +28,7 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 | 參數 | 說明 | 預設 |
 |---|---|---|
 | `--apply` | 實際寫入；沒帶就是試跑 | 試跑 |
-| `--max-writes N` | 單次最多新增＋完成幾筆，超過的下次再補（已存在的不算） | 20 |
+| `--max-writes N` | 單次最多送出幾筆寫入（失敗也算，已存在的不算），超過的下次再補；一直補不完時超過 7 天的會被略過 | 20 |
 | `--only T-1,T-2` | 只建立這些 agenda 代碼 | 全部 |
 | `--exclude T-3` | 這些代碼這次不建立 | — |
 | `--priorities P0,P1` | 只收這些優先級 | P0,P1,P2 |
@@ -46,6 +46,10 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 | 可能已完成 | 不寫入，只列筆數 |
 
 使用者在 PM 改過的內容不會被覆蓋；PM 勾完成不回寫 agenda；在 PM 取消的待辦不會被重建（伺服器去重含已取消）。去重鍵是 `agenda:<代碼>:<建立時間>`（agenda 代碼是 4 碼隨機數字，單用可能重複）。
+
+## 本機對照檔
+
+`--apply` 會在 `~/.workhub-inbox/endpoint-<端點雜湊>/agenda-map.json`（可用 `WORKHUB_INBOX_STATE_DIR` 改位置）記下「去重鍵 → PM 待辦 ID」。Work Hub 的清單每次最多回 500 筆，靠這份對照檔，舊待辦掉出清單後 agenda 標完成時仍能勾完成。開發與正式環境各一份，不會混用。刪掉它不會造成重複建立（伺服器會去重），只是較舊的待辦可能漏勾完成。
 
 ## 安全
 

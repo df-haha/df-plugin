@@ -68,7 +68,8 @@ function idempotencyKey(action, externalId) {
 
 /** 不可信文字：空白壓成單一空格、去掉控制字元（含 ANSI 跳脫的 ESC）、截長。 */
 function safeText(text, max) {
-  const flat = String(text ?? "").split(/\s+/).filter(Boolean).join(" ").replace(/\p{Cc}/gu, "");
+  // \p{Cc}：控制字元（含 ESC）；\p{Cf}：格式控制字元（右至左覆寫、零寬字元等，可偽造顯示順序）
+  const flat = String(text ?? "").split(/\s+/).filter(Boolean).join(" ").replace(/[\p{Cc}\p{Cf}]/gu, "");
   return [...flat].slice(0, max).join("");
 }
 

@@ -76,6 +76,18 @@ test("callTool：503 與網路錯誤會重試，最後成功", async () => {
   assert.equal(calls.length, 3);
 });
 
+test("callTool：讀回應內容時斷線也會重試（有 idempotency_key，重送安全）", async () => {
+  const calls = [];
+  const broken = { status: 200, ok: true, text: async () => { throw new Error("socket hang up"); } };
+  const client = createClient({
+    endpoint: "https://pm.example/mcp", apiKey: "k",
+    fetchImpl: fakeFetch([broken, response(200, { result: { structuredContent: { ok: 2 } } })], calls),
+    sleep: noSleep,
+  });
+  assert.deepEqual(await client.callTool("x", {}), { ok: 2 });
+  assert.equal(calls.length, 2);
+});
+
 test("callTool：401 不重試，錯誤訊息不含金鑰", async () => {
   const calls = [];
   const client = createClient({

@@ -52,7 +52,13 @@ function createClient({ endpoint, apiKey, fetchImpl = fetch, sleep = (ms) => new
     if (!res.ok) {
       throw new WorkhubError(`${tool} HTTP ${res.status}`, { status: res.status, tool, retryable: RETRYABLE_STATUS.has(res.status) });
     }
-    const raw = await res.text();
+    let raw;
+    try {
+      raw = await res.text();
+    } catch (err) {
+      // 伺服器可能已處理完；寫入都帶 idempotency_key，重送安全
+      throw new WorkhubError(`${tool} 讀取回應中斷：${err.message}`, { tool, retryable: true });
+    }
     const dataLine = raw.split(/\r?\n/).find((l) => l.startsWith("data:"));
     let body;
     try {

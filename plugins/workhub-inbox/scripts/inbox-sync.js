@@ -6,8 +6,12 @@
 //        [--priorities P0,P1] [--endpoint URL] [--da-home PATH] [--show-titles] [--json]
 // 環境變數：WORKHUB_INBOX_ENDPOINT、WORKHUB_INBOX_API_KEY（金鑰只從環境變數讀，不寫檔、不印出）。
 
+const { createHash } = require("node:crypto");
+const path = require("node:path");
+
 const { AgendaSourceError, loadAgenda, resolveDaHome, taipeiDate, toInboxItems } = require("./lib/agenda.js");
 const { buildCompleteArgs, buildCreateArgs, planSync, safeText } = require("./lib/plan.js");
+const { StateError, loadMap, mergeExisting, resolveStateDir, saveMap } = require("./lib/state.js");
 const { WorkhubError, createClient } = require("./lib/workhub-client.js");
 
 const SOURCES = new Set(["daily-agenda"]);
@@ -50,26 +54,55 @@ async function fetchExisting(client) {
   return [...byId.values()].filter((t) => String(t.external_id || "").startsWith("agenda:"));
 }
 
-async function applyPlan(client, plan, maxWrites) {
+const AUTH_STATUS = new Set([401, 403]);
+
+/** 對照檔依端點分資料夾：開發與正式環境的待辦 ID 不同，混用會勾錯待辦。 */
+function stateDirFor(base, endpoint) {
+  const digest = createHash("sha256").update(String(endpoint || "")).digest("hex").slice(0, 12);
+  return path.join(base, `endpoint-${digest}`);
+}
+
+/**
+ * 依序寫入，並把結果記進對照檔 *map*（原地更新，呼叫端負責存檔）。
+ * 上限計算：每個送出的寫入都算一筆（失敗也算，因為結果不確定時伺服器可能已寫入）；
+ * 只有確認是去重命中（同鍵的舊待辦，含已取消）才不算。遇到 401／403 立即停止。
+ */
+async function applyPlan(client, plan, maxWrites, map) {
   const queue = [
-    ...plan.complete.map((c) => ({ kind: "complete", tool: "pm_complete_personal_task", args: buildCompleteArgs(c), item: c.item })),
+    ...plan.complete.map((c) => ({ kind: "complete", tool: "pm_complete_personal_task", args: buildCompleteArgs(c), item: c.item, taskId: c.taskId })),
     ...plan.create.map((item) => ({ kind: "create", tool: "pm_create_personal_task", args: buildCreateArgs(item), item })),
   ];
-  // 上限只算真的新增或完成；去重命中（同鍵的舊待辦，含已取消）不算寫入，不佔名額。
-  const results = { created: 0, deduplicated: 0, completed: 0, failed: 0, deferred: 0, failures: [] };
+  const results = { created: 0, deduplicated: 0, completed: 0, failed: 0, deferred: 0, aborted: false, failures: [] };
+  let counted = 0;
   for (const [index, action] of queue.entries()) {
-    if (results.created + results.completed >= maxWrites) {
+    if (counted >= maxWrites) {
       results.deferred = queue.length - index;
       break;
     }
+    const key = action.item.externalId;
     try {
       const out = await client.callTool(action.tool, action.args);
-      if (action.kind === "complete") results.completed += 1;
-      else if (out && out.deduplicated) results.deduplicated += 1;
-      else results.created += 1;
+      if (action.kind === "complete") {
+        results.completed += 1;
+        counted += 1;
+        map.tasks[key] = { taskId: action.taskId, completed: true };
+      } else {
+        if (out && out.deduplicated) results.deduplicated += 1;
+        else {
+          results.created += 1;
+          counted += 1;
+        }
+        if (out && out.id) map.tasks[key] = { taskId: Number(out.id), completed: false };
+      }
     } catch (err) {
+      counted += 1;
       results.failed += 1;
       results.failures.push({ agendaId: action.item.agendaId, action: action.kind, error: String(err.message).slice(0, 200) });
+      if (err instanceof WorkhubError && AUTH_STATUS.has(err.status)) {
+        results.aborted = true;
+        results.deferred = queue.length - index - 1;
+        break;
+      }
     }
   }
   return results;
@@ -114,6 +147,8 @@ function renderText(report, plan, opts) {
     const r = report.results;
     lines.push("", `寫入結果：建立 ${r.created}、已存在 ${r.deduplicated}、勾完成 ${r.completed}、失敗 ${r.failed}、超過上限未執行 ${r.deferred}`);
     for (const f of r.failures) lines.push(`- 失敗 ${f.agendaId}（${f.action}）：${f.error}`);
+    if (r.aborted) lines.push("⚠️ 金鑰無效或沒有寫入權限，已停止，其餘未執行。");
+    if (r.deferred > 0) lines.push(`⚠️ 有 ${r.deferred} 筆超過上限，下次執行再補；若一直補不完，出現超過 7 天的會被略過，必要時調高 --max-writes。`);
   }
   return lines.join("\n");
 }
@@ -145,26 +180,49 @@ async function main(argv, deps = {}) {
     return EXIT.source;
   }
 
+  const endpoint = opts.endpoint || env.WORKHUB_INBOX_ENDPOINT;
   let client;
   try {
-    client = deps.client || createClient({ endpoint: opts.endpoint || env.WORKHUB_INBOX_ENDPOINT, apiKey: env.WORKHUB_INBOX_API_KEY });
+    client = deps.client || createClient({ endpoint, apiKey: env.WORKHUB_INBOX_API_KEY });
   } catch (err) {
     print(err.message);
     return EXIT.usage;
   }
 
-  let existing;
+  const stateDir = deps.stateDir || stateDirFor(resolveStateDir({ env }), endpoint);
+  let map;
   try {
-    existing = await fetchExisting(client);
+    map = loadMap(stateDir);
   } catch (err) {
-    print(`讀取 Work Hub 現況失敗：${err.message}`);
-    return err instanceof WorkhubError && [401, 403].includes(err.status) ? EXIT.usage : EXIT.partial;
+    if (!(err instanceof StateError)) throw err;
+    print(err.message);
+    return EXIT.source;
   }
 
+  let listed;
+  try {
+    listed = await fetchExisting(client);
+  } catch (err) {
+    print(`讀取 Work Hub 現況失敗：${err.message}`);
+    return err instanceof WorkhubError && AUTH_STATUS.has(err.status) ? EXIT.usage : EXIT.partial;
+  }
+
+  const existing = mergeExisting(listed, map);
   const plan = selectCreates(planSync({ items, existing, today: taipeiDate(deps.now || new Date()), priorities: opts.priorities }), opts);
   const report = summarize(opts, plan);
-  if (opts.apply) report.results = await applyPlan(client, plan, opts.maxWrites);
+  if (opts.apply) {
+    // 清單看得到的先記進對照檔，日後掉出 500 筆範圍仍查得到 task_id
+    for (const task of listed) {
+      if (!map.tasks[task.external_id]) map.tasks[task.external_id] = { taskId: Number(task.id), completed: task.workflow_state === "completed" };
+    }
+    try {
+      report.results = await applyPlan(client, plan, opts.maxWrites, map);
+    } finally {
+      saveMap(stateDir, map);
+    }
+  }
   print(opts.json ? JSON.stringify(report, null, 2) : renderText(report, plan, opts));
+  if (report.results && report.results.aborted) return EXIT.usage;
   return report.results && report.results.failed > 0 ? EXIT.partial : EXIT.ok;
 }
 
@@ -175,4 +233,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, parseArgs };
+module.exports = { main, parseArgs, stateDirFor };
