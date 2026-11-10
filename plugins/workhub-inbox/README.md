@@ -49,7 +49,7 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 
 ## 本機對照檔
 
-`--apply` 會在 `~/.workhub-inbox/endpoint-<端點雜湊>/agenda-map.json`（可用 `WORKHUB_INBOX_STATE_DIR` 改位置）記下「去重鍵 → PM 待辦 ID」。Work Hub 的清單每次最多回 500 筆，靠這份對照檔，舊待辦掉出清單後 agenda 標完成時仍能勾完成。開發與正式環境各一份，不會混用。刪掉它不會造成重複建立（伺服器會去重），只是較舊的待辦可能漏勾完成。
+`--apply` 會在 `~/.workhub-inbox/scope-<雜湊>/agenda-map.json`（可用 `WORKHUB_INBOX_STATE_DIR` 改位置）記下「去重鍵 → PM 待辦 ID」。Work Hub 的清單每次最多回 500 筆，靠這份對照檔，舊待辦掉出清單後 agenda 標完成時仍能勾完成。雜湊由端點＋金鑰算出（不存金鑰本身），不同環境、不同使用者各一份，不會混用；換金鑰會從空表重新開始。刪掉它不會造成重複建立（伺服器會去重），只是較舊的待辦可能漏勾完成。
 
 ## 安全
 

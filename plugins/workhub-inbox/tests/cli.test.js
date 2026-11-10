@@ -121,9 +121,34 @@ test("--apply：寫入時遇到 401 立刻停止，結束碼 1", async () => {
     if (name === "pm_create_personal_task") { client.calls.push({ name, args }); throw new WorkhubError("HTTP 401", { status: 401 }); }
     return orig(name, args);
   })(client.callTool);
-  const { code } = await run(["sync", "--source", "daily-agenda", "--apply", "--json"], client, makeHome([row("T-1"), row("T-2")]));
+  const { code, out } = await run(["sync", "--source", "daily-agenda", "--apply", "--json"], client, makeHome([row("T-1"), row("T-2")]));
   assert.equal(code, 1);
   assert.equal(writes(client).length, 1);
+  const r = JSON.parse(out).results;
+  assert.equal(r.notAttempted, 1);
+  assert.equal(r.deferred, 0);
+});
+
+test("401 中止的文字摘要不誤報「超過上限」", async () => {
+  const { WorkhubError } = require("../scripts/lib/workhub-client.js");
+  const client = fakeClient();
+  client.callTool = (orig => async (name, args) => {
+    if (name === "pm_create_personal_task") throw new WorkhubError("HTTP 401", { status: 401 });
+    return orig(name, args);
+  })(client.callTool);
+  const { out } = await run(["sync", "--source", "daily-agenda", "--apply"], client, makeHome([row("T-1"), row("T-2"), row("T-3")]));
+  assert.match(out, /中止後未執行 2/);
+  assert.doesNotMatch(out, /7 天/);
+});
+
+test("對照檔：清單看得到的狀態覆寫舊紀錄", async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "wi-state-"));
+  const key = "agenda:T-1:2026-11-09T08:00:00+08:00";
+  fs.writeFileSync(path.join(stateDir, "agenda-map.json"), JSON.stringify({ version: 1, tasks: { [key]: { taskId: 5, completed: false } } }));
+  const client = fakeClient([{ id: 5, source: "outlook", external_id: key, workflow_state: "completed", completed_at: "2026-11-10T00:00:00Z" }]);
+  await run(["sync", "--source", "daily-agenda", "--apply", "--json"], client, makeHome([row("T-1")]), stateDir);
+  const map = JSON.parse(fs.readFileSync(path.join(stateDir, "agenda-map.json"), "utf8"));
+  assert.equal(map.tasks[key].completed, true);
 });
 
 test("對照檔：建立後記下 task id，清單查不到時仍能勾完成", async () => {
@@ -153,13 +178,14 @@ test("對照檔：已記為完成的不再送完成；清單顯示已取消的�
   assert.equal(writes(client).length, 0);
 });
 
-test("stateDirFor：不同端點用不同子資料夾，開發與正式環境的對照檔不會混用", () => {
+test("stateDirFor：端點或金鑰不同就用不同子資料夾，路徑不含金鑰原文", () => {
   const { stateDirFor } = require("../scripts/inbox-sync.js");
-  const a = stateDirFor("/base", "https://dev.example/mcp");
-  const b = stateDirFor("/base", "https://prod.example/mcp");
-  assert.notEqual(a, b);
-  assert.equal(a, stateDirFor("/base", "https://dev.example/mcp"));
+  const a = stateDirFor("/base", "https://dev.example/mcp", "key-A");
+  assert.notEqual(a, stateDirFor("/base", "https://prod.example/mcp", "key-A"));
+  assert.notEqual(a, stateDirFor("/base", "https://dev.example/mcp", "key-B"));
+  assert.equal(a, stateDirFor("/base", "https://dev.example/mcp", "key-A"));
   assert.ok(a.startsWith(path.join("/base", "")));
+  assert.ok(!a.includes("key-A"));
 });
 
 test("dry-run 不寫對照檔", async () => {

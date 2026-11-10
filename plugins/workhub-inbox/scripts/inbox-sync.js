@@ -56,10 +56,13 @@ async function fetchExisting(client) {
 
 const AUTH_STATUS = new Set([401, 403]);
 
-/** 對照檔依端點分資料夾：開發與正式環境的待辦 ID 不同，混用會勾錯待辦。 */
-function stateDirFor(base, endpoint) {
-  const digest = createHash("sha256").update(String(endpoint || "")).digest("hex").slice(0, 12);
-  return path.join(base, `endpoint-${digest}`);
+/**
+ * 對照檔依「端點＋金鑰」分資料夾：不同環境或不同使用者的待辦 ID 不能混用。
+ * 只取不可逆雜湊的前 16 碼當資料夾名，不存金鑰本身。換金鑰會開新的空表（伺服器去重仍防重複建立）。
+ */
+function stateDirFor(base, endpoint, apiKey) {
+  const digest = createHash("sha256").update(`workhub-inbox\n${endpoint || ""}\n${apiKey || ""}`).digest("hex").slice(0, 16);
+  return path.join(base, `scope-${digest}`);
 }
 
 /**
@@ -72,7 +75,8 @@ async function applyPlan(client, plan, maxWrites, map) {
     ...plan.complete.map((c) => ({ kind: "complete", tool: "pm_complete_personal_task", args: buildCompleteArgs(c), item: c.item, taskId: c.taskId })),
     ...plan.create.map((item) => ({ kind: "create", tool: "pm_create_personal_task", args: buildCreateArgs(item), item })),
   ];
-  const results = { created: 0, deduplicated: 0, completed: 0, failed: 0, deferred: 0, aborted: false, failures: [] };
+  // deferred＝因上限延到下次；notAttempted＝因金鑰問題中止而沒送出
+  const results = { created: 0, deduplicated: 0, completed: 0, failed: 0, deferred: 0, notAttempted: 0, aborted: false, failures: [] };
   let counted = 0;
   for (const [index, action] of queue.entries()) {
     if (counted >= maxWrites) {
@@ -100,7 +104,7 @@ async function applyPlan(client, plan, maxWrites, map) {
       results.failures.push({ agendaId: action.item.agendaId, action: action.kind, error: String(err.message).slice(0, 200) });
       if (err instanceof WorkhubError && AUTH_STATUS.has(err.status)) {
         results.aborted = true;
-        results.deferred = queue.length - index - 1;
+        results.notAttempted = queue.length - index - 1;
         break;
       }
     }
@@ -147,7 +151,7 @@ function renderText(report, plan, opts) {
     const r = report.results;
     lines.push("", `寫入結果：建立 ${r.created}、已存在 ${r.deduplicated}、勾完成 ${r.completed}、失敗 ${r.failed}、超過上限未執行 ${r.deferred}`);
     for (const f of r.failures) lines.push(`- 失敗 ${f.agendaId}（${f.action}）：${f.error}`);
-    if (r.aborted) lines.push("⚠️ 金鑰無效或沒有寫入權限，已停止，其餘未執行。");
+    if (r.aborted) lines.push(`⚠️ 金鑰無效或沒有寫入權限，已停止；中止後未執行 ${r.notAttempted} 筆。`);
     if (r.deferred > 0) lines.push(`⚠️ 有 ${r.deferred} 筆超過上限，下次執行再補；若一直補不完，出現超過 7 天的會被略過，必要時調高 --max-writes。`);
   }
   return lines.join("\n");
@@ -189,7 +193,7 @@ async function main(argv, deps = {}) {
     return EXIT.usage;
   }
 
-  const stateDir = deps.stateDir || stateDirFor(resolveStateDir({ env }), endpoint);
+  const stateDir = deps.stateDir || stateDirFor(resolveStateDir({ env }), endpoint, env.WORKHUB_INBOX_API_KEY);
   let map;
   try {
     map = loadMap(stateDir);
@@ -211,9 +215,9 @@ async function main(argv, deps = {}) {
   const plan = selectCreates(planSync({ items, existing, today: taipeiDate(deps.now || new Date()), priorities: opts.priorities }), opts);
   const report = summarize(opts, plan);
   if (opts.apply) {
-    // 清單看得到的先記進對照檔，日後掉出 500 筆範圍仍查得到 task_id
+    // 清單看得到的一律覆寫對照檔（清單為準），日後掉出 500 筆範圍仍查得到 task_id 與正確狀態
     for (const task of listed) {
-      if (!map.tasks[task.external_id]) map.tasks[task.external_id] = { taskId: Number(task.id), completed: task.workflow_state === "completed" };
+      map.tasks[task.external_id] = { taskId: Number(task.id), completed: task.workflow_state === "completed" };
     }
     try {
       report.results = await applyPlan(client, plan, opts.maxWrites, map);
