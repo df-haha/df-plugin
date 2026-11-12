@@ -7,7 +7,7 @@
 
 - Node.js 22 以上（用內建 `fetch`，不需安裝套件；daily-agenda 已要求 Node.js 24，裝好 daily-agenda 就符合）
 - 已安裝並跑過 daily-agenda（要有 `%USERPROFILE%\.daily-agenda\CURRENT`）。資料夾會自動找：Windows 用 `%USERPROFILE%\.daily-agenda`，有設 `DAILY_AGENDA_HOME` 就用它，WSL 上會換算到 Windows 的使用者資料夾
-- Work Hub 個人 API 金鑰（PM 系統「MCP 連線」頁產生）
+- Work Hub 個人 API 金鑰：用公司微軟帳號登入 PM 系統，在左側「AI 串接」頁產生（完整金鑰只顯示一次）
 
 ## 安裝
 
