@@ -269,10 +269,10 @@ test("本機假伺服器正常路徑：建立成功、結束碼 0（確認驗證
   }
 });
 
-test("合法端點網址不算秘密：伺服器錯誤訊息含端點網址時，失敗原因照常顯示", async () => {
+test("合法端點網址不算秘密：伺服器錯誤含端點網址時，失敗代碼照常顯示", async () => {
   let endpointUrl = "";
   const { server, url } = await fakeServer(workhubLike({
-    pm_create_personal_task: (rpc) => ({ jsonrpc: "2.0", id: rpc.id, result: { isError: true, content: [{ type: "text", text: `RATE_LIMITED: 請稍後再呼叫 ${endpointUrl}` }] } }),
+    pm_create_personal_task: (rpc) => ({ jsonrpc: "2.0", id: rpc.id, result: { isError: true, content: [{ type: "text", text: `請稍後再呼叫 ${endpointUrl}` }], structuredContent: { success: false, error: { code: "RATE_LIMITED", message: `請稍後再呼叫 ${endpointUrl}` } } } }),
   }));
   endpointUrl = url;
   try {
@@ -330,7 +330,7 @@ test("勾完成回應缺少 task → 算失敗、結束碼 3", async () => {
 
 // ── F：伺服器錯誤文字清控制字元 ─────────────────────────
 
-test("伺服器錯誤文字（isError 與 JSON-RPC error）去除控制字元後才輸出", async () => {
+test("伺服器錯誤文字（isError 與 JSON-RPC error）不輸出，失敗行沒有控制字元", async () => {
   const nasty = "壞\u001b[31m紅\u0007\r\n第二行‮反轉";
   const { server, url } = await fakeServer(workhubLike({
     pm_create_personal_task: (rpc) => (rpc.params.arguments.external_id.includes("T-1")
@@ -343,7 +343,8 @@ test("伺服器錯誤文字（isError 與 JSON-RPC error）去除控制字元後
     assert.equal(failLines.length, 2);
     for (const line of failLines) {
       assert.ok(!CONTROL.test(line), JSON.stringify(line));
-      assert.match(line, /紅/);
+      assert.ok(!line.includes("紅") && !line.includes("第二行"), line);
+      assert.match(line, /SERVER_ERROR_TEXT_HIDDEN|JSON-RPC -32000/);
     }
   } finally {
     server.close();

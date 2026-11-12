@@ -49,10 +49,10 @@ test("callTool：isError 轉成 WorkhubError 且不重試", async () => {
   const calls = [];
   const client = createClient({
     endpoint: "https://pm.example/mcp", apiKey: "k",
-    fetchImpl: fakeFetch([response(200, { result: { isError: true, content: [{ type: "text", text: "VALIDATION_ERROR: title" }] } })], calls),
+    fetchImpl: fakeFetch([response(200, { result: { isError: true, content: [{ type: "text", text: "標題太長" }], structuredContent: { success: false, error: { code: "VALIDATION_ERROR", message: "標題太長" } } } })], calls),
     sleep: noSleep,
   });
-  await assert.rejects(client.callTool("pm_create_personal_task", {}), (err) => err instanceof WorkhubError && /VALIDATION_ERROR/.test(err.message));
+  await assert.rejects(client.callTool("pm_create_personal_task", {}), (err) => err instanceof WorkhubError && /VALIDATION_ERROR/.test(err.message) && !err.message.includes("標題太長"));
   assert.equal(calls.length, 1);
 });
 

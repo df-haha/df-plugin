@@ -66,4 +66,4 @@ macOS／Linux 用 `export WORKHUB_INBOX_ENDPOINT=...`、`export WORKHUB_INBOX_AP
 
 ## 回報格式
 
-轉述腳本摘要的筆數（建立、勾完成、可能已完成、略過、失敗、超過上限未執行）。失敗時附腳本給的 agenda 代碼與錯誤原因，不猜原因。
+轉述腳本摘要的筆數（建立、勾完成、可能已完成、略過、失敗、超過上限未執行）。失敗時附腳本給的 agenda 代碼與錯誤代碼（例如 `VALIDATION_ERROR`、`HTTP 503`；`SERVER_ERROR_TEXT_HIDDEN` 表示伺服器沒給可用的代碼），不猜原因；要看詳細原因請使用者到 PM 系統查。

@@ -24,8 +24,7 @@ const EXIT = { ok: 0, usage: 1, source: 2, partial: 3 };
 const AGENDA_ID = /^T-\d{4}$/;
 const SECRET_HIDDEN = "（訊息含金鑰或端點設定值，已整段隱藏；請確認 WORKHUB_INBOX_ENDPOINT 與 WORKHUB_INBOX_API_KEY 沒有填反）";
 const BAD_RESPONSE = "回應格式不符，可能不是 Work Hub 的 MCP 端點";
-const ITEM_TEXT_HIDDEN = "（錯誤訊息帶有待辦標題或來源名稱，已隱藏；請到 PM 系統或試跑清單檔核對這筆）";
-const MIN_NEEDLE = 4;
+const UNEXPECTED_ERROR = "UNEXPECTED_ERROR";
 
 class UsageError extends Error {}
 
@@ -73,15 +72,11 @@ function expectShape(ok, tool) {
 }
 
 /**
- * 錯誤訊息是否帶出這筆待辦的第三方內容（標題、標題開頭、對話名稱）。伺服器可能在驗證錯誤裡回印送出的欄位。
- * 比對前兩邊都用 safeText 正規化（空白收成一格、去控制字元），太短的片段不比，避免誤殺。
+ * 要輸出的錯誤文字：只用 WorkhubError 的訊息（客戶端只用代碼組成，不含伺服器自由文字）；
+ * 其他例外的訊息來路不明，一律換成固定字串。
  */
-function mentionsItem(text, item) {
-  const flat = safeText(text, 100_000);
-  const title = safeText(item.title, 100_000);
-  const needles = [title, [...title].slice(0, 20).join("")];
-  if (item.sourceName && item.sourceName !== item.sourceLabel) needles.push(safeText(item.sourceName, 100_000));
-  return needles.some((n) => [...n].length >= MIN_NEEDLE && flat.includes(n));
+function errorText(err, scrub) {
+  return err instanceof WorkhubError ? safeText(scrub(err.message), 200) : UNEXPECTED_ERROR;
 }
 
 const hasId = (value) => (typeof value === "number" || typeof value === "string") && Number.isInteger(Number(value)) && Number(value) > 0;
@@ -154,8 +149,7 @@ async function applyPlan(client, plan, maxWrites, map, scrub = String) {
     } catch (err) {
       counted += 1;
       results.failed += 1;
-      const message = mentionsItem(err.message, action.item) ? ITEM_TEXT_HIDDEN : scrub(err.message);
-      results.failures.push({ agendaId: action.item.agendaId, action: action.kind, error: safeText(message, 200) });
+      results.failures.push({ agendaId: action.item.agendaId, action: action.kind, error: errorText(err, scrub) });
       if (err instanceof WorkhubError && AUTH_STATUS.has(err.status)) {
         results.aborted = true;
         results.notAttempted = queue.length - index - 1;
@@ -269,7 +263,7 @@ async function main(argv, deps = {}) {
   try {
     listed = await fetchExisting(client);
   } catch (err) {
-    print(`讀取 Work Hub 現況失敗：${safeText(scrub(err.message), 300)}`);
+    print(`讀取 Work Hub 現況失敗：${errorText(err, scrub)}`);
     return err instanceof WorkhubError && AUTH_STATUS.has(err.status) ? EXIT.usage : EXIT.partial;
   }
 
