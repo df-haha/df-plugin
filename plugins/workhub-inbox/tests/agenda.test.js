@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { loadAgenda, toInboxItems, taipeiDate } = require("../scripts/lib/agenda.js");
+const { loadAgenda, resolveDaHome, toInboxItems, taipeiDate } = require("../scripts/lib/agenda.js");
 
 function row(overrides = {}) {
   return {
@@ -75,4 +75,18 @@ test("loadAgenda：讀 CURRENT generation 的 ledger 與 state", () => {
 test("loadAgenda：沒有 CURRENT 時丟出可辨識的錯誤", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "da-home-"));
   assert.throws(() => loadAgenda(home), { name: "AgendaSourceError" });
+});
+
+test("resolveDaHome：原生 Windows 用 %USERPROFILE%\\.daily-agenda（與 daily-agenda 相同位置）", () => {
+  const home = resolveDaHome({ env: { USERPROFILE: "C:\\Users\\amy" }, platform: "win32" });
+  assert.equal(home, "C:\\Users\\amy\\.daily-agenda");
+});
+
+test("resolveDaHome：認得 daily-agenda 自己的 DAILY_AGENDA_HOME", () => {
+  assert.equal(resolveDaHome({ env: { DAILY_AGENDA_HOME: "D:\\agenda" }, platform: "win32" }), "D:\\agenda");
+  assert.equal(resolveDaHome({ env: { DAILY_AGENDA_HOME: "/data/agenda" }, platform: "linux" }), "/data/agenda");
+});
+
+test("resolveDaHome：--da-home 優先於環境變數", () => {
+  assert.equal(resolveDaHome({ explicit: "/x", env: { DAILY_AGENDA_HOME: "/y", DA_HOME: "/z" }, platform: "win32" }), "/x");
 });

@@ -30,11 +30,12 @@ function taipeiDate(value) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
 
-/** 找 daily-agenda home：明送 > 環境變數 > Windows %USERPROFILE% > WSL 換算 > 家目錄。 */
+/** 找 daily-agenda home：明送 > DA_HOME > DAILY_AGENDA_HOME（daily-agenda 自己認的變數）> Windows %USERPROFILE% > WSL 換算 > 家目錄。 */
 function resolveDaHome({ explicit, env = process.env, platform = process.platform, exec = execFileSync } = {}) {
   if (explicit) return explicit;
   if (env.DA_HOME) return env.DA_HOME;
-  if (platform === "win32") return path.join(env.USERPROFILE || os.homedir(), ".daily-agenda");
+  if (env.DAILY_AGENDA_HOME) return env.DAILY_AGENDA_HOME;
+  if (platform === "win32") return path.win32.join(env.USERPROFILE || os.homedir(), ".daily-agenda");
   if (platform === "linux" && /microsoft/i.test(os.release())) {
     try {
       const winProfile = exec("cmd.exe", ["/c", "echo %USERPROFILE%"], { cwd: "/", encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
@@ -42,7 +43,7 @@ function resolveDaHome({ explicit, env = process.env, platform = process.platfor
       const wslPath = exec("wslpath", ["-u", winProfile], { encoding: "utf8" }).trim();
       return path.join(wslPath, ".daily-agenda");
     } catch {
-      throw new AgendaSourceError("無法換算 Windows 使用者目錄；請用 --da-home 或 DA_HOME 指定 daily-agenda 資料夾");
+      throw new AgendaSourceError("無法換算 Windows 使用者目錄；請用 --da-home 或 DAILY_AGENDA_HOME 指定 daily-agenda 資料夾");
     }
   }
   return path.join(os.homedir(), ".daily-agenda");
