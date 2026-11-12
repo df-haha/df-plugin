@@ -2,14 +2,12 @@
  * Pure logic for the session taint marker.
  * No I/O, no process.exit — testable as a module.
  *
- * The marker records that a session has seen third-party raw text (runs/,
- * raw-emitting subcommands, the DA-RAW-3f9a sentinel).  Since 2026-11-13
- * (third version) a marked session is denied only the three kinds in
- * MARKED_DENY_RULES at the end of this file (calendar writes, launching the
- * bundled LINE component, daily-agenda setting subcommands).  Everything
- * else is left to the model; the fence markers in CLI output tell it the
- * text is untrusted.  guard.mjs (denies direct LINE send tools in every
- * session) is separate and unchanged.
+ * Since 2026-11-13 the marker blocks nothing: it only records that a session
+ * has seen third-party raw text (runs/, raw-emitting subcommands, the
+ * DA-RAW-3f9a sentinel).  Whether to act on instructions found in that text
+ * is left to the model; the fence markers in CLI output tell it the text is
+ * untrusted.  guard.mjs (denies direct LINE send-class tools in every
+ * session) is separate and unchanged; no hook covers calendar tools.
  */
 
 import { readFileSync, realpathSync } from 'node:fs';
@@ -1113,112 +1111,3 @@ export const isUnderRuns = (filePath, ctx) => {
 // ---------------------------------------------------------------------------
 
 export const markerPath = (daHome, sanitizedSessionId) => join(daHome, 'taint', sanitizedSessionId);
-
-// ---------------------------------------------------------------------------
-// Marked-session deny table (2026-11-13, third version)
-// ---------------------------------------------------------------------------
-
-/*
- * A session that read LINE / mail raw text is denied exactly three kinds of
- * action; everything else stays allowed.  The checks match tool names and
- * command strings only, so a script written to disk and then run can still
- * get around (b) and (c) — see README "剩餘風險".
- */
-
-const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'Monitor']);
-
-/** (a) calendar write tools on any MCP server; read-only calendar tools pass. */
-const CALENDAR_WRITE_RE = /^mcp__.+__calendar_(?:create|update|delete|forward|rsvp)$/i;
-
-/**
- * (b) the bundled LINE component, by any path spelling (vendor/, runtime/,
- * Windows backslashes) or its npm bin name.  The normal /agenda read flow
- * never names it in a command: the CLI starts it from Python.
- */
-const LINE_COMPONENT_RE = /line[-_]desktop[-_]mcp/i;
-
-/**
- * (c) daily-agenda setting subcommands.  Key = subcommand, value = predicate
- * over the remaining args (with --progress-file removed, matching how the
- * CLI parses them).  Read-only forms (config get, schedule status,
- * consent --status) return false.
- */
-const SETTING_SUBCOMMANDS = {
-  config: (args) => args[0] === 'set',
-  schedule: (args) => args[0] === 'install' || args[0] === 'remove',
-  consent: (args) => args.includes('--accept'),
-  trust: () => true, // `trust probe` is its only form and writes trust + config
-};
-
-/**
- * `-m daily_agenda`, `-mdaily_agenda`, `-Im daily_agenda`,
- * `-m daily_agenda.__main__`, `daily_agenda/__main__.py`.
- */
-const DA_INVOCATION_RE =
-  /(?:(?<=-[A-Za-z]*m)|(?<![A-Za-z0-9_]))daily_agenda(?:\.__main__|[\\/]+__main__\.py)?["']?(?=\s|$)/gi;
-
-const _stripProgressFile = (tokens) => {
-  const out = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i];
-    if (t === '--progress-file') { i++; continue; }
-    if (t.startsWith('--progress-file=')) continue;
-    out.push(t);
-  }
-  return out;
-};
-
-/** Unexpanded shell value: $VAR, $(...), backticks, %VAR%. */
-const DYNAMIC_TOKEN_RE = /[$`]|%\w+%/;
-
-/**
- * True when any daily-agenda invocation in *command* is a setting
- * subcommand.  Line continuations (bash `\`, PowerShell backtick) are joined
- * first.  A subcommand that is itself a shell expansion, or a setting
- * subcommand whose args contain one, counts as a setting command (we cannot
- * tell what it expands to).
- */
-export const isSettingCommand = (command) => {
-  if (typeof command !== 'string') return false;
-  const joined = command.replace(/[\\`]\r?\n/g, ' ');
-  return [...joined.matchAll(DA_INVOCATION_RE)].some((m) => {
-    const rest = joined.slice(m.index + m[0].length).split(/[;&|\n\r]/)[0];
-    const [sub = '', ...args] = _stripProgressFile(shellTokenize(rest));
-    if (DYNAMIC_TOKEN_RE.test(sub)) return true;
-    if (!Object.hasOwn(SETTING_SUBCOMMANDS, sub)) return false;
-    return args.some((a) => DYNAMIC_TOKEN_RE.test(a)) || SETTING_SUBCOMMANDS[sub](args);
-  });
-};
-
-const _denyText = (what) =>
-  `這段對話讀過 LINE 或信件的原文，為了避免訊息裡藏的指令被照做，這段對話不能${what}。` +
-  '請開一個新的對話再做，或請使用者自己執行。';
-
-const MARKED_DENY_RULES = [
-  {
-    applies: (toolName) => CALENDAR_WRITE_RE.test(toolName),
-    matches: () => true,
-    reason: _denyText('建立、修改、刪除、轉寄或回覆行事曆邀請'),
-  },
-  {
-    applies: (toolName) => SHELL_TOOLS.has(toolName),
-    matches: (input) => typeof input?.command === 'string' && LINE_COMPONENT_RE.test(input.command),
-    reason: _denyText('直接啟動 LINE 連線元件'),
-  },
-  {
-    applies: (toolName) => SHELL_TOOLS.has(toolName),
-    matches: (input) => isSettingCommand(input?.command),
-    reason: _denyText('修改每日彙整的設定（設定值、排程、同意狀態、LINE 版本確認）'),
-  },
-];
-
-/**
- * Decide whether a call in an already-marked session is one of the three
- * blocked kinds.  Pure; never throws on malformed input.
- * @returns {{deny: boolean, reason?: string}}
- */
-export const checkMarkedSessionDeny = (toolName, toolInput) => {
-  if (typeof toolName !== 'string') return { deny: false };
-  const rule = MARKED_DENY_RULES.find((r) => r.applies(toolName) && r.matches(toolInput || {}));
-  return rule ? { deny: true, reason: rule.reason } : { deny: false };
-};

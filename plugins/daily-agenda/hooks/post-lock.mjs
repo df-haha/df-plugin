@@ -16,9 +16,8 @@
  * NOT matched: Glob (returns paths only).
  *
  * Fail-safe: on parse errors, marker-write failure or any exception, output
- * {} (no-op).  Never blocks or stops the tool flow, even when the marker
- * cannot be written.  What a marked session is denied (three kinds since
- * 2026-11-13) is decided by lock.mjs on the next PreToolUse.
+ * {} (no-op).  Never blocks or stops the tool flow: since 2026-11-13 the
+ * marker is a record only.
  */
 
 import { readFileSync } from 'node:fs';

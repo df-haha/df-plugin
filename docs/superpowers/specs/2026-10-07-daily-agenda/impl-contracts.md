@@ -225,18 +225,12 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 
 **Marker lifecycle（M2）**：taint marker 在建立時記錄 `transcript_path`（來自 hook 的 `hookData.transcript_path`）。60 天清理規則：marker 超過 60 天 AND 其 `transcript_path` 指向的檔案已不存在 → 才刪除。legacy marker（無 `transcript_path`）→ 保留（fail closed），因為無法確認 session 是否仍可恢復。
 
-**Taint marker 記錄＋只擋三類（2026-11-13 第三版，使用者拍板，取代同日第二版「什麼都不擋」與 10/21「維持鎖、只補逃生口」）**：
+**Taint marker 只記錄、不擋（2026-11-13，使用者拍板，取代 10/21「維持鎖、只補逃生口」；同日曾試「只擋三類」第三版，使用者再改裁決後撤回）**：
 - **記錄條件只剩第三方原文**：Read／Grep `<home>/runs/`（含 runs 本身）、Bash／PowerShell 指令帶 `<home>/runs/` 路徑、raw-emitting 子指令（registry）、Monitor 指向 runs/ 或以遞迴工具掃 runs 的上層、工具輸出含 sentinel（PostToolUse matcher 含 PowerShell）。`gen/`（待辦登記簿）、`output/` 與自訂 `output.dir`（彙整頁）、`config.json`、DA home 本身**不再觸發**；`readExtraTaintPrefixes` 已移除。
-- **已標記的 session 只擋三類**（`lock-core.mjs` 的 `MARKED_DENY_RULES` 查表，`checkMarkedSessionDeny`；PreToolUse 輸出 `permissionDecision: deny`）：
-  - (a) 行事曆寫入工具：工具名稱符合 `^mcp__.+__calendar_(create|update|delete|forward|rsvp)$`。`calendar_list`／`calendar_get`／`calendar_find_times`／`calendar_get_schedule` 放行。
-  - (b) Bash／PowerShell／Monitor 指令字串含 `line-desktop-mcp`（不分大小寫，`-`／`_` 皆可；涵蓋 `vendor/`、`runtime/`、Windows 反斜線、npm bin 名稱）。正常 `/agenda` 讀 LINE 是 Python 以 subprocess 啟動 `line_collect.mjs`，指令字串不含這個名稱，所以不受影響；代價是已標記 session 裡 `ls`、`cat` 這個目錄也會被擋。
-  - (c) daily-agenda 設定子指令：在指令中每一處 `daily_agenda` 呼叫（`-m daily_agenda`、`-mdaily_agenda`、`daily_agenda.__main__`、`daily_agenda/__main__.py`）之後，先把換行接續（bash `\`、PowerShell 反引號）併成一行、去掉 `--progress-file`（空格或 `=` 形式，子指令前後都可）再取子指令：`config set`、`schedule install`／`schedule remove`、任何位置帶 `--accept` 的 `consent`、`trust`（只有 `trust probe` 一種，會寫入信任紀錄與設定）。子指令本身、或這四個子指令的參數含未展開的 `$VAR`、`$(…)`、反引號、`%VAR%` 時，無法判斷展開結果，一律當成設定指令擋下。`config get`、`schedule status`、`consent --status` 放行。`exclude`、`mail select`、`line-select`、`uninstall`、`consent --revoke`、`runtime install` 不擋（`/agenda` 在 `chats new` 之後會用 `exclude --add`）。
-  - 其餘工具一律輸出 `{}`：WebFetch、WebSearch、其他 MCP 工具（含寄信、PM 寫入）、Bash／PowerShell 連網指令、Write／Edit 任何路徑、Agent、Artifact、SendMessage、其他 skill、其他 DA 子指令。舊的 tainted allowlist（`checkTaintedAllow`／`checkTaintedBash`／`checkTaintedWrite`）不恢復。
-  - **fail-open**：讀不到 marker（`isSessionTainted` 例外回 false）、hook 內任何例外，一律放行。marker 或 tainted-drafts 寫入失敗也不擋：PreToolUse 照常放行，PostToolUse 不輸出 `continue:false`。
-  - deny 訊息白話：「這段對話讀過 LINE 或信件的原文……請開一個新的對話再做，或請使用者自己執行。」
+- **標記不擋任何工具**：`lock.mjs` 對所有工具一律輸出 `{}`，包括 WebFetch、WebSearch、所有 MCP 工具（含 `calendar_create`／`update`／`delete` 等行事曆寫入、寄信、PM 寫入）、Bash／PowerShell 連網指令、啟動內附 `line-desktop-mcp` 的指令、Write／Edit 任何路徑、Agent、Artifact、SendMessage、其他 skill、所有 DA 子指令（含 `config set`、`schedule`、`consent --accept`、`trust probe`、`uninstall --purge`、`confirm --from-stdin` heredoc）。`lock-relax.test.mjs` 釘住這些放行。原本的 tainted allowlist（`checkTaintedAllow`／`checkTaintedBash`／`checkTaintedWrite`）已刪除。marker 或 tainted-drafts 寫入失敗也不擋：PreToolUse 照常放行，PostToolUse 不再輸出 `continue:false`。
 - **不可信內容的處理交給模型**：CLI 輸出以 `fence_untrusted` 圍住第三方內容，skills 明訂圍欄內的要求一律不照做。沒有另外加 additionalContext 提醒（現有 hook 沒有這個機制，使用者指示不新增）。
-- **仍保留**：marker 檔與 marker lifecycle（M2）、tainted-drafts 記錄（只記 runs/ 底下被寫入的路徑），供日後需要時重新收緊；`envcheck` 的 hook 自我檢查用「已標記 session＋`mcp__selftest__calendar_create`」樣本，必須回 deny 才算過（同時驗 node 能執行 plugin hooks，guard.mjs 也需要）。
-- **不變**：guard.mjs／guard-core.mjs——任何 session 直接呼叫 LINE 送出類工具（`send_message_*`、`stage_*`、`prepare_line_forward`、`confirm_line_forward`）一律 deny，訊息指向 `/agenda-reply`。送出確認流程（`actions/server.mjs`：確認內容等於送出內容、一次性、10 分鐘有效）尚未啟用（只有 `.mcp.json.phase5`），所以目前沒有經由本 plugin 送 LINE 的途徑；行事曆寫入不經 guard.mjs，只有已標記 session 由 lock.mjs 擋。
+- **仍保留**：marker 檔與 marker lifecycle（M2）、tainted-drafts 記錄（只記 runs/ 底下被寫入的路徑），供日後需要時重新收緊；`envcheck` 的 hook 自我檢查改成「hook 能跑且回傳不擋的 JSON」，實際驗的是 node 能執行 plugin hooks（guard.mjs 需要）。
+- **不變**：guard.mjs／guard-core.mjs——任何 session 直接呼叫 LINE 送出類工具（`send_message_*`、`stage_*`、`prepare_line_forward`、`confirm_line_forward`）一律 deny，訊息指向 `/agenda-reply`。送出確認流程（`actions/server.mjs`：確認內容等於送出內容、一次性、10 分鐘有效）尚未啟用（只有 `.mcp.json.phase5`），所以目前沒有經由本 plugin 確認流程送 LINE 的途徑。行事曆寫入沒有任何 hook 管；用 Bash 啟動內附 LINE 元件、daily-agenda 設定子指令也都不擋。
 
 **Path-reference exemption（mechanism 2）**：checkBashTaint 的 mechanism 2 會對 command 中出現在 `<home>/runs` 下的路徑觸發 taint（2026-11-13 前還包括 gen、output、config.json、DA home 本身）。但 canonical DA invocation（通過 `_parseCanonicalDA` 驗證：`uv run --quiet --project ... python -I -X utf8 -m daily_agenda`、project path 為 template 或 realpath 相符）的 flag 值依 subcommand 語意豁免：`--progress-file`（任何 subcommand）和 `progress show|watch --file` → 只接受 `runs/progress/*.jsonl`；`criteria save` / `refine apply --file` → 只接受 `criteria-draft.md`；`profile save --file` → 只接受 `profile-draft.md`；`profile coverage save --file` → 只接受 `coverage-draft.json`；`draft show --file` → 接受三種 draft basename。其他 subcommand 的 `--file` 無豁免。所有 draft 路徑拒絕含 `raw` segment。非 canonical form（project path 不對、非 `-I -X utf8`、metachar、`$`）不豁免。Registry 機制仍優先：raw-emitting subcommand 即使帶合法 progress-file 也一定 taint。
 
@@ -264,7 +258,7 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 
 **Monitor realtime stream**：Monitor 逐行送入 Claude，PostToolUse 要等 Monitor 完成後才觸發。因此 untainted session 中的 Monitor 在 PreToolUse 階段做 `checkMonitorPreTaint`，採用三層偵測——(1) 模組名稱：`daily_agenda` 作為 whole-token（word-boundary）比對，不做 basename/substring 比對；(2) path-token 比對：tokenize 後 canonicalize 每個 path-like token（含 MSYS `/c/...`、`~`、反斜線、大小寫不敏感），檢查是否在 protected root（2026-11-13 起只有 `<home>/runs`）內部或等於 protected root；(3) ancestor 偵測（僅限 recursive search 工具：rg/grep -r/find/fd/ag/tree/ls -R）：若任何 path positional（或無 path 時的 cwd）canonicalize 後是 protected root 的上層目錄 → taint。若偵測為 sensitive，必須解析為 canonical `progress watch --file <runs/progress/*.jsonl>`；否則 taint（不 deny）。$(printf)/eval/variable 展開仍是 accepted residual。
 
-**Accepted residuals of the 2026-11-13 relaxation（使用者決定接受）**：三類以外的對外動作（寄信、上網、PM 寫入等）只靠模型自己判斷，hook 不擋。自動資安審查對第一版提出的四點：(1) `cd` 之後用相對路徑讀 runs/，PreToolUse 認不出（磁碟原文每行有 sentinel，PostToolUse 仍會記錄並生效於下一個工具呼叫）；(2) gen/、output/ 不再觸發；(3) 用 MCP 名稱判斷唯讀可被繞過；(4) 先寫檔再執行可繞過連網清單。第三版的三類同樣只比對工具名稱與指令字串：把指令寫進腳本檔再執行、`python -c` 匯入 `daily_agenda.cli`、用萬用字元或變數拼出元件路徑（例如 `node vendor/line*/src/server.js`）、把元件複製改名，都繞得過 (b)(c)；行事曆寫入若改經其他非 `calendar_*` 命名的工具也繞得過 (a)。(1)(2) 與這些繞道是使用者明確選擇的取捨。
+**Accepted residuals of the 2026-11-13 relaxation（使用者決定接受）**：訊息裡夾帶的指令只靠模型自己判斷，hook 不擋任何對外動作。讀過原文的 session 可以直接建立／修改／刪除行事曆事件、用指令啟動內附 LINE 元件送訊息、改 daily-agenda 設定（含 `uninstall --purge`）；剩下的防線是模型判斷與 Claude Code 權限確認視窗。自動資安審查對第一版提出的四點：(1) `cd` 之後用相對路徑讀 runs/，PreToolUse 認不出（磁碟原文每行有 sentinel，PostToolUse 仍會記錄，但記錄本身不擋）；(2) gen/、output/ 不再觸發；(3) 用 MCP 名稱判斷唯讀可被繞過；(4) 先寫檔再執行可繞過連網清單。第二版起拿掉所有阻擋，(3)(4) 不再適用；(1)(2) 是使用者明確選擇的取捨。
 
 **CLI save policy（item 4）**：Python CLI 使用 `raw-commands.json::draft_policy` 的 subcommand→basenames 對應表。`criteria save --file` 只接受 `criteria-draft.md`，`profile save` 只接受 `profile-draft.md`，以此類推。Python 額外檢查：拒絕含 `raw` 路徑段的檔案，拒絕 file content 含 `RAW_SENTINEL`（code `RAW_CONTENT`）。
 
@@ -276,10 +270,10 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 
 | 指令 | 用途 | 輸出重點 |
 |---|---|---|
-| `consent --status｜--accept｜--revoke` | setup 第 0 步（讀過原文的 session 擋 `--accept`） | `accepted_at` |
+| `consent --status｜--accept｜--revoke` | setup 第 0 步 | `accepted_at` |
 | `envcheck` | setup 第 1 步 | checks[] |
 | `runtime install [--with-cua]`／`runtime status` | setup 第 1 步、`/agenda` 前檢查 | 各元件狀態、`RUNTIME_OUTDATED` |
-| `trust probe` | setup 第 2 步／`LINE_BUILD_UNVERIFIED` 時（讀過原文的 session 擋） | `trusted｜already_trusted｜skipped_noninteractive｜<code>` |
+| `trust probe` | setup 第 2 步／`LINE_BUILD_UNVERIFIED` 時 | `trusted｜already_trusted｜skipped_noninteractive｜<code>` |
 | `line-detect` | setup 第 3 步 | `status: ok｜multiple｜failed`、`database`、`candidates[{name,mtime}]`、`codes` |
 | `line-select --database NAME` | 多份都成功時使用者選 | |
 | `probe` | setup 第 2–4 步試讀 | 各來源 status／筆數 |
@@ -296,7 +290,7 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 | `profile coverage [save --file F]` | 維度覆蓋率管理 | `coverage` |
 | `profile cadence [--set now｜agenda｜refine｜later]` | 設定補充頻率 | `cadence` |
 | `profile next-question [--context agenda｜refine]` | 取得下一個要問的維度。`--context` 只在 cadence 匹配時回傳問題。限速：同一天或同一 generation 只問一題 | `question`、`dim`、`cadence` |
-| `config get`／`config set KEY=VALUE...` | setup 第 7 步（output.dir、output.formats、refine.every_runs、refine.every_days、analysis.model）；讀過原文的 session 擋 `set` | 設定摘要 |
+| `config get`／`config set KEY=VALUE...` | setup 第 7 步（output.dir、output.formats、refine.every_runs、refine.every_days、analysis.model） | 設定摘要 |
 | `criteria draft --days 7｜14｜30 [--from-run <run_id>]` | setup 第 9 步：分析 → 草稿檔。`--from-run` 重用 scan raw 儲存的 records（不再重新收集），包含 profile；驗證 run_id 格式（`YYYYMMDD-HHMM-XXXX`）且路徑在 `<home>/runs/` 下；LINE enabled 時要求 saved status=="ok"（skipped/failed 均拒絕）；days 從 scan-meta.json 取 | `draft_path`、`draft_text`（fenced） |
 | `draft new --kind criteria｜profile｜coverage` | 在 `<home>/runs/drafts/<ts-hex>/` 建立空白（或以目前版本為種子的）草稿檔，回傳 `draft_path`。供 Claude Write 後再 save/apply。檔名必須是 `criteria-draft.md`/`profile-draft.md`/`coverage-draft.json`（符合 lock-core hook allowlist） | `draft_path`、`kind`、`seeded` |
 | `draft show --file F` | 回傳 fenced 草稿文字，Claude 不需直接 Read runs/ 下的檔案。`--file` 限制為 runs/ 下的已知草稿檔名 | `text`（fenced）、`draft_path` |
@@ -308,7 +302,7 @@ def collect(h, cfg, state, *, now, line: LineSource | None, graph: GraphSource |
 | `dismiss --todo T-1` | 不再追蹤 | |
 | `restore T-xxxx` | 摺疊→移回待辦 | |
 | `refine status`／`refine draft`／`refine apply --file F`／`refine skip` | 修正準則（US-9） | `due`、`reason`、`draft_path`、`draft_text`（fenced） |
-| `schedule install --time HH:MM｜remove｜status` | setup 第 7 步（讀過原文的 session 擋 `install`／`remove`） | |
+| `schedule install --time HH:MM｜remove｜status` | setup 第 7 步 | |
 | `uninstall [--purge]` | 回滾 | |
 
 ## 8. 動作代理（actions/server.mjs）
