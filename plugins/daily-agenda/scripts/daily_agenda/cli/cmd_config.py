@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 
 from daily_agenda import state
@@ -24,19 +23,6 @@ _VALID_FORMATS = {"html", "md"}
 # is rejected so a typo does not silently break every analysis run.
 _MODEL_ALIASES = {"sonnet", "opus", "haiku"}
 _MODEL_ID_RE = re.compile(r"^claude-[a-z0-9][a-z0-9.-]*(\[1m\])?$")
-# Claude Code's Bash tool on Windows is Git Bash, whose `pwd` prints /c/Users/...;
-# Windows Python reads that as C:\c\Users\..., so the digest would land elsewhere.
-_IS_WINDOWS = os.name == "nt"
-_GIT_BASH_DRIVE_RE = re.compile(r"^/([A-Za-z])(?=/|$)")
-
-
-def _native_dir(value: str) -> str:
-    """Turn a Git Bash drive path (/c/Users/x) into C:\\Users\\x on Windows."""
-    m = _GIT_BASH_DRIVE_RE.match(value)
-    if not (_IS_WINDOWS and m):
-        return value
-    rest = value[m.end():].replace("/", "\\")
-    return f"{m.group(1).upper()}:{rest or chr(92)}"
 
 
 def _set_nested(cfg: dict, dotkey: str, value: object) -> None:
@@ -109,8 +95,6 @@ def handle(argv: list[str], deps: Deps) -> int:
                     return emit({"ok": False, "code": "ARG_ERROR",
                                   "detail": f"analysis.model must be one of {sorted(_MODEL_ALIASES)} or a claude-* model id"},
                                 exit_code=2)
-            elif key == "output.dir" and raw_value:
-                value = _native_dir(raw_value)
             else:
                 value = raw_value if raw_value else None
 

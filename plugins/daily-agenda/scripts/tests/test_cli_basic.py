@@ -151,39 +151,6 @@ class TestConfigCommand:
         code, obj = _run_cli(["config", "set", "output.formats=pdf"], deps, capsys)
         assert code == 2
 
-    def test_output_dir_git_bash_form_converted_on_windows(
-        self, tmp_path: Path, capsys: Any, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """Claude Code's Bash tool on Windows is Git Bash: `pwd` prints /c/Users/...
-        Windows Python would read that as C:\\c\\Users\\..., so store the drive form."""
-        from daily_agenda import state
-        from daily_agenda.cli import cmd_config
-        monkeypatch.setattr(cmd_config, "_IS_WINDOWS", True)
-        deps = _deps(tmp_path)
-        code, obj = _run_cli(["config", "set", "output.dir=/c/Users/amy/daily-agenda"], deps, capsys)
-        assert obj["ok"] is True
-        assert state.load_config(tmp_path)["output"]["dir"] == "C:\\Users\\amy\\daily-agenda"
-
-    def test_output_dir_windows_form_kept(
-        self, tmp_path: Path, capsys: Any, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        from daily_agenda import state
-        from daily_agenda.cli import cmd_config
-        monkeypatch.setattr(cmd_config, "_IS_WINDOWS", True)
-        deps = _deps(tmp_path)
-        _run_cli(["config", "set", "output.dir=D:\\工作\\daily-agenda"], deps, capsys)
-        assert state.load_config(tmp_path)["output"]["dir"] == "D:\\工作\\daily-agenda"
-
-    def test_output_dir_posix_untouched_off_windows(
-        self, tmp_path: Path, capsys: Any, monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        from daily_agenda import state
-        from daily_agenda.cli import cmd_config
-        monkeypatch.setattr(cmd_config, "_IS_WINDOWS", False)
-        deps = _deps(tmp_path)
-        _run_cli(["config", "set", "output.dir=/c/out"], deps, capsys)
-        assert state.load_config(tmp_path)["output"]["dir"] == "/c/out"
-
 
 class TestExclude:
     def test_set_exclude(self, tmp_path: Path, capsys: Any) -> None:
