@@ -12,7 +12,7 @@ plugin 以「來源轉接器（source adapter）」為單位擴充；v1 只有 `
 
 - daily-agenda 規格 §75「不寫入 workhub」維持不變：daily-agenda 本身仍唯讀。寫入由本 plugin 的獨立腳本負責，只讀 daily-agenda 的整理成品（`CURRENT` generation 的 `ledger.jsonl`＋`state.json`），不讀 `runs/` 的原始訊息。
 - 待辦標題是 AI 從第三方訊息整理出的不可信內容。**寫入全程不經 AI**：腳本直接以 HTTP 呼叫 Work Hub 的 MCP 端點（stateless JSON-RPC `tools/call`），標題只當資料傳遞。skill 只負責跑腳本、轉述筆數，不把標題放進任何工具參數。
-- 金鑰與端點只從環境變數讀取（`WORKHUB_INBOX_API_KEY`、`WORKHUB_INBOX_ENDPOINT`；命令列不提供端點參數，避免不可信的標題內容誘導 AI 改掉金鑰的去處），不寫檔、不進 log。端點送出前先驗證：只接受 `https:`，`http:` 只放行 127.0.0.1、localhost、[::1]，網址不得含帳號密碼；不跟隨轉址。錯誤訊息只帶錯誤代碼，不帶底層訊息與端點原字串；輸出前另以金鑰與驗證不過的端點原值做保底遮蔽。plugin 不認個人機器上的其他變數名，由呼叫端（例如排程腳本）對應。`--json` 輸出與錯誤訊息只有代碼、筆數與動作類型，不含標題；人看的試跑清單加 `--show-titles` 才顯示標題。
+- 金鑰與端點只從環境變數讀取（`WORKHUB_INBOX_API_KEY`、`WORKHUB_INBOX_ENDPOINT`；命令列不提供端點參數，避免不可信的標題內容誘導 AI 改掉金鑰的去處），不寫檔、不進 log。端點送出前先驗證：只接受 `https:`，`http:` 只放行 127.0.0.1、localhost、[::1]，網址不得含帳號密碼；不跟隨轉址。錯誤訊息只帶錯誤代碼，不帶底層訊息與端點原字串；輸出前另以金鑰與驗證不過的端點原值做保底遮蔽。plugin 不認個人機器上的其他變數名，由呼叫端（例如排程腳本）對應。標題與來源名稱（含 LINE 對話名稱）不得出現在任何 stdout、stderr 或 `--json` 輸出：Claude 的 Bash 工具讀得到環境變數裡的金鑰，腳本擋不住被說動的模型自己連線，所以要守的邊界是「不把不可信標題送進拿得到金鑰的對話」。人看的試跑清單用 `--review-file` 寫成本機的自足 HTML（`<狀態資料夾>/inbox-review.html`，狀態資料夾預設 `~/.workhub-inbox`、可用 `WORKHUB_INBOX_STATE_DIR` 改；每次覆蓋、先寫暫存檔再改名、權限比照對照檔；內容全部 HTML 跳脫、沒有 script 與外部資源，並以 CSP 禁止載入任何東西），stdout 只印筆數、代碼與檔案路徑。清單檔在送出任何寫入前產生，寫不出來就停止（結束碼 2）。寫入失敗時，伺服器錯誤訊息若帶出該筆標題或來源名稱就整段隱藏。skill 不得讀清單檔與 daily-agenda 資料夾，由使用者自己打開後用代碼回覆。
 - 預設 dry-run（試跑，只列出不寫入）；`--apply` 才寫入，且受 `--max-writes`（預設 20）上限保護。
 
 ## 3. 資料對應
@@ -71,14 +71,15 @@ plugin 以「來源轉接器（source adapter）」為單位擴充；v1 只有 `
 ```
 node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
      [--priorities P0,P1] [--only T-1234,...] [--exclude T-1234,...]
-     [--da-home PATH] [--show-titles] [--json]
+     [--da-home PATH] [--review-file] [--json]
 ```
 
 - `--only`／`--exclude`：以 agenda 代碼挑選或排除「建立」的項目（只接受 `T-` 加 4 碼數字），完成同步不受影響。被排除的項目下次執行仍會出現；要永久不收，到 PM 建立後取消即可。
 
 - 預設 dry-run，輸出動作摘要（建立／完成／可能已完成／略過筆數，及每筆的 agenda 代碼、優先級、期限）。
 - `--json`：機器可讀輸出，供排程與測試。
-- 結束碼：0 成功；1 參數或設定錯誤；2 讀不到來源；3 寫入部分失敗。
+- `--review-file`：把會建立與勾完成的項目（動作、代碼、優先級、期限、來源、標題）寫進 `<狀態資料夾>/inbox-review.html`，stdout 只多印這個檔案的路徑；`--json` 則多一個 `reviewFile` 欄位放路徑。可與 `--apply` 併用，清單檔一定在寫入前產生。
+- 結束碼：0 成功；1 參數或設定錯誤；2 讀不到來源，或本機對照檔、清單檔讀寫失敗；3 寫入部分失敗。
 
 排程：AI_Copilot 的 `scripts/hi_autorun.sh` 在 daily-agenda 掃完後執行 `sync --apply`（另案改動，不在本 plugin 內）。
 

@@ -3,15 +3,17 @@
 
 // workhub-inbox 命令列入口：外部待辦 → Work Hub 個人待辦（單向、可重跑）。
 // 用法：node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
-//        [--priorities P0,P1] [--da-home PATH] [--show-titles] [--json]
+//        [--priorities P0,P1] [--da-home PATH] [--review-file] [--json]
 // 環境變數：WORKHUB_INBOX_ENDPOINT、WORKHUB_INBOX_API_KEY（兩者都只從環境變數讀；金鑰不寫檔、不印出）。
-// 端點刻意不開放命令列指定：待辦標題是不可信內容、會出現在 Claude 的對話裡，不能讓它有機會改掉金鑰送去的地方。
+// 端點刻意不開放命令列指定，不能讓不可信內容有機會改掉金鑰送去的地方。
+// 待辦標題與對話名稱是第三方內容：任何 stdout／stderr／--json 都不輸出，只寫進 --review-file 的本機清單檔（不進 Claude 的對話）。
 
 const { createHash } = require("node:crypto");
 const path = require("node:path");
 
 const { AgendaSourceError, loadAgenda, resolveDaHome, taipeiDate, toInboxItems } = require("./lib/agenda.js");
 const { buildCompleteArgs, buildCreateArgs, planSync, safeText } = require("./lib/plan.js");
+const { ReviewFileError, buildReviewHtml, writeReviewFile } = require("./lib/review.js");
 const { StateError, loadMap, mergeExisting, resolveStateDir, saveMap } = require("./lib/state.js");
 const { WorkhubError, createClient, validateEndpoint } = require("./lib/workhub-client.js");
 
@@ -22,15 +24,17 @@ const EXIT = { ok: 0, usage: 1, source: 2, partial: 3 };
 const AGENDA_ID = /^T-\d{4}$/;
 const SECRET_HIDDEN = "（訊息含金鑰或端點設定值，已整段隱藏；請確認 WORKHUB_INBOX_ENDPOINT 與 WORKHUB_INBOX_API_KEY 沒有填反）";
 const BAD_RESPONSE = "回應格式不符，可能不是 Work Hub 的 MCP 端點";
+const ITEM_TEXT_HIDDEN = "（錯誤訊息帶有待辦標題或來源名稱，已隱藏；請到 PM 系統或試跑清單檔核對這筆）";
+const MIN_NEEDLE = 4;
 
 class UsageError extends Error {}
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (command !== "sync") throw new UsageError("用法：inbox-sync.js sync --source daily-agenda [--apply] ...");
-  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], daHome: null, json: false, showTitles: false, only: null, exclude: [] };
+  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], daHome: null, json: false, reviewFile: false, only: null, exclude: [] };
   const takesValue = { "--source": "source", "--max-writes": "maxWrites", "--priorities": "priorities", "--da-home": "daHome", "--only": "only", "--exclude": "exclude" };
-  const flags = { "--apply": "apply", "--json": "json", "--show-titles": "showTitles" };
+  const flags = { "--apply": "apply", "--json": "json", "--review-file": "reviewFile" };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
     if (flags[arg]) opts[flags[arg]] = true;
@@ -66,6 +70,18 @@ function makeScrub(secrets) {
 /** 回應要長得像 Work Hub：清單要有 items 陣列、建立要有 id、勾完成要有 task.id；不像就當失敗，不報成功。 */
 function expectShape(ok, tool) {
   if (!ok) throw new WorkhubError(`${tool} ${BAD_RESPONSE}`, { tool });
+}
+
+/**
+ * 錯誤訊息是否帶出這筆待辦的第三方內容（標題、標題開頭、對話名稱）。伺服器可能在驗證錯誤裡回印送出的欄位。
+ * 比對前兩邊都用 safeText 正規化（空白收成一格、去控制字元），太短的片段不比，避免誤殺。
+ */
+function mentionsItem(text, item) {
+  const flat = safeText(text, 100_000);
+  const title = safeText(item.title, 100_000);
+  const needles = [title, [...title].slice(0, 20).join("")];
+  if (item.sourceName && item.sourceName !== item.sourceLabel) needles.push(safeText(item.sourceName, 100_000));
+  return needles.some((n) => [...n].length >= MIN_NEEDLE && flat.includes(n));
 }
 
 const hasId = (value) => (typeof value === "number" || typeof value === "string") && Number.isInteger(Number(value)) && Number(value) > 0;
@@ -138,7 +154,8 @@ async function applyPlan(client, plan, maxWrites, map, scrub = String) {
     } catch (err) {
       counted += 1;
       results.failed += 1;
-      results.failures.push({ agendaId: action.item.agendaId, action: action.kind, error: safeText(scrub(err.message), 200) });
+      const message = mentionsItem(err.message, action.item) ? ITEM_TEXT_HIDDEN : scrub(err.message);
+      results.failures.push({ agendaId: action.item.agendaId, action: action.kind, error: safeText(message, 200) });
       if (err instanceof WorkhubError && AUTH_STATUS.has(err.status)) {
         results.aborted = true;
         results.notAttempted = queue.length - index - 1;
@@ -168,7 +185,7 @@ function summarize(opts, plan) {
   };
 }
 
-function renderText(report, plan, opts) {
+function renderText(report, plan) {
   const c = report.counts;
   const lines = [
     `workhub-inbox ${report.mode}（來源 ${report.source}，優先級 ${report.priorities.join("/")}）`,
@@ -176,13 +193,12 @@ function renderText(report, plan, opts) {
     `略過：PM 已有 ${c.exists}、優先級不符 ${c.priority}、過期或太舊 ${c.stale}、指定排除 ${c.excluded}`,
   ];
   if (plan.create.length) {
-    lines.push("", opts.showTitles ? "預計建立（標題與對話名稱是外部內容，只供檢視）：" : "預計建立：");
-    for (const i of plan.create) {
-      // 標題與對話名稱是第三方內容：去控制字元、截長，標題用引號包住，避免被當成輸出的一部分或指令。
-      const where = opts.showTitles ? safeText(i.sourceName, 60) : i.sourceLabel;
-      const title = opts.showTitles ? `  ${JSON.stringify(safeText(i.title, 200))}` : "";
-      lines.push(`- ${i.agendaId}  ${i.agendaPriority}  期限 ${i.due || "—"}  ${where}${title}`);
-    }
+    lines.push("", "預計建立：");
+    // 只列代碼、優先級、期限與來源類別（LINE／信件／行事曆，是程式自己的分類）；標題與對話名稱只在清單檔
+    for (const i of plan.create) lines.push(`- ${i.agendaId}  ${i.agendaPriority}  期限 ${i.due || "—"}  ${i.sourceLabel}`);
+  }
+  if (report.reviewFile) {
+    lines.push("", `標題與來源寫在試跑清單檔（請使用者自己打開看）：${report.reviewFile}`);
   }
   if (report.results) {
     const r = report.results;
@@ -238,7 +254,8 @@ async function main(argv, deps = {}) {
     return EXIT.usage;
   }
 
-  const stateDir = deps.stateDir || stateDirFor(resolveStateDir({ env }), rawEndpoint, apiKey);
+  const baseDir = resolveStateDir({ env });
+  const stateDir = deps.stateDir || stateDirFor(baseDir, rawEndpoint, apiKey);
   let map;
   try {
     map = loadMap(stateDir);
@@ -259,6 +276,16 @@ async function main(argv, deps = {}) {
   const existing = mergeExisting(listed, map);
   const plan = selectCreates(planSync({ items, existing, today: taipeiDate(deps.now || new Date()), priorities: opts.priorities }), opts);
   const report = summarize(opts, plan);
+  if (opts.reviewFile) {
+    // 先寫清單檔再寫入 PM：清單檔寫不出來就整個停下，不送任何寫入
+    try {
+      report.reviewFile = writeReviewFile(deps.reviewDir || baseDir, buildReviewHtml(plan, taipeiDate(deps.now || new Date())));
+    } catch (err) {
+      if (!(err instanceof ReviewFileError)) throw err;
+      print(err.message);
+      return EXIT.source;
+    }
+  }
   if (opts.apply) {
     // 清單看得到的一律覆寫對照檔（清單為準），日後掉出 500 筆範圍仍查得到 task_id 與正確狀態
     for (const task of listed) {
@@ -270,7 +297,7 @@ async function main(argv, deps = {}) {
       saveMap(stateDir, map);
     }
   }
-  print(opts.json ? JSON.stringify(report, null, 2) : renderText(report, plan, opts));
+  print(opts.json ? JSON.stringify(report, null, 2) : renderText(report, plan));
   if (report.results && report.results.aborted) return EXIT.usage;
   return report.results && report.results.failed > 0 ? EXIT.partial : EXIT.ok;
 }

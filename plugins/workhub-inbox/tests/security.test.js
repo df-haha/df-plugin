@@ -269,12 +269,16 @@ test("本機假伺服器正常路徑：建立成功、結束碼 0（確認驗證
   }
 });
 
-test("合法端點網址不算秘密：標題剛好含端點網址時，試跑清單照常顯示", async () => {
-  const { server, url } = await fakeServer(workhubLike());
+test("合法端點網址不算秘密：伺服器錯誤訊息含端點網址時，失敗原因照常顯示", async () => {
+  let endpointUrl = "";
+  const { server, url } = await fakeServer(workhubLike({
+    pm_create_personal_task: (rpc) => ({ jsonrpc: "2.0", id: rpc.id, result: { isError: true, content: [{ type: "text", text: `RATE_LIMITED: 請稍後再呼叫 ${endpointUrl}` }] } }),
+  }));
+  endpointUrl = url;
   try {
-    const { code, out } = await runReal(["sync", "--source", "daily-agenda", "--show-titles"], { endpoint: url, rows: [row("T-1", { title: `看一下 ${url}` })] });
-    assert.equal(code, 0);
-    assert.match(out, /預計建立 1/);
+    const { code, out } = await runReal(["sync", "--source", "daily-agenda", "--apply"], { endpoint: url });
+    assert.equal(code, 3);
+    assert.match(out, /RATE_LIMITED/);
   } finally {
     server.close();
   }

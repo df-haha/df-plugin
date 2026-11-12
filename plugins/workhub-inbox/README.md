@@ -57,16 +57,23 @@ export WORKHUB_INBOX_API_KEY="<個人 API 金鑰>"
 
 ## 使用
 
-**一般使用者**：在 Claude Code 裡說「同步待辦到 PM」就好，不用自己打指令。Claude 會先試跑，列出會建立、會勾完成哪些待辦；你確認後才實際寫入。第一次寫入正式環境只寫 3 筆，請先到 PM 看過再補其餘。
+**一般使用者**：在 Claude Code 裡說「同步待辦到 PM」就好，不用自己打指令。
+
+1. Claude 先試跑，告訴你會建立幾筆、勾完成幾筆，以及一個清單檔的位置（檔名 `inbox-review.html`，Windows 通常在 `C:\Users\<你的帳號>\.workhub-inbox\`）。
+2. 你自己打開那個清單檔看待辦標題：在檔案總管的網址列貼上路徑按 Enter，或對檔案按兩下用瀏覽器開。標題不會顯示在 Claude 的對話裡，這是刻意的。
+3. 回 Claude 要同步哪些代碼（例如「同步 T-1234、T-5678」）或「全部同步」。
+4. Claude 才實際寫入。第一次寫入正式環境只寫 3 筆，請先到 PM 看過再補其餘。
+
+**不要開「略過權限確認」模式。** 金鑰放在環境變數，這台電腦上的 Claude 對話都讀得到。Claude 要執行連線或寄送類的指令時會跳出確認視窗，這是最後一道防線：看到不是你要的動作，就按拒絕。
 
 **開發者**：在本 repo 根目錄可以直接跑命令列（PowerShell 與 bash 寫法相同）。從市集安裝的人電腦裡沒有這個資料夾，不適用。
 
 ```
-node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --show-titles
+node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --review-file
 node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --apply --max-writes 3
 ```
 
-第一行是試跑，只列出、不寫入；第二行實際寫入。
+第一行是試跑，只列出、不寫入，標題寫進清單檔；第二行實際寫入。
 
 | 參數 | 說明 | 預設 |
 |---|---|---|
@@ -76,7 +83,7 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 | `--exclude T-3` | 這些代碼這次不建立 | — |
 | `--priorities P0,P1` | 只收這些優先級 | P0,P1,P2 |
 | `--da-home PATH` | daily-agenda 資料夾 | 自動找 |
-| `--show-titles` | 試跑清單顯示標題 | 不顯示 |
+| `--review-file` | 把清單（含標題與來源）寫進 `~/.workhub-inbox/inbox-review.html`，每次覆蓋；畫面上只顯示代碼與檔案位置 | 不寫 |
 | `--json` | 機器可讀輸出（不含標題），給排程用 | — |
 
 ## 同步規則
@@ -100,7 +107,7 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 - 金鑰與端點都只從環境變數讀，命令列不能指定端點。
 - 端點只接受 `https://` 開頭的網址（`http://` 只限本機測試用的 127.0.0.1、localhost）；網址裡不能帶帳號密碼。不符合就在送出任何請求前停止。
 - 不跟隨轉址：端點若回轉址就停止，不把金鑰與資料帶到別的網址。
-- 錯誤訊息不含標題、金鑰與端點設定值；萬一訊息裡出現金鑰或填錯的端點設定值，整段會改成固定的提示文字。`--json` 輸出不含標題。
+- 畫面輸出、錯誤訊息與 `--json` 都不含標題、來源名稱、金鑰與端點設定值；萬一訊息裡出現這些內容，整段會改成固定的提示文字。標題與來源只寫進本機的清單檔，清單檔不含任何程式碼或外部連結。
 
 ## 測試
 

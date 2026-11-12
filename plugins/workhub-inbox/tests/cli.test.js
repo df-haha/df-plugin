@@ -260,17 +260,15 @@ test("parseArgs：--only 代碼格式不符報錯", () => {
   assert.throws(() => parseArgs(["sync", "--only", "T-1;rm"]), /代碼/);
 });
 
-test("文字輸出：標題去除控制字元與換行並加引號，沒帶 --show-titles 不顯示對話名稱", async () => {
+test("文字輸出：不顯示標題與對話名稱，只顯示代碼與來源類別，沒有控制字元", async () => {
   const state = { known_chats: [{ ref: "chat:ab12", name: "機密群組" }] };
   const home = makeHome([row("T-1", { title: "第一行\n\u001b[31m紅字\u0007", src_ids: ["line:chat:ab12:m:1"] })]);
   fs.writeFileSync(path.join(home, "gen", "1", "state.json"), JSON.stringify(state));
-  const hidden = (await run(["sync", "--source", "daily-agenda"], fakeClient(), home)).out;
-  assert.ok(!hidden.includes("機密群組"));
-  assert.ok(!hidden.includes("紅字"));
-  const shown = (await run(["sync", "--source", "daily-agenda", "--show-titles"], fakeClient(), home)).out;
-  assert.ok(shown.includes("機密群組"));
-  assert.ok(shown.includes("\"第一行 [31m紅字\""));
-  assert.ok(!/[\u0000-\u001f\u007f]/.test(shown.replace(/\n/g, "")));
+  const out = (await run(["sync", "--source", "daily-agenda"], fakeClient(), home)).out;
+  assert.ok(!out.includes("機密群組"));
+  assert.ok(!out.includes("紅字"));
+  assert.match(out, /T-1 {2}P1 {2}期限 — {2}LINE/);
+  assert.ok(!/[\u0000-\u001f\u007f]/.test(out.replace(/\n/g, "")));
 });
 
 test("讀不到 agenda 資料：結束碼 2，不呼叫 Work Hub", async () => {
