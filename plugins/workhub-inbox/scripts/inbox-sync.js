@@ -3,8 +3,9 @@
 
 // workhub-inbox 命令列入口：外部待辦 → Work Hub 個人待辦（單向、可重跑）。
 // 用法：node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
-//        [--priorities P0,P1] [--endpoint URL] [--da-home PATH] [--show-titles] [--json]
-// 環境變數：WORKHUB_INBOX_ENDPOINT、WORKHUB_INBOX_API_KEY（金鑰只從環境變數讀，不寫檔、不印出）。
+//        [--priorities P0,P1] [--da-home PATH] [--show-titles] [--json]
+// 環境變數：WORKHUB_INBOX_ENDPOINT、WORKHUB_INBOX_API_KEY（兩者都只從環境變數讀；金鑰不寫檔、不印出）。
+// 端點刻意不開放命令列指定：待辦標題是不可信內容、會出現在 Claude 的對話裡，不能讓它有機會改掉金鑰送去的地方。
 
 const { createHash } = require("node:crypto");
 const path = require("node:path");
@@ -12,21 +13,23 @@ const path = require("node:path");
 const { AgendaSourceError, loadAgenda, resolveDaHome, taipeiDate, toInboxItems } = require("./lib/agenda.js");
 const { buildCompleteArgs, buildCreateArgs, planSync, safeText } = require("./lib/plan.js");
 const { StateError, loadMap, mergeExisting, resolveStateDir, saveMap } = require("./lib/state.js");
-const { WorkhubError, createClient } = require("./lib/workhub-client.js");
+const { WorkhubError, createClient, validateEndpoint } = require("./lib/workhub-client.js");
 
 const SOURCES = new Set(["daily-agenda"]);
 const VALID_PRIORITIES = new Set(["P0", "P1", "P2"]);
 const PM_SOURCES = ["line", "outlook"];
 const EXIT = { ok: 0, usage: 1, source: 2, partial: 3 };
 const AGENDA_ID = /^T-\d{4}$/;
+const SECRET_HIDDEN = "（訊息含金鑰或端點設定值，已整段隱藏；請確認 WORKHUB_INBOX_ENDPOINT 與 WORKHUB_INBOX_API_KEY 沒有填反）";
+const BAD_RESPONSE = "回應格式不符，可能不是 Work Hub 的 MCP 端點";
 
 class UsageError extends Error {}
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (command !== "sync") throw new UsageError("用法：inbox-sync.js sync --source daily-agenda [--apply] ...");
-  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], endpoint: null, daHome: null, json: false, showTitles: false, only: null, exclude: [] };
-  const takesValue = { "--source": "source", "--max-writes": "maxWrites", "--priorities": "priorities", "--endpoint": "endpoint", "--da-home": "daHome", "--only": "only", "--exclude": "exclude" };
+  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], daHome: null, json: false, showTitles: false, only: null, exclude: [] };
+  const takesValue = { "--source": "source", "--max-writes": "maxWrites", "--priorities": "priorities", "--da-home": "daHome", "--only": "only", "--exclude": "exclude" };
   const flags = { "--apply": "apply", "--json": "json", "--show-titles": "showTitles" };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
@@ -47,10 +50,42 @@ function parseArgs(argv) {
   return opts;
 }
 
+/**
+ * 保底遮蔽：要輸出的字串若含金鑰或不合法的端點原值（兩個變數可能填反），整段換成固定文字。
+ * @param {Array<string|undefined>} secrets 空值會被略過
+ * @returns {(text: unknown) => string}
+ */
+function makeScrub(secrets) {
+  const list = secrets.filter((v) => typeof v === "string" && v.length > 0);
+  return (text) => {
+    const str = String(text);
+    return list.some((v) => str.includes(v)) ? SECRET_HIDDEN : str;
+  };
+}
+
+/** 回應要長得像 Work Hub：清單要有 items 陣列、建立要有 id、勾完成要有 task.id；不像就當失敗，不報成功。 */
+function expectShape(ok, tool) {
+  if (!ok) throw new WorkhubError(`${tool} ${BAD_RESPONSE}`, { tool });
+}
+
+const hasId = (value) => (typeof value === "number" || typeof value === "string") && Number.isInteger(Number(value)) && Number(value) > 0;
+
+/** 端點原值驗證不過時（例如被填成金鑰、帶帳密）才需要遮蔽；合法網址照常可以出現在輸出裡。 */
+function endpointSecret(raw) {
+  if (!raw) return undefined;
+  try {
+    validateEndpoint(raw);
+    return undefined;
+  } catch {
+    return raw;
+  }
+}
+
 async function fetchExisting(client) {
   const views = await Promise.all(["all", "completed"].map((view) => client.callTool("pm_list_personal_tasks", { view, sources: PM_SOURCES })));
+  for (const result of views) expectShape(result && Array.isArray(result.items), "pm_list_personal_tasks");
   const byId = new Map();
-  for (const result of views) for (const task of (result && result.items) || []) byId.set(String(task.id), task);
+  for (const result of views) for (const task of result.items) byId.set(String(task.id), task);
   return [...byId.values()].filter((t) => String(t.external_id || "").startsWith("agenda:"));
 }
 
@@ -70,7 +105,7 @@ function stateDirFor(base, endpoint, apiKey) {
  * 上限計算：每個送出的寫入都算一筆（失敗也算，因為結果不確定時伺服器可能已寫入）；
  * 只有確認是去重命中（同鍵的舊待辦，含已取消）才不算。遇到 401／403 立即停止。
  */
-async function applyPlan(client, plan, maxWrites, map) {
+async function applyPlan(client, plan, maxWrites, map, scrub = String) {
   const queue = [
     ...plan.complete.map((c) => ({ kind: "complete", tool: "pm_complete_personal_task", args: buildCompleteArgs(c), item: c.item, taskId: c.taskId })),
     ...plan.create.map((item) => ({ kind: "create", tool: "pm_create_personal_task", args: buildCreateArgs(item), item })),
@@ -86,22 +121,24 @@ async function applyPlan(client, plan, maxWrites, map) {
     const key = action.item.externalId;
     try {
       const out = await client.callTool(action.tool, action.args);
+      if (action.kind === "complete") expectShape(out && out.task && hasId(out.task.id), action.tool);
+      else expectShape(out && hasId(out.id), action.tool);
       if (action.kind === "complete") {
         results.completed += 1;
         counted += 1;
         map.tasks[key] = { taskId: action.taskId, completed: true };
       } else {
-        if (out && out.deduplicated) results.deduplicated += 1;
+        if (out.deduplicated) results.deduplicated += 1;
         else {
           results.created += 1;
           counted += 1;
         }
-        if (out && out.id) map.tasks[key] = { taskId: Number(out.id), completed: false };
+        map.tasks[key] = { taskId: Number(out.id), completed: false };
       }
     } catch (err) {
       counted += 1;
       results.failed += 1;
-      results.failures.push({ agendaId: action.item.agendaId, action: action.kind, error: String(err.message).slice(0, 200) });
+      results.failures.push({ agendaId: action.item.agendaId, action: action.kind, error: safeText(scrub(err.message), 200) });
       if (err instanceof WorkhubError && AUTH_STATUS.has(err.status)) {
         results.aborted = true;
         results.notAttempted = queue.length - index - 1;
@@ -163,9 +200,18 @@ function renderText(report, plan, opts) {
  * @returns {Promise<number>} 結束碼
  */
 async function main(argv, deps = {}) {
-  const print = deps.print || ((s) => process.stdout.write(`${s}\n`));
   const env = deps.env || process.env;
+  const rawEndpoint = env.WORKHUB_INBOX_ENDPOINT;
+  const apiKey = env.WORKHUB_INBOX_API_KEY;
+  const scrub = makeScrub([apiKey, endpointSecret(rawEndpoint)]);
+  const rawPrint = deps.print || ((s) => process.stdout.write(`${s}\n`));
   let opts;
+  // 最後一道：整份輸出若仍含金鑰或端點原值就不印原文（各錯誤欄位已先逐欄遮蔽，正常不會走到這裡）
+  const print = (s) => {
+    const text = String(s);
+    if (scrub(text) === text) rawPrint(text);
+    else rawPrint(opts && opts.json ? JSON.stringify({ error: SECRET_HIDDEN }) : SECRET_HIDDEN);
+  };
   try {
     opts = parseArgs(argv);
   } catch (err) {
@@ -184,16 +230,15 @@ async function main(argv, deps = {}) {
     return EXIT.source;
   }
 
-  const endpoint = opts.endpoint || env.WORKHUB_INBOX_ENDPOINT;
   let client;
   try {
-    client = deps.client || createClient({ endpoint, apiKey: env.WORKHUB_INBOX_API_KEY });
+    client = deps.client || createClient({ endpoint: rawEndpoint, apiKey, fetchImpl: deps.fetchImpl });
   } catch (err) {
-    print(err.message);
+    print(scrub(err.message));
     return EXIT.usage;
   }
 
-  const stateDir = deps.stateDir || stateDirFor(resolveStateDir({ env }), endpoint, env.WORKHUB_INBOX_API_KEY);
+  const stateDir = deps.stateDir || stateDirFor(resolveStateDir({ env }), rawEndpoint, apiKey);
   let map;
   try {
     map = loadMap(stateDir);
@@ -207,7 +252,7 @@ async function main(argv, deps = {}) {
   try {
     listed = await fetchExisting(client);
   } catch (err) {
-    print(`讀取 Work Hub 現況失敗：${err.message}`);
+    print(`讀取 Work Hub 現況失敗：${safeText(scrub(err.message), 300)}`);
     return err instanceof WorkhubError && AUTH_STATUS.has(err.status) ? EXIT.usage : EXIT.partial;
   }
 
@@ -220,7 +265,7 @@ async function main(argv, deps = {}) {
       map.tasks[task.external_id] = { taskId: Number(task.id), completed: task.workflow_state === "completed" };
     }
     try {
-      report.results = await applyPlan(client, plan, opts.maxWrites, map);
+      report.results = await applyPlan(client, plan, opts.maxWrites, map, scrub);
     } finally {
       saveMap(stateDir, map);
     }
@@ -232,7 +277,8 @@ async function main(argv, deps = {}) {
 
 if (require.main === module) {
   main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (err) => {
-    process.stderr.write(`workhub-inbox 未預期錯誤：${err.message}\n`);
+    const scrub = makeScrub([process.env.WORKHUB_INBOX_API_KEY, endpointSecret(process.env.WORKHUB_INBOX_ENDPOINT)]);
+    process.stderr.write(`workhub-inbox 未預期錯誤：${safeText(scrub(err && err.message), 300)}\n`);
     process.exitCode = 1;
   });
 }

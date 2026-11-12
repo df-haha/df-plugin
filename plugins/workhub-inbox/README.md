@@ -57,9 +57,9 @@ export WORKHUB_INBOX_API_KEY="<個人 API 金鑰>"
 
 ## 使用
 
-在 Claude Code 裡說「同步待辦到 PM」。Claude 會先試跑，列出會建立、會勾完成哪些待辦；你確認後才實際寫入。第一次寫入正式環境只寫 3 筆，請先到 PM 看過再補其餘。
+**一般使用者**：在 Claude Code 裡說「同步待辦到 PM」就好，不用自己打指令。Claude 會先試跑，列出會建立、會勾完成哪些待辦；你確認後才實際寫入。第一次寫入正式環境只寫 3 筆，請先到 PM 看過再補其餘。
 
-也可以直接用命令列跑（以下路徑是在本 repo 根目錄；PowerShell 與 bash 寫法相同）：
+**開發者**：在本 repo 根目錄可以直接跑命令列（PowerShell 與 bash 寫法相同）。從市集安裝的人電腦裡沒有這個資料夾，不適用。
 
 ```
 node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --show-titles
@@ -76,7 +76,6 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 | `--exclude T-3` | 這些代碼這次不建立 | — |
 | `--priorities P0,P1` | 只收這些優先級 | P0,P1,P2 |
 | `--da-home PATH` | daily-agenda 資料夾 | 自動找 |
-| `--endpoint URL` | Work Hub MCP 端點 | `WORKHUB_INBOX_ENDPOINT` |
 | `--show-titles` | 試跑清單顯示標題 | 不顯示 |
 | `--json` | 機器可讀輸出（不含標題），給排程用 | — |
 
@@ -98,7 +97,10 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 
 - 寫入全程不經 AI，待辦標題只當資料傳遞（它是 AI 從第三方訊息整理出來的不可信內容）。
 - 只讀 daily-agenda 的整理成品，不讀原始訊息；daily-agenda 本身維持唯讀。
-- 金鑰只從環境變數讀；`--json` 與錯誤訊息不含標題與金鑰。
+- 金鑰與端點都只從環境變數讀，命令列不能指定端點。
+- 端點只接受 `https://` 開頭的網址（`http://` 只限本機測試用的 127.0.0.1、localhost）；網址裡不能帶帳號密碼。不符合就在送出任何請求前停止。
+- 不跟隨轉址：端點若回轉址就停止，不把金鑰與資料帶到別的網址。
+- 錯誤訊息不含標題、金鑰與端點設定值；萬一訊息裡出現金鑰或填錯的端點設定值，整段會改成固定的提示文字。`--json` 輸出不含標題。
 
 ## 測試
 

@@ -87,6 +87,11 @@ test("resolveDaHome：認得 daily-agenda 自己的 DAILY_AGENDA_HOME", () => {
   assert.equal(resolveDaHome({ env: { DAILY_AGENDA_HOME: "/data/agenda" }, platform: "linux" }), "/data/agenda");
 });
 
+test("resolveDaHome：DAILY_AGENDA_HOME 優先；DA_HOME 不再採用（daily-agenda 自己不認它）", () => {
+  assert.equal(resolveDaHome({ env: { DAILY_AGENDA_HOME: "/real", DA_HOME: "/other" }, platform: "linux" }), "/real");
+  assert.equal(resolveDaHome({ env: { DA_HOME: "D:\\other", USERPROFILE: "C:\\Users\\amy" }, platform: "win32" }), "C:\\Users\\amy\\.daily-agenda");
+});
+
 test("resolveDaHome：--da-home 優先於環境變數", () => {
   assert.equal(resolveDaHome({ explicit: "/x", env: { DAILY_AGENDA_HOME: "/y", DA_HOME: "/z" }, platform: "win32" }), "/x");
 });

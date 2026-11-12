@@ -31,7 +31,8 @@ function fakeClient(existing = []) {
       calls.push({ name, args });
       if (name === "pm_list_personal_tasks") return { items: args.view === "completed" ? [] : existing };
       if (name === "pm_create_personal_task") return { id: nextId++, deduplicated: false };
-      if (name === "pm_complete_personal_task") return { id: args.task_id };
+      // 與 Work Hub 實際回應同形：completePersonalTask 回 { task, next, completed_children, already_completed }
+      if (name === "pm_complete_personal_task") return { task: { id: args.task_id }, next: null, completed_children: [], already_completed: false };
       throw new Error(`unexpected ${name}`);
     },
   };
@@ -41,6 +42,7 @@ function run(argv, client, home, stateDir = fs.mkdtempSync(path.join(os.tmpdir()
   const out = [];
   const code = main(argv, {
     client,
+    env: {},
     daHome: home,
     stateDir,
     now: new Date("2026-11-10T03:00:00Z"),
@@ -241,6 +243,17 @@ test("--only／--exclude：用代碼挑選或排除要建立的項目", async ()
   const excl = JSON.parse((await run(["sync", "--source", "daily-agenda", "--exclude", "T-1002", "--json"], fakeClient(), home)).out);
   assert.deepEqual(excl.create.map((c) => c.agendaId).sort(), ["T-1001", "T-1003"]);
   assert.equal(excl.counts.excluded, 1);
+});
+
+test("parseArgs：不接受 --endpoint（端點只能來自環境變數）", () => {
+  assert.throws(() => parseArgs(["sync", "--endpoint", "https://pm.example/mcp"]), /參數/);
+});
+
+test("說明文件不再教 --endpoint", () => {
+  for (const file of ["../README.md", "../skills/workhub-inbox/SKILL.md"]) {
+    const text = fs.readFileSync(path.join(__dirname, file), "utf8");
+    assert.ok(!text.includes("--endpoint"), file);
+  }
 });
 
 test("parseArgs：--only 代碼格式不符報錯", () => {

@@ -12,7 +12,7 @@ plugin 以「來源轉接器（source adapter）」為單位擴充；v1 只有 `
 
 - daily-agenda 規格 §75「不寫入 workhub」維持不變：daily-agenda 本身仍唯讀。寫入由本 plugin 的獨立腳本負責，只讀 daily-agenda 的整理成品（`CURRENT` generation 的 `ledger.jsonl`＋`state.json`），不讀 `runs/` 的原始訊息。
 - 待辦標題是 AI 從第三方訊息整理出的不可信內容。**寫入全程不經 AI**：腳本直接以 HTTP 呼叫 Work Hub 的 MCP 端點（stateless JSON-RPC `tools/call`），標題只當資料傳遞。skill 只負責跑腳本、轉述筆數，不把標題放進任何工具參數。
-- 金鑰與端點只從環境變數讀取（`WORKHUB_INBOX_API_KEY`、`WORKHUB_INBOX_ENDPOINT`；端點可用 `--endpoint` 覆寫），不寫檔、不進 log。plugin 不認個人機器上的其他變數名，由呼叫端（例如排程腳本）對應。`--json` 輸出與錯誤訊息只有代碼、筆數與動作類型，不含標題；人看的試跑清單加 `--show-titles` 才顯示標題。
+- 金鑰與端點只從環境變數讀取（`WORKHUB_INBOX_API_KEY`、`WORKHUB_INBOX_ENDPOINT`；命令列不提供端點參數，避免不可信的標題內容誘導 AI 改掉金鑰的去處），不寫檔、不進 log。端點送出前先驗證：只接受 `https:`，`http:` 只放行 127.0.0.1、localhost、[::1]，網址不得含帳號密碼；不跟隨轉址。錯誤訊息只帶錯誤代碼，不帶底層訊息與端點原字串；輸出前另以金鑰與驗證不過的端點原值做保底遮蔽。plugin 不認個人機器上的其他變數名，由呼叫端（例如排程腳本）對應。`--json` 輸出與錯誤訊息只有代碼、筆數與動作類型，不含標題；人看的試跑清單加 `--show-titles` 才顯示標題。
 - 預設 dry-run（試跑，只列出不寫入）；`--apply` 才寫入，且受 `--max-writes`（預設 20）上限保護。
 
 ## 3. 資料對應
@@ -71,7 +71,7 @@ plugin 以「來源轉接器（source adapter）」為單位擴充；v1 只有 `
 ```
 node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
      [--priorities P0,P1] [--only T-1234,...] [--exclude T-1234,...]
-     [--endpoint URL] [--da-home PATH] [--show-titles] [--json]
+     [--da-home PATH] [--show-titles] [--json]
 ```
 
 - `--only`／`--exclude`：以 agenda 代碼挑選或排除「建立」的項目（只接受 `T-` 加 4 碼數字），完成同步不受影響。被排除的項目下次執行仍會出現；要永久不收，到 PM 建立後取消即可。

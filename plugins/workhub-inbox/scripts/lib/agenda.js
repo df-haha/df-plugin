@@ -30,10 +30,12 @@ function taipeiDate(value) {
   return new Intl.DateTimeFormat("en-CA", { timeZone: TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }
 
-/** 找 daily-agenda home：明送 > DA_HOME > DAILY_AGENDA_HOME（daily-agenda 自己認的變數）> Windows %USERPROFILE% > WSL 換算 > 家目錄。 */
+/**
+ * 找 daily-agenda home：明送 > DAILY_AGENDA_HOME > Windows %USERPROFILE% > WSL 換算 > 家目錄。
+ * 只認 daily-agenda 自己認的 DAILY_AGENDA_HOME，兩邊才會讀寫同一個資料夾。
+ */
 function resolveDaHome({ explicit, env = process.env, platform = process.platform, exec = execFileSync } = {}) {
   if (explicit) return explicit;
-  if (env.DA_HOME) return env.DA_HOME;
   if (env.DAILY_AGENDA_HOME) return env.DAILY_AGENDA_HOME;
   if (platform === "win32") return path.win32.join(env.USERPROFILE || os.homedir(), ".daily-agenda");
   if (platform === "linux" && /microsoft/i.test(os.release())) {
