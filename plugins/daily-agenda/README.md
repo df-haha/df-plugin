@@ -1,6 +1,6 @@
 # daily-agenda — 每日待辦與行程彙整
 
-> ⚠️ 測試中版本（0.0.3-dev）：完整流程尚未在 Windows 上驗證完畢，請先不要推廣給同事。
+> ⚠️ 測試中版本（0.0.4-dev）：完整流程尚未在 Windows 上驗證完畢，請先不要推廣給同事。
 
 每天一個指令 `/agenda`，一次讀取你的 **Outlook 信件、Outlook 行事曆、LINE 電腦版對話**，依照你個人的「判斷準則」整理出：
 
@@ -23,14 +23,14 @@
 
 ## 需求
 
-- Windows（x64）上的 Claude Code（原生版，不支援 WSL 或 macOS）
-- Node.js 24 以上、[uv](https://docs.astral.sh/uv/)
+- Windows（x64）上的 Claude Code（原生版，不支援 WSL 或 macOS）。要用官方安裝程式裝的 `claude.exe`；用 npm 裝的版本（`claude.cmd`）分析時會被 Windows 截斷指示，無法使用。在 PowerShell 跑 `Get-Command claude -All` 可以看是哪一種。
+- Node.js 24 以上、[uv](https://docs.astral.sh/uv/)。剛裝好要完全關掉 Claude Code 再打開，它才找得到。
 - LINE 電腦版已登入並開著視窗（縮到右下角時可能讀不到）
 - 已安裝並登入 `df-graph` plugin（`/df-graph-setup`）
 
 ## 開始使用
 
-1. 安裝 `df-graph` 與 `daily-agenda` plugin。
+1. 安裝 `df-graph` 與 `daily-agenda` plugin，然後**完全關掉 Claude Code 再打開**。之後每次更新 plugin 也一樣要重開，不然還是舊版的設定流程，安全鎖也不會生效。
 2. 執行 `/agenda-setup`，跟著問答完成設定（大約 10 分鐘；第一次會下載約 100MB 的執行元件）：
    同意說明 → 環境檢查 → LINE 試讀 → 自動找到你的 LINE 帳號資料 → 串 Outlook → 選擇不讀的 LINE 對話 → 選擇信箱資料夾 → 個人資料夾（可跳過）→ 輸出格式、位置與排程 → 掃描過去 7／14／30 天建立判斷準則。
 3. 之後每天執行 `/agenda`。
