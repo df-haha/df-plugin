@@ -143,12 +143,13 @@ _node_available = _shutil.which("node") is not None
 
 
 class TestCheckLockHook:
-    """F8: envcheck runs the lock hook with a tainted fixture; it must answer
-    with a non-deny JSON object (the taint marker blocks nothing since 2026-11-13)."""
+    """F8: envcheck runs the lock hook with a marked-session fixture that
+    writes to the calendar; the hook must deny it (one of the three kinds a
+    marked session still blocks since 2026-11-13)."""
 
     @pytest.mark.skipif(not _node_available, reason="node not on PATH")
     def test_passes_when_hook_works(self, tmp_path: Path) -> None:
-        """With a taint marker present, the hook still answers and does not deny."""
+        """With a taint marker present, the hook denies a calendar write."""
         plugin_root = Path(__file__).resolve().parents[2]
         result = envcheck.check_lock_hook(
             runner=subprocess.run,
@@ -157,6 +158,21 @@ class TestCheckLockHook:
         )
         assert result["ok"] is True
         assert result["name"] == "lock_hook"
+
+    @pytest.mark.skipif(not _node_available, reason="node not on PATH")
+    def test_fails_when_hook_does_not_deny(self, tmp_path: Path) -> None:
+        """A hook that runs but lets a marked calendar write through fails."""
+        fake_plugin = tmp_path / "fake-plugin"
+        (fake_plugin / "hooks").mkdir(parents=True)
+        (fake_plugin / "hooks" / "lock.mjs").write_text(
+            "process.stdout.write('{}');\n", encoding="utf-8")
+        result = envcheck.check_lock_hook(
+            runner=subprocess.run,
+            plugin_root=fake_plugin,
+            tmp_dir=tmp_path / "tmp",
+        )
+        assert result["ok"] is False
+        assert result["code"] == "LOCK_HOOK_UNAVAILABLE"
 
     @pytest.mark.skipif(not _node_available, reason="node not on PATH")
     def test_fails_when_hook_missing(self, tmp_path: Path) -> None:

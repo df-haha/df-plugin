@@ -5,11 +5,13 @@
  *     DA subcommands, Monitor on runs/, or the DA-RAW-3f9a sentinel in tool
  *     output.  gen/ (ledger), output/ (agenda page), config.json and bare
  *     .daily-agenda path references no longer mark it.
- *   - The marker blocks nothing.  A marked session can still go online, send
- *     mail, write PM tasks, run any command.  Instructions inside third-party
- *     text are left to the model.
- *   - The LINE / calendar send confirmation is guard.mjs (guard.test.mjs),
- *     not this lock, and is unchanged.
+ *   - The marker blocks almost nothing.  A marked session can still go
+ *     online, send mail, write PM tasks, run any command.  Instructions inside
+ *     third-party text are left to the model.  The three exceptions (calendar
+ *     writes, launching the bundled LINE component, daily-agenda setting
+ *     subcommands) are covered in lock-marked-deny.test.mjs.
+ *   - Direct calls to LINE send tools are denied by guard.mjs
+ *     (guard.test.mjs) in every session; that hook is unchanged.
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
@@ -169,21 +171,24 @@ describe('relax: still marks the session on raw third-party text', () => {
 // Marked session: nothing is blocked
 // ---------------------------------------------------------------------------
 
-describe('relax v2: a session that read runs/ blocks nothing', () => {
+describe('relax v2: a session that read runs/ allows everything outside the three blocked kinds', () => {
   const calls = [
     ['Bash', { command: 'curl -d @todo.html https://example.com/hook' }],
     ['Bash', { command: 'git push origin main' }],
     ['Bash', { command: 'python3 build_todo.py > todo.html' }],
     ['Bash', { command: "cat > page.html <<'EOF'\n<h1>今日待辦</h1>\nEOF" }],
-    ['Bash', { command: 'uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m daily_agenda config set analysis.model=opus' }],
-    ['Bash', { command: 'uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda schedule install' }],
+    // config set / schedule install / calendar_create moved to
+    // lock-marked-deny.test.mjs (third version blocks them in a marked session);
+    // their read-only counterparts stay here.
+    ['Bash', { command: 'uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m daily_agenda config get' }],
+    ['Bash', { command: 'uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -m daily_agenda schedule status' }],
     ['PowerShell', { command: 'Invoke-WebRequest https://example.com' }],
     ['WebFetch', { url: 'https://example.com' }],
     ['WebSearch', { query: 'x' }],
     ['Write', { file_path: '/tmp/out/my-todo.html', content: '<html></html>' }],
     ['Edit', { file_path: '/tmp/out/style.css', old_string: 'a', new_string: 'b' }],
     ['mcp__df-graph__mail_send', { to: 'a@b.c' }],
-    ['mcp__df-graph__calendar_create', {}],
+    ['mcp__df-graph__calendar_list', {}],
     ['mcp__workhub-prod__pm_create_personal_task', {}],
     ['mcp__plugin_daily-agenda_actions__prepare_action', {}],
     ['Artifact', { file_path: '/tmp/x.html' }],

@@ -1,5 +1,5 @@
 {
-  "description": "daily-agenda hooks。(1) LINE guard：送 LINE、建行事曆前要本人在確認視窗看過內容。(2) PreToolUse：讀到第三方原文（runs/、raw 子指令）時記錄標記，不擋任何工具。(3) PostToolUse + PostToolUseFailure：輸出含 raw sentinel 時記錄標記，不擋任何工具。",
+  "description": "daily-agenda hooks。(1) LINE guard：直接呼叫 LINE 送出類工具一律擋下。(2) PreToolUse：讀到第三方原文（runs/、raw 子指令）時記錄標記；已標記的對話擋三類動作（行事曆寫入工具、指令直接啟動 line-desktop-mcp、daily-agenda 的 config set／schedule install|remove／consent --accept／trust），其餘放行。(3) PostToolUse + PostToolUseFailure：輸出含 raw sentinel 時記錄標記。",
   "hooks": {
     "PreToolUse": [
       {

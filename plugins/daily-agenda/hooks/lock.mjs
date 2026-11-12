@@ -1,18 +1,25 @@
 #!/usr/bin/env node
 
 /**
- * PreToolUse hook: session taint marker.
+ * PreToolUse hook: session taint marker + three marked-session denials.
  *
  * Decides whether this call exposes third-party raw text (Read under runs/,
  * raw-emitting DA subcommands, Monitor on runs/) and, if so, records a taint
- * marker for the session.  Since 2026-11-13 the marker blocks nothing: every
- * call is allowed, locked or not.  Instructions hidden in third-party text
- * are handled by the model (CLI output fences untrusted text); sending LINE
- * messages / creating calendar events still needs the user's confirmation
- * through guard.mjs, which is a separate hook.
+ * marker for the session.
  *
- * Always fail-open.  Emits {} (never "allow" — that suppresses permission
- * prompts).
+ * Since 2026-11-13 (third version) a marked session is denied only:
+ *   (a) calendar write tools  mcp__<server>__calendar_(create|update|delete|forward|rsvp)
+ *   (b) Bash / PowerShell / Monitor commands naming the bundled LINE
+ *       component (line-desktop-mcp)
+ *   (c) daily-agenda setting subcommands: config set, schedule install|remove,
+ *       consent --accept, trust
+ * Everything else is allowed; instructions hidden in third-party text are
+ * left to the model (CLI output fences untrusted text).  Direct calls to
+ * LINE send tools are denied in every session by guard.mjs, a separate hook.
+ *
+ * Always fail-open: if the marker cannot be read or anything throws, the
+ * call is allowed.  Emits {} for allow (never "allow" — that suppresses
+ * permission prompts).
  */
 
 import { readFileSync } from 'node:fs';
@@ -22,6 +29,7 @@ import {
   checkMonitorPreTaint,
   sanitizeSessionId,
   isUnderRuns,
+  checkMarkedSessionDeny,
 } from './lock-core.mjs';
 import {
   resolveHome, isSessionTainted, markSessionTainted,
@@ -30,6 +38,16 @@ import {
 
 const outputAllow = () => {
   process.stdout.write(JSON.stringify({}));
+};
+
+const outputDeny = (reason) => {
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  }));
 };
 
 try {
@@ -53,6 +71,8 @@ try {
   if (!sanitizedId) { outputAllow(); process.exit(0); }
 
   if (isSessionTainted(daHome, sanitizedId)) {
+    const blocked = checkMarkedSessionDeny(toolName, toolInput);
+    if (blocked.deny) { outputDeny(blocked.reason); process.exit(0); }
     // Draft laundering record: runs/ paths written while tainted (best-effort;
     // a failed record never blocks the write).
     if ((toolName === 'Write' || toolName === 'Edit') &&

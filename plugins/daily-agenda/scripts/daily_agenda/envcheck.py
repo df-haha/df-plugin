@@ -120,7 +120,7 @@ def check_environment(
 
 
 # ---------------------------------------------------------------------------
-# F8: hook runtime self-test
+# F8: lock hook self-test
 # ---------------------------------------------------------------------------
 
 _LOCK_SELFTEST_TIMEOUT_S = 15
@@ -133,13 +133,13 @@ def check_lock_hook(
     plugin_root: Path | None = None,
     tmp_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """Run the lock hook with a tainted fixture and verify it answers.
+    """Run the lock hook with a marked-session fixture and verify it denies.
 
-    Creates a temporary DA home with a taint marker, feeds a WebFetch
-    PreToolUse fixture on stdin, and checks that the hook runs and returns a
-    JSON object that does not deny (since 2026-11-13 the taint marker blocks
-    nothing).  What this really verifies is that ``node`` can run the
-    plugin's hooks — guard.mjs (LINE / calendar send confirmation) needs it.
+    Creates a temporary DA home with a taint marker, feeds a calendar-write
+    PreToolUse fixture on stdin, and checks for a deny response — a calendar
+    write is one of the three kinds a marked session still blocks (since
+    2026-11-13).  This also proves ``node`` can run the plugin's hooks, which
+    guard.mjs (denies direct LINE send tools) needs as well.
     Cross-platform: only requires ``node`` on PATH (not Windows-specific).
 
     Parameters
@@ -176,8 +176,8 @@ def check_lock_hook(
     try:
         # 4. Build the stdin fixture
         fixture = json.dumps({
-            "tool_name": "WebFetch",
-            "tool_input": {"url": "https://selftest.invalid"},
+            "tool_name": "mcp__selftest__calendar_create",
+            "tool_input": {"subject": "selftest"},
             "session_id": _LOCK_SELFTEST_SESSION,
         })
 
@@ -205,10 +205,10 @@ def check_lock_hook(
 
         if not isinstance(result, dict):
             return _check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE")
-        decision = result.get("hookSpecificOutput", {}).get("permissionDecision")
+        decision = (result.get("hookSpecificOutput") or {}).get("permissionDecision")
         if decision == "deny":
-            return _check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE")
-        return _check("lock_hook", True)
+            return _check("lock_hook", True)
+        return _check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE")
 
     finally:
         # 7. Clean up
