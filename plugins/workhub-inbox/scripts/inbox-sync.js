@@ -3,7 +3,7 @@
 
 // workhub-inbox 命令列入口：外部待辦 → Work Hub 個人待辦（單向、可重跑）。
 // 用法：node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
-//        [--priorities P0,P1] [--only T-1234,...|--no-create] [--exclude T-1234,...]
+//        [--report R-XXX|latest] [--priorities P0,P1] [--only T-1234,...|--no-create] [--exclude T-1234,...]
 //        [--da-home PATH] [--review-file] [--json]
 // 環境變數：WORKHUB_INBOX_ENDPOINT、WORKHUB_INBOX_API_KEY（沒設就讀 DF_WORKHUB_API_KEY）；都只從環境變數讀，金鑰不寫檔、不印出。
 // 端點刻意不開放命令列指定，不能讓不可信內容有機會改掉金鑰送去的地方。
@@ -12,7 +12,7 @@
 const { createHash } = require("node:crypto");
 const path = require("node:path");
 
-const { AgendaSourceError, loadAgenda, resolveDaHome, taipeiDate, toInboxItems } = require("./lib/agenda.js");
+const { AgendaSourceError, REPORT_CODE, loadAgenda, reportTodoIds, resolveDaHome, taipeiDate, toInboxItems } = require("./lib/agenda.js");
 const { buildCompleteArgs, buildCreateArgs, planSync, safeText } = require("./lib/plan.js");
 const { ReviewFileError, buildReviewHtml, writeReviewFile } = require("./lib/review.js");
 const { StateError, loadMap, mergeExisting, resolveStateDir, saveMap } = require("./lib/state.js");
@@ -32,8 +32,8 @@ class UsageError extends Error {}
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (command !== "sync") throw new UsageError("用法：inbox-sync.js sync --source daily-agenda [--apply] ...");
-  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], daHome: null, json: false, reviewFile: false, only: null, exclude: [], noCreate: false };
-  const takesValue = { "--source": "source", "--max-writes": "maxWrites", "--priorities": "priorities", "--da-home": "daHome", "--only": "only", "--exclude": "exclude" };
+  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], daHome: null, json: false, reviewFile: false, only: null, exclude: [], noCreate: false, report: null };
+  const takesValue = { "--source": "source", "--max-writes": "maxWrites", "--priorities": "priorities", "--da-home": "daHome", "--only": "only", "--exclude": "exclude", "--report": "report" };
   const flags = { "--apply": "apply", "--json": "json", "--review-file": "reviewFile", "--no-create": "noCreate" };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
@@ -56,6 +56,10 @@ function parseArgs(argv) {
     if (opts[key].some((id) => !AGENDA_ID.test(id))) throw new UsageError(`--${key} 只接受 agenda 代碼（例 T-1234，逗號分隔）`);
   }
   if (opts.noCreate && (opts.only || opts.exclude.length)) throw new UsageError("--no-create 不能和 --only、--exclude 一起用");
+  if (opts.report !== null && opts.report !== "latest" && !REPORT_CODE.test(opts.report)) {
+    throw new UsageError("--report 只接受報表代碼（R- 加 3 碼大寫英數，例 R-7KQ）或 latest");
+  }
+  if (opts.noCreate && opts.report !== null) throw new UsageError("--no-create 不能和 --report 一起用（--report 是用來挑要建立的項目）");
   opts.maxWrites = Number(opts.maxWrites);
   if (!Number.isInteger(opts.maxWrites) || opts.maxWrites < 0) throw new UsageError("--max-writes 要是 0 以上的整數");
   return opts;
@@ -181,10 +185,11 @@ function selectCreates(plan, opts) {
   return { ...plan, create, excluded: plan.create.length - create.length };
 }
 
-function summarize(opts, plan) {
+function summarize(opts, plan, reportScope) {
   return {
     mode: opts.apply ? "apply" : "dry-run",
     source: opts.source,
+    report: reportScope ? reportScope.code : null,
     priorities: opts.priorities,
     counts: { create: plan.create.length, complete: plan.complete.length, maybeDone: plan.maybeDone.length, excluded: plan.excluded, ...plan.skipped },
     create: plan.create.map((i) => ({ agendaId: i.agendaId, priority: i.agendaPriority, due: i.due, source: i.sourceLabel })),
@@ -195,9 +200,11 @@ function summarize(opts, plan) {
 function renderText(report, plan) {
   const c = report.counts;
   const lines = [
-    `workhub-inbox ${report.mode}（來源 ${report.source}，優先級 ${report.priorities.join("/")}）`,
+    `workhub-inbox ${report.mode}（來源 ${report.source}${report.report ? `，報表 ${report.report}` : ""}，優先級 ${report.priorities.join("/")}）`,
     `預計建立 ${c.create}、勾完成 ${c.complete}；可能已完成 ${c.maybeDone}（不寫入，請到 agenda 確認）`,
-    `略過：PM 已有 ${c.exists}、優先級不符 ${c.priority}、過期或太舊 ${c.stale}、指定排除 ${c.excluded}`,
+    report.report
+      ? `略過：PM 已有 ${c.exists}、不在這份報表 ${c.notInReport}、優先級不符 ${c.priority}、指定排除 ${c.excluded}`
+      : `略過：PM 已有 ${c.exists}、優先級不符 ${c.priority}、過期或太舊 ${c.stale}、指定排除 ${c.excluded}`,
   ];
   if (plan.create.length) {
     lines.push("", "預計建立：");
@@ -212,7 +219,9 @@ function renderText(report, plan) {
     lines.push("", `寫入結果：建立 ${r.created}、已存在 ${r.deduplicated}、勾完成 ${r.completed}、失敗 ${r.failed}、超過上限未執行 ${r.deferred}`);
     for (const f of r.failures) lines.push(`- 失敗 ${f.agendaId}（${f.action}）：${f.error}`);
     if (r.aborted) lines.push(`⚠️ 金鑰無效或沒有寫入權限，已停止；中止後未執行 ${r.notAttempted} 筆。`);
-    if (r.deferred > 0) lines.push(`⚠️ 有 ${r.deferred} 筆超過上限，下次執行再補；若一直補不完，出現超過 7 天的會被略過，必要時調高 --max-writes。`);
+    if (r.deferred > 0) lines.push(report.report
+      ? `⚠️ 有 ${r.deferred} 筆超過上限還沒執行，請用同一行指令重跑，直到「超過上限未執行」是 0。`
+      : `⚠️ 有 ${r.deferred} 筆超過上限，下次執行再補；若一直補不完，出現超過 7 天的會被略過，必要時調高 --max-writes。`);
   }
   return lines.join("\n");
 }
@@ -243,10 +252,12 @@ async function main(argv, deps = {}) {
   }
 
   let items;
+  let reportScope = null;
   try {
     const home = deps.daHome || resolveDaHome({ explicit: opts.daHome, env });
     const { ledger, state } = loadAgenda(home);
     items = toInboxItems(ledger, state);
+    if (opts.report !== null) reportScope = reportTodoIds(state, opts.report);
   } catch (err) {
     if (!(err instanceof AgendaSourceError)) throw err;
     print(err.message);
@@ -281,8 +292,8 @@ async function main(argv, deps = {}) {
   }
 
   const existing = mergeExisting(listed, map);
-  const plan = selectCreates(planSync({ items, existing, today: taipeiDate(deps.now || new Date()), priorities: opts.priorities }), opts);
-  const report = summarize(opts, plan);
+  const plan = selectCreates(planSync({ items, existing, today: taipeiDate(deps.now || new Date()), priorities: opts.priorities, reportIds: reportScope && reportScope.ids }), opts);
+  const report = summarize(opts, plan, reportScope);
   if (opts.reviewFile) {
     // 先寫清單檔再寫入 PM：清單檔寫不出來就整個停下，不送任何寫入
     try {

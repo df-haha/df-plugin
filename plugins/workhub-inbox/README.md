@@ -72,32 +72,32 @@ export WORKHUB_INBOX_API_KEY="<個人 API 金鑰>"
 
 ## 使用
 
-**一般使用者**：在 Claude Code 裡說「同步待辦到 PM」就好，不用自己打指令。
+**一般使用者**：在 daily-agenda 的彙整頁勾完成、刪除、改優先後，照常複製「確認待辦 R-XXX…」那段文字貼回 Claude。daily-agenda 更新完待辦登記簿後，Claude 會在同一個對話直接把這份彙整頁保留下來的待辦寫進 PM，你標完成或刪除的，PM 對應那筆會勾完成。沒有剛確認過的彙整頁時，說「同步待辦到 PM」就會同步最新一份。
 
-1. 開一個新的對話再說「同步待辦到 PM」，不要接在剛看過 agenda 待辦的對話後面（那個對話裡已經有待辦標題）。
-2. Claude 先試跑，告訴你會建立幾筆、勾完成幾筆，以及一個清單檔的位置（檔名 `inbox-review.html`，Windows 通常在 `C:\Users\<你的帳號>\.workhub-inbox\`）。
-3. 你自己打開那個清單檔看待辦標題：在檔案總管的網址列貼上路徑按 Enter，或對檔案按兩下用瀏覽器開。標題不會顯示在 Claude 的對話裡，這是刻意的。
-4. 回 Claude 要同步哪些代碼（例如「同步 T-1234、T-5678」）或「全部同步」。「全部」指的是你在清單檔看過的那些，之後才新整理出來的待辦不會一起寫進去。
-5. Claude 才實際寫入。第一次寫入正式環境只寫 3 筆，請先到 PM 看過再補其餘。
+確認只在彙整頁做一次：不用另開對話、不另外試跑、不另看一份清單、也不分批先寫 3 筆（2026-11-13 決定拿掉這三道確認）。Claude 會告訴你建立幾筆、勾完成幾筆、失敗幾筆。
+
+想先看清單再寫的話，直接跟 Claude 說「先給我看清單」：它會先試跑，把標題寫進本機的清單檔（`inbox-review.html`，Windows 通常在 `C:\Users\<你的帳號>\.workhub-inbox\`）讓你自己打開看，你回覆要哪些代碼後才寫入。
 
 **不要開「略過權限確認」模式。** 金鑰放在環境變數，這台電腦上的 Claude 對話都讀得到。Claude 要執行連線或寄送類的指令時會跳出確認視窗，這是最後一道防線：看到不是你要的動作，就按拒絕。
 
 **開發者**：在本 repo 根目錄可以直接跑命令列（PowerShell 與 bash 寫法相同）。從市集安裝的人電腦裡沒有這個資料夾，不適用。
 
 ```
-node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --review-file
-node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --apply --max-writes 3 --only T-1234,T-5678
+node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --apply --report R-7KQ
+node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --report latest --review-file
+node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --apply --report latest --only T-1234,T-5678
 ```
 
-第一行是試跑，只列出、不寫入，標題寫進清單檔；第二行實際寫入，`--only` 填試跑列出、你看過的代碼。實寫請一律帶 `--only`（或只勾完成時帶 `--no-create`）：不帶的話，試跑之後才整理出來、你還沒看過的待辦也會一起寫進去。
+第一行是預設流程：把彙整頁 R-7KQ 列出、登記簿現在仍未完成的待辦寫進 PM，並把 agenda 已完成或不處理的在 PM 勾完成。第二行是試跑，只列出、不寫入，標題寫進清單檔。第三行只寫最新彙整頁裡你挑的代碼。
 
 | 參數 | 說明 | 預設 |
 |---|---|---|
 | `--apply` | 實際寫入；沒帶就是試跑 | 試跑 |
-| `--max-writes N` | 單次最多送出幾筆寫入（失敗也算，已存在的不算），超過的下次再補；一直補不完時超過 7 天的會被略過 | 20 |
-| `--only T-1234,T-5678` | 只建立這些 agenda 代碼（格式是 `T-` 加四碼數字，至少一個） | 全部 |
+| `--report R-XXX` | 只建立這份彙整頁列出、登記簿現在仍未完成的待辦（`R-` 加 3 碼大寫英數；`latest`＝最新一份）。daily-agenda 只保留最新一份的對照，舊代碼會回結束碼 2 | 不限報表 |
+| `--max-writes N` | 單次最多送出幾筆寫入（失敗也算，已存在的不算），超過的用同一行重跑補；不帶 `--report` 時一直補不完，超過 7 天的會被略過 | 20 |
+| `--only T-1234,T-5678` | 只建立這些 agenda 代碼（格式是 `T-` 加四碼數字，至少一個）；和 `--report` 一起用時取交集 | 全部 |
 | `--exclude T-9012` | 這些代碼這次不建立 | — |
-| `--no-create` | 只勾完成，不建立任何待辦（不能和 `--only`、`--exclude` 一起用） | — |
+| `--no-create` | 只勾完成，不建立任何待辦（不能和 `--report`、`--only`、`--exclude` 一起用） | — |
 | `--priorities P0,P1` | 只收這些優先級 | P0,P1,P2 |
 | `--da-home PATH` | daily-agenda 資料夾 | 自動找 |
 | `--review-file` | 把清單（含標題與來源）寫進 `~/.workhub-inbox/inbox-review.html`，每次覆蓋；畫面上只顯示代碼與檔案位置 | 不寫 |
@@ -107,8 +107,9 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 
 | agenda 狀態 | PM 動作 |
 |---|---|
-| 未完成，期限或出現日期在 7 天內，PM 還沒有 | 建立（P0→優先 1、P1→2、P2→3；期限填全天到期日；來源 `line`／`outlook`；標籤 LINE／信件／行事曆） |
-| 已完成、不處理 | PM 對應待辦勾完成 |
+| 未完成，列在 `--report` 指定的彙整頁上，PM 還沒有（不看出現多久） | 建立（同下） |
+| 未完成，不帶 `--report`，期限或出現日期在 7 天內，PM 還沒有 | 建立（P0→優先 1、P1→2、P2→3；期限填全天到期日；來源 `line`／`outlook`；標籤 LINE／信件／行事曆） |
+| 已完成、不處理 | PM 對應待辦勾完成（不限報表） |
 | 可能已完成 | 不寫入，只列筆數 |
 
 使用者在 PM 改過的內容不會被覆蓋；PM 勾完成不回寫 agenda；在 PM 取消的待辦不會被重建（伺服器去重含已取消）。去重鍵是 `agenda:<代碼>:<建立時間>`（agenda 代碼是 4 碼隨機數字，單用可能重複）。
