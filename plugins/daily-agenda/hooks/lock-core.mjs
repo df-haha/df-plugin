@@ -785,20 +785,50 @@ const _protectedReason = (normPath, ctx) => {
 
 const DESTRUCTIVE_RE = /(?<![\w.-])(?:rm|rmdir|mv|unlink|shred|truncate|del|erase|rd|ri|remove-item|move-item|rename-item)(?:\.exe)?(?![\w.-])/i;
 
+/**
+ * Canonical forms one shell token may mean on Windows + Git Bash:
+ * bash semantics (backslash = escape), Windows semantics (backslash =
+ * separator, as in PowerShell and double-quoted paths), and the Git Bash
+ * drive form `/c/Users/...` → `c:/users/...`.
+ */
+const _drive = (p) => p.replace(/^\/([a-zA-Z])(?=\/|$)/, (_, d) => `${d}:`);
+const _pathVariants = (token, cwd) => {
+  const out = new Set();
+  const add = (v) => { if (v) out.add(v); };
+  add(_canonShellToken(token, cwd));
+  const unquoted = token.replace(/["']/g, '');
+  if (!unquoted || unquoted.startsWith('-')) return [...out];
+  const homeStr = (process.env.USERPROFILE || process.env.HOME || '').replace(/\\/g, '/');
+  let win = unquoted.replace(/\\/g, '/');
+  if (homeStr) win = win.replace(/^~(?=\/|$)/, homeStr).replace(/\$HOME\b|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE\b|\$USERPROFILE\b/gi, homeStr);
+  add(canonicalize(win, cwd));
+  add(canonicalize(_drive(win), cwd));
+  const bashForm = _canonShellToken(token, cwd);
+  if (bashForm) add(canonicalize(_drive(bashForm)));
+  return [...out];
+};
+
 const _tamperHit = (command, ctx) => {
   const normHome = ctx?.daHome ? canonicalize(ctx.daHome) : '';
-  const taintDir = normHome ? normHome + '/taint' : '';
   const destructive = DESTRUCTIVE_RE.test(command);
   for (const token of command.split(/[\s;|&<>()`,]+/)) {
-    const normToken = _canonShellToken(token, ctx?.cwd);
-    if (!normToken) continue;
-    const reason = _protectedReason(normToken, ctx);
-    if (reason) return reason;
-    // `rm -rf <home>` (or an ancestor) removes the marker with it
-    if (destructive && taintDir && taintDir.startsWith(normToken + '/')) return '上鎖紀錄';
+    for (const normToken of _pathVariants(token, ctx?.cwd)) {
+      const reason = _protectedReason(normToken, ctx);
+      if (reason) return reason;
+      // `rm -rf <home>` removes the marker with it
+      if (destructive && normHome && normToken === normHome) return '上鎖紀錄';
+    }
   }
-  // `cd <home> && rm -rf taint`: relative form the cwd check cannot resolve
-  if (destructive && /(?:^|[\s"'/\\])taint(?:[/\\"'\s]|$)/i.test(command)) return '上鎖紀錄';
+  if (destructive) {
+    // `cd <home> && rm -rf taint`: relative form the cwd check cannot resolve
+    if (/(?:^|[\s"'/\\])taint(?:[/\\"'\s]|$)/i.test(command)) return '上鎖紀錄';
+    // `rm -rf $SOME_VAR/.daily-agenda` and other forms the token check misses
+    const homeName = normHome ? normHome.split('/').pop() : '';
+    if (homeName) {
+      const esc = homeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp(`(?:^|[\\s"'/\\\\])${esc}(?:[/\\\\]?["'\\s]|[/\\\\]?$)`, 'i').test(command)) return '上鎖紀錄';
+    }
+  }
   return null;
 };
 
@@ -1392,8 +1422,11 @@ export const checkTaintedWrite = (toolInput, ctx) => {
   const filePath = toolInput?.file_path;
   if (typeof filePath !== 'string' || filePath.length === 0) return deny('（Write：路徑無效）');
 
-  // Check the plain path and the parent-realpath form (symlinked parents).
-  for (const key of draftKeys(filePath, ctx?.cwd)) {
+  // Check the plain path, the parent-realpath form (symlinked parents) and
+  // the Git Bash drive form (/c/Users/... → c:/users/...).
+  const keys = draftKeys(filePath, ctx?.cwd);
+  for (const k of [...keys]) keys.push(_drive(k));
+  for (const key of keys) {
     const reason = _protectedReason(key, ctx);
     if (reason) return deny(`（Write／Edit：不能修改${reason}，否則鎖定會失效）。要解除鎖定請開新對話。`);
   }
