@@ -100,4 +100,6 @@ macOS／Linux 用 `export WORKHUB_INBOX_ENDPOINT=...`；還沒設 `DF_WORKHUB_AP
 
 ## 回報格式
 
-轉述腳本摘要的筆數：建立、勾完成、失敗，再加上可能已完成、略過（PM 已有、不在這份報表、優先級不符）、超過上限未執行。失敗時附腳本給的 agenda 代碼與錯誤代碼（例如 `VALIDATION_ERROR`、`HTTP 503`；`SERVER_ERROR_TEXT_HIDDEN` 表示伺服器沒給可用的代碼），不猜原因；要看詳細原因請使用者到 PM 系統查。
+轉述腳本摘要的筆數：建立、勾完成、失敗，再加上可能已完成、略過（PM 已有、不在這份報表、優先級不符）、超過上限未執行。
+
+「可能已完成」大於 0 時，告訴使用者：這幾筆是彙整頁「可能已完成」區的項目，在彙整頁按「保留」不會改變它們的狀態，所以不會進 PM。真的還沒做完、要進 PM 的，請使用者在 daily-agenda 把它改回未完成（daily-agenda 的 `reject-done --todo T-xxxx`），再同步一次。失敗時附腳本給的 agenda 代碼與錯誤代碼（例如 `VALIDATION_ERROR`、`HTTP 503`；`SERVER_ERROR_TEXT_HIDDEN` 表示伺服器沒給可用的代碼），不猜原因；要看詳細原因請使用者到 PM 系統查。
