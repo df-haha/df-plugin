@@ -340,6 +340,77 @@ class TestMailSelectCLI:
         assert obj["code"] == "CONSENT_REQUIRED"
 
 
+class TestMailSelectByNumber:
+    """`mail folders` numbers the rows and saves n→ref, so `mail select` can take
+    short numbers instead of ~150-char Graph ids (a long --set line broke the
+    Windows Bash tool for a colleague with 87 folders)."""
+
+    def _setup(self, tmp_path: Path, n_extra: int = 2) -> Deps:
+        state.accept_consent(tmp_path, NOW)
+        top = [_make_folder("f-inbox", "收件匣")]
+        top += [_make_folder(f"id-{i:03d}", f"客戶{i:03d}") for i in range(n_extra)]
+        graph = FakeGraph(folder_tree={"": top})
+        return _deps(tmp_path, graph_factory=lambda: graph)
+
+    def test_folders_are_numbered(self, tmp_path: Path, capsys: Any) -> None:
+        deps = self._setup(tmp_path)
+        _, obj = _run_cli(["mail", "folders"], deps, capsys)
+        assert [f["n"] for f in obj["folders"]] == [1, 2, 3]
+
+    def test_set_by_numbers(self, tmp_path: Path, capsys: Any) -> None:
+        deps = self._setup(tmp_path)
+        _, listing = _run_cli(["mail", "folders"], deps, capsys)
+        by_n = {f["n"]: f["ref"] for f in listing["folders"]}
+        _, obj = _run_cli(["mail", "select", "--set", "1", "3"], deps, capsys)
+        assert obj["ok"] is True
+        assert obj["folders"] == [by_n[1], by_n[3]]
+
+    def test_many_numbers(self, tmp_path: Path, capsys: Any) -> None:
+        deps = self._setup(tmp_path, n_extra=89)
+        _run_cli(["mail", "folders"], deps, capsys)
+        nums = [str(i) for i in range(1, 91)]
+        _, obj = _run_cli(["mail", "select", "--set", *nums], deps, capsys)
+        assert obj["ok"] is True and obj["selected_count"] == 90
+
+    def test_numbers_need_listing(self, tmp_path: Path, capsys: Any) -> None:
+        deps = self._setup(tmp_path)
+        code, obj = _run_cli(["mail", "select", "--set", "1"], deps, capsys)
+        assert code == 2 and obj["code"] == "ARG_ERROR"
+        assert "mail folders" in obj["detail"]
+
+    def test_number_out_of_range(self, tmp_path: Path, capsys: Any) -> None:
+        deps = self._setup(tmp_path)
+        _run_cli(["mail", "folders"], deps, capsys)
+        code, obj = _run_cli(["mail", "select", "--set", "1", "9"], deps, capsys)
+        assert code == 2 and obj["code"] == "ARG_ERROR"
+        assert state.load_config(tmp_path).get("mail", {}).get("folders") in (None, ["inbox"])
+
+    def test_stale_listing_refused(self, tmp_path: Path, capsys: Any) -> None:
+        deps = self._setup(tmp_path)
+        _run_cli(["mail", "folders"], deps, capsys)
+        later = _deps(tmp_path, graph_factory=deps.graph_factory)
+        later.now_factory = lambda: NOW + timedelta(hours=13)
+        code, obj = _run_cli(["mail", "select", "--set", "1"], later, capsys)
+        assert code == 2 and obj["code"] == "ARG_ERROR"
+
+    def test_add_takes_every_ref(self, tmp_path: Path, capsys: Any) -> None:
+        """--add used to keep only the first ref and silently drop the rest."""
+        deps = self._setup(tmp_path)
+        _run_cli(["mail", "select", "--set", "inbox"], deps, capsys)
+        _, obj = _run_cli(["mail", "select", "--add", "id-000", "id-001"], deps, capsys)
+        assert obj["folders"] == ["inbox", "id-000", "id-001"]
+
+    def test_add_and_remove_by_numbers(self, tmp_path: Path, capsys: Any) -> None:
+        deps = self._setup(tmp_path)
+        _, listing = _run_cli(["mail", "folders"], deps, capsys)
+        by_n = {f["n"]: f["ref"] for f in listing["folders"]}
+        _run_cli(["mail", "select", "--set", "1"], deps, capsys)
+        _, obj = _run_cli(["mail", "select", "--add", "2", "3"], deps, capsys)
+        assert obj["folders"] == [by_n[1], by_n[2], by_n[3]]
+        _, obj = _run_cli(["mail", "select", "--remove", "2", "3"], deps, capsys)
+        assert obj["folders"] == [by_n[1]]
+
+
 # ===========================================================================
 # D. Checkpoint migration
 # ===========================================================================

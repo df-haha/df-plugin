@@ -45,6 +45,11 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
 
 ## 開始前
 
+0. **先確認 uv 與 Node 在不在**（`DA` 本身要靠 uv 才能跑，uv 不在時 `DA envcheck` 根本沒機會回報）：分兩行各跑一次 `uv --version`、`node --version`。
+   - 出現 `command not found` → 請使用者在 **PowerShell 視窗**（不是這個對話）執行：uv 用 `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`；Node 用 `winget install OpenJS.NodeJS.LTS`。裝好後請使用者**完全關掉 Claude Code 再重新打開**（舊視窗抓不到新裝程式的路徑），重開後再執行 `/agenda-setup`，結束 skill。
+   - 這兩行是唯讀檢查，可以在第 0 步同意之前執行。
+1. 剛安裝或剛更新 daily-agenda 的話，要先完全關掉 Claude Code 再打開，新版的設定流程與安全鎖才會載入。使用者提到「剛裝好」「剛更新」而這個對話是在那之前開的，先請他重開。
+
 先跑 `DA consent --status` 與 `DA config get`。如果已經完成過設定，問使用者要「從頭重設」「只改排除的 LINE 對話（跳到第 6 步）」「只改信箱資料夾（跳到第 7 步）」「只改輸出或排程（跳到第 4 步）」「重建判斷準則（重新掃描並重建，會包含你目前的工作檔案；跳到第 8 步）」「解除安裝」。
 
 ## 第 0 步：資料外送說明與同意（US-0）
@@ -110,7 +115,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
 依序問（每張卡片自足）：
 
 1. **格式**：「彙整檔要哪一種格式？」選項「網頁 html（建議，排版較好讀）」「Markdown md」「兩種都要」。
-2. **存放位置**：先用 `pwd` 取得目前資料夾，預設是 `<目前資料夾>\daily-agenda`，在卡片中顯示**完整路徑**。選項「用這個位置（建議）」「我要指定別的資料夾」。
+2. **存放位置**：先用 `pwd -W` 取得目前資料夾（Windows 上的 Bash 是 Git Bash，單打 `pwd` 會得到 `/c/Users/...` 這種寫法），預設是 `<目前資料夾>\daily-agenda`，在卡片中用 `C:\Users\...` 這種 Windows 寫法顯示**完整路徑**，寫入 `output.dir` 也用同一個寫法。選項「用這個位置（建議）」「我要指定別的資料夾」。
 3. **判斷準則修正頻率**：先解釋「判斷準則＝AI 決定哪些訊息算待辦、排多優先、哪些略過的規則；用一陣子後根據你的回饋調整會更準。」選項「每 10 次或 14 天問我一次（建議）」「每 5 次或 7 天」「每 20 次或 30 天」。
 4. **排程**：「要不要每天自動產生彙整？（Windows 排程；只在你登入電腦時執行；需要你回答的事會留到你手動執行時處理）」選項「不用，我自己打 /agenda（建議先這樣）」「要，每天早上 8:30」「要，我指定時間」。
 
@@ -144,12 +149,12 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
 ## 第 7 步：選擇信箱資料夾（US-14）
 
 1. `DA mail folders`。若回傳 `complete: false`，告訴使用者：「信箱資料夾清單不完整」並列出 `skipped`（讀取失敗的子資料夾）和 `truncated`（截斷原因），問使用者要不要繼續選取。
-2. 用編號列出資料夾清單（顯示路徑、信件總數），標示建議選取與不建議選取的：
+2. 用每個資料夾的 `n` 當編號列出清單（顯示路徑、信件總數），標示建議選取與不建議選取的：
    - 收件匣及其子資料夾：預設勾選（建議）
    - 寄件備份、刪除的郵件、垃圾郵件、草稿、寄件匣：標示「通常不需要」
    - 其他自訂資料夾：列出讓使用者判斷
 3. 告訴使用者：「以下是你的信箱資料夾。選擇要讀取的資料夾（預設只讀收件匣）。如果你用 Outlook 規則把信分到子資料夾，建議也勾選那些子資料夾，否則那些信會被漏掉。」
-4. 請使用者直接打編號（例如「1, 2, 4」或「用預設就好」），把選到的 `ref` 呼叫 `DA mail select --set <ref ...>`。若回傳 `MAIL_FOLDERS_INCOMPLETE`（清單不完整，無法確認該 ref），告訴使用者「無法確認這個資料夾是否存在（因為清單不完整）。確定要加入嗎？」使用者確認 → 加上 `--allow-incomplete` 重跑。
+4. 請使用者直接打編號（例如「1, 2, 4」或「用預設就好」），**直接用編號**呼叫 `DA mail select --set 1 2 4`（編號對應的 ref 已由 `mail folders` 存檔，12 小時內有效；過期或回 `ARG_ERROR` 說要先跑 `mail folders`，就重跑第 1 步再選）。不要把 `ref` 抄進指令：ref 每個約 150 字元，選幾十個資料夾時整行指令會長到 Windows 的 Bash 執行失敗。之後要加減資料夾用 `DA mail select --add 5 6`、`DA mail select --remove 3`（都可一次給多個編號）。若回傳 `MAIL_FOLDERS_INCOMPLETE`（清單不完整，無法確認該 ref），告訴使用者「無法確認這個資料夾是否存在（因為清單不完整）。確定要加入嗎？」使用者確認 → 加上 `--allow-incomplete` 重跑。
 5. 回報「會讀取 N 個信箱資料夾」。
 
 ## 第 8 步：掃描訊息樣本並建立個人工作檔案
