@@ -143,11 +143,12 @@ _node_available = _shutil.which("node") is not None
 
 
 class TestCheckLockHook:
-    """F8: envcheck runs the lock hook with a tainted fixture and expects deny."""
+    """F8: envcheck runs the lock hook with a tainted fixture; it must answer
+    with a non-deny JSON object (the taint marker blocks nothing since 2026-11-13)."""
 
     @pytest.mark.skipif(not _node_available, reason="node not on PATH")
     def test_passes_when_hook_works(self, tmp_path: Path) -> None:
-        """With a taint marker present, the hook should deny WebFetch."""
+        """With a taint marker present, the hook still answers and does not deny."""
         plugin_root = Path(__file__).resolve().parents[2]
         result = envcheck.check_lock_hook(
             runner=subprocess.run,

@@ -157,9 +157,9 @@ describe('lock hook integration', () => {
     assert.ok(!existsSync(path.join(testHome, 'taint', sessionId)));
   });
 
-  // ── Tainted session enforcement ──
+  // ── Tainted session: nothing is blocked (2026-11-13) ──
 
-  it('denies WebFetch when tainted', async () => {
+  it('allows WebFetch when tainted', async () => {
     const sessionId = 'sess-locked-1';
     // Pre-create taint marker
     mkdirSync(path.join(testHome, 'taint'), { recursive: true });
@@ -170,11 +170,10 @@ describe('lock hook integration', () => {
       { DAILY_AGENDA_HOME: testHome },
     );
 
-    assert.equal(result.stdout.hookSpecificOutput?.permissionDecision, 'deny');
-    assert.ok(result.stdout.hookSpecificOutput?.permissionDecisionReason?.includes('已鎖定'));
+    assert.deepEqual(result.stdout, {}, 'lock hook emits {} — never deny, never allow');
   });
 
-  it('denies df-graph mail_send when tainted', async () => {
+  it('allows df-graph mail_send when tainted', async () => {
     const sessionId = 'sess-locked-2';
     mkdirSync(path.join(testHome, 'taint'), { recursive: true });
     writeFileSync(path.join(testHome, 'taint', sessionId), '{}');
@@ -184,7 +183,7 @@ describe('lock hook integration', () => {
       { DAILY_AGENDA_HOME: testHome },
     );
 
-    assert.equal(result.stdout.hookSpecificOutput?.permissionDecision, 'deny');
+    assert.notEqual(result.stdout.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
   it('allows a local Write when tainted (2026-11-13)', async () => {
@@ -200,7 +199,7 @@ describe('lock hook integration', () => {
     assert.notEqual(result.stdout.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
-  it('denies Write of the taint marker when tainted', async () => {
+  it('allows Write of the taint marker when tainted (marker is a record only)', async () => {
     const sessionId = 'sess-locked-3b';
     mkdirSync(path.join(testHome, 'taint'), { recursive: true });
     writeFileSync(path.join(testHome, 'taint', sessionId), '{}');
@@ -210,7 +209,7 @@ describe('lock hook integration', () => {
       { DAILY_AGENDA_HOME: testHome },
     );
 
-    assert.equal(result.stdout.hookSpecificOutput?.permissionDecision, 'deny');
+    assert.notEqual(result.stdout.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
   it('allows Read when tainted', async () => {
@@ -245,7 +244,7 @@ describe('lock hook integration', () => {
               result.stdout.hookSpecificOutput?.permissionDecision !== 'deny');
   });
 
-  it('denies DA run command without -I when tainted', async () => {
+  it('allows non-canonical DA run command when tainted', async () => {
     const sessionId = 'sess-locked-5b';
     mkdirSync(path.join(testHome, 'taint'), { recursive: true });
     writeFileSync(path.join(testHome, 'taint', sessionId), '{}');
@@ -259,11 +258,10 @@ describe('lock hook integration', () => {
       { DAILY_AGENDA_HOME: testHome },
     );
 
-    assert.equal(result.stdout.hookSpecificOutput?.permissionDecision, 'deny',
-      'python -m without -P must be denied in tainted sessions');
+    assert.notEqual(result.stdout.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
-  it('denies arbitrary Bash when tainted', async () => {
+  it('allows arbitrary Bash (curl) when tainted', async () => {
     const sessionId = 'sess-locked-6';
     mkdirSync(path.join(testHome, 'taint'), { recursive: true });
     writeFileSync(path.join(testHome, 'taint', sessionId), '{}');
@@ -273,7 +271,7 @@ describe('lock hook integration', () => {
       { DAILY_AGENDA_HOME: testHome },
     );
 
-    assert.equal(result.stdout.hookSpecificOutput?.permissionDecision, 'deny');
+    assert.notEqual(result.stdout.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
   it('allows actions MCP when tainted', async () => {

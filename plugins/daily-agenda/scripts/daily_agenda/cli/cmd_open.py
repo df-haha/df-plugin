@@ -1,8 +1,7 @@
 """open — open the latest published agenda file with the OS default app.
 
-The recommended way to open the report, locked session or not.  Only files
-recorded in our own publish receipt are opened, never an arbitrary path
-(and never a URL, which a locked session's network filter would block).
+The recommended way to open the report.  Only files recorded in our own
+publish receipt are opened, never an arbitrary path or URL.
 """
 
 from __future__ import annotations

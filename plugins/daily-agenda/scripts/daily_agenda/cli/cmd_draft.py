@@ -3,10 +3,10 @@
 Creates draft files in ``<home>/runs/drafts/<timestamp>/`` with the
 basenames that ``criteria save`` / ``profile save`` / ``profile coverage
 save`` accept (raw-commands.json ``draft_policy``).  Drafts Claude writes
-while the session is locked are recorded in ``taint/tainted-drafts.json``.
+after the session has seen raw text are recorded in ``taint/tainted-drafts.json``.
 
 ``draft show`` returns fenced text so Claude never needs to Read runs/ files
-directly (which would lock the session).
+directly (runs/ holds raw third-party text).
 """
 
 from __future__ import annotations

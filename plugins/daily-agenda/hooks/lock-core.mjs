@@ -1,9 +1,13 @@
 /**
- * Pure logic for the session taint-lock system.
+ * Pure logic for the session taint marker.
  * No I/O, no process.exit — testable as a module.
  *
- * Fail-open when untainted (internal errors must not block normal sessions).
- * Fail-closed when tainted (internal errors deny the call for safety).
+ * Since 2026-11-13 the marker blocks nothing: it only records that a session
+ * has seen third-party raw text (runs/, raw-emitting subcommands, the
+ * DA-RAW-3f9a sentinel).  Whether to act on instructions found in that text
+ * is left to the model; the fence markers in CLI output tell it the text is
+ * untrusted.  The LINE / calendar send confirmation (guard.mjs) is separate
+ * and unchanged.
  */
 
 import { readFileSync, realpathSync } from 'node:fs';
@@ -283,14 +287,14 @@ const _checkRegistryInvocation = (command) => {
 };
 
 // ---------------------------------------------------------------------------
-// Canonical DA invocation parser (shared by tainted allowlist + exemption)
+// Canonical DA invocation parser (shared by the taint exemption + Monitor check)
 // ---------------------------------------------------------------------------
 
 /**
  * Parse a canonical DA invocation from a Bash command.
  * Returns {ok, projectPath, subcommand, argsStr} or {ok:false}.
  * This is the ONLY canonical-form regex in lock-core.mjs.  Used by both
- * tainted allowlist (checkTaintedBash) and untainted exemption (checkBashTaint),
+ * the untainted exemption (checkBashTaint)
  * and by checkMonitorCommand, so they cannot drift.
  *
  * Canonical form: `uv run --quiet --project "..." python -I -X utf8 -m daily_agenda <sub> ...`
@@ -648,241 +652,11 @@ export const sanitizeSessionId = (sessionId) => {
 };
 
 // ---------------------------------------------------------------------------
-// Unified deny reason
+// Internal check result (used by checkMonitorCommand for the Monitor pre-taint
+// exemption; never shown to the user)
 // ---------------------------------------------------------------------------
 
-// The prefix is matched by skills (agenda-setup) — keep it stable.
-const DENY_BASE = '這個對話已讀取外部訊息原文，為了防止訊息裡藏的指令被執行，已鎖定';
-const DENY_DEFAULT = `${DENY_BASE}對外動作：上網、寄信、寫入外部系統都會被擋；本機讀寫檔案和跑程式不受影響。要做對外動作請開新對話。`;
-
-const deny = (suffix) => ({
-  allow: false,
-  reason: suffix ? `${DENY_BASE}${suffix}` : DENY_DEFAULT,
-});
-
-const OUTBOUND_TAIL = '本機讀寫檔案和跑程式不受影響；要上網或對外送出請開新對話。';
-
-// ---------------------------------------------------------------------------
-// Tainted-state tool policy (2026-11-13 relaxation)
-//
-// A locked session keeps local work and loses only actions that send data
-// out of the computer.  Default-deny stays: any tool not handled below is
-// denied (Artifact, SendMessage, Agent, Cron*, NotebookEdit, other skills…).
-// ---------------------------------------------------------------------------
-
-const TAINTED_ALLOWED_TOOLS = new Set([
-  'Read', 'Glob', 'Grep', 'AskUserQuestion',
-  'TodoRead', 'TodoWrite', 'Monitor', 'TaskStop', 'ToolSearch',
-]);
-
-const ACTIONS_PREFIX = 'mcp__plugin_daily-agenda_actions__';
-
-const ALLOWED_SKILLS = new Set([
-  'agenda', 'agenda-setup', 'agenda-reply',
-  'daily-agenda:agenda', 'daily-agenda:agenda-setup', 'daily-agenda:agenda-reply',
-]);
-
-// Fully denied (cannot be scoped safely)
-const DENIED_SUBCOMMANDS = new Set([
-  'schedule', 'uninstall', 'runtime', 'trust', 'ctx', 'docs',
-]);
-
-// ── MCP: read-only name allowlist with a write-verb veto ──
-// Matched on whole words of the tool part (after `mcp__<server>__`), so
-// `mail_mark_read` (mark) and `mail_reply_draft` (reply) stay denied even
-// though they contain "read"/"draft".  A name with no read verb is denied.
-const MCP_READ_VERBS = new Set([
-  'list', 'get', 'search', 'read', 'find', 'query', 'view', 'show',
-  'lookup', 'describe', 'count', 'stats', 'status',
-]);
-const MCP_WRITE_VERBS = new Set([
-  'send', 'create', 'update', 'delete', 'remove', 'add', 'set', 'post', 'put',
-  'patch', 'insert', 'reply', 'forward', 'draft', 'upload', 'move', 'mark',
-  'complete', 'cancel', 'submit', 'assign', 'import', 'export', 'save', 'write',
-  'edit', 'approve', 'reject', 'publish', 'rsvp', 'schedule', 'reschedule',
-  'enable', 'disable', 'restore', 'reopen', 'snooze', 'pin', 'unpin', 'reorder',
-  'link', 'copy', 'execute', 'exec', 'run', 'mutation', 'mutate', 'manage',
-  'invoke', 'generate', 'refresh', 'acknowledge', 'resolve', 'share', 'invite',
-  'archive', 'rename', 'sync', 'trigger', 'notify', 'transfer', 'apply',
-  'merge', 'close', 'start', 'stop', 'login', 'authenticate', 'navigate',
-]);
-
-export const isReadOnlyMcpTool = (toolName) => {
-  if (typeof toolName !== 'string') return false;
-  const parts = toolName.split('__');
-  if (parts.length < 3 || parts[0] !== 'mcp') return false;
-  const words = parts.slice(2).join('_')
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-  if (words.some((w) => MCP_WRITE_VERBS.has(w))) return false;
-  return words.some((w) => MCP_READ_VERBS.has(w));
-};
-
-// ── Bash / PowerShell: commands that obviously reach the network ──
-// BEST-EFFORT ONLY.  A locked session may still write a script and run it,
-// and that script can open a socket; this list stops the obvious one-liners
-// (and the forms an injected instruction would most likely ask for), not a
-// determined program.  Matched case-insensitively anywhere in the command,
-// so `powershell -Command "iwr …"` and `xargs curl` are caught too.
-const OUTBOUND_COMMANDS = [
-  'curl', 'wget', 'aria2c',
-  'invoke-webrequest', 'invoke-restmethod', 'iwr', 'irm',
-  'start-bitstransfer', 'bitsadmin', 'send-mailmessage',
-  'ssh', 'scp', 'sftp', 'ftp', 'tftp', 'telnet',
-  'nc', 'ncat', 'netcat', 'socat',
-  'gh', 'rclone', 'gsutil', 'gcloud', 'aws', 'twine',
-  'sendmail', 'mutt', 'mailx',
-];
-const OUTBOUND_COMMAND_RE = new RegExp(
-  `(?<![\\w.$-])(${OUTBOUND_COMMANDS.map((c) => c.replace(/[-]/g, '\\-')).join('|')})(?:\\.exe)?(?![\\w.-])`,
-  'i',
-);
-const OUTBOUND_PATTERNS = [
-  ['git push / send-email', /(?<![\w.-])git(?:\.exe)?(?:\s+[^\s;|&]+)*?\s+(?:push|send-email)(?![\w-])/i],
-  ['npm publish', /(?<![\w.-])npm(?:\.cmd)?\s+publish\b/i],
-  ['/dev/tcp', /\/dev\/(?:tcp|udp)\//i],
-  // Any non-loopback URL: covers `python -c "urlopen('https://…')"`,
-  // `start https://…?q=<data>`, `git clone https://…`.
-  ['網址', /\b(?:https?|ftps?|wss?|sftp):\/\/(?!(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:[/?#'"\s]|$))/i],
-  ['網路函式庫', /net\.webclient|system\.net\.http|\bhttpclient\b|xmlhttprequest|\burllib\b|\bhttp\.client\b|\bsmtplib\b|\bftplib\b|\bhttpx\b|\baiohttp\b/i],
-];
-
-const _outboundHit = (command) => {
-  const m = command.match(OUTBOUND_COMMAND_RE);
-  if (m) return m[1];
-  for (const [label, re] of OUTBOUND_PATTERNS) {
-    if (re.test(command)) return label;
-  }
-  return null;
-};
-
-// ── Lock self-protection ──
-// With Write/Edit/Bash open, injected text could otherwise lift the lock by
-// deleting this session's marker or editing the hook code.  Protected:
-//   <home>/taint/          markers + tainted-drafts.json
-//   <plugin>/hooks/        this code, guard.mjs, hooks.json
-//   */.claude/settings(.local).json   hook / permission settings
-const HOOKS_DIR_KEYS = (() => {
-  const keys = new Set([canonicalize(__dirname)]);
-  try { keys.add(canonicalize(realpathSync(__dirname))); } catch { /* ignore */ }
-  keys.delete('');
-  return [...keys];
-})();
-const SETTINGS_FILE_RE = /\/\.claude\/settings(?:\.local)?\.json$/;
-
-const _within = (p, root) => p === root || p.startsWith(root + '/');
-
-const _protectedReason = (normPath, ctx) => {
-  if (!normPath) return null;
-  const normHome = ctx?.daHome ? canonicalize(ctx.daHome) : '';
-  if (normHome && _within(normPath, normHome + '/taint')) return '上鎖紀錄';
-  if (HOOKS_DIR_KEYS.some((k) => _within(normPath, k))) return '安全鎖程式';
-  if (SETTINGS_FILE_RE.test(normPath)) return 'Claude Code 設定檔';
-  return null;
-};
-
-const DESTRUCTIVE_RE = /(?<![\w.-])(?:rm|rmdir|mv|unlink|shred|truncate|del|erase|rd|ri|remove-item|move-item|rename-item)(?:\.exe)?(?![\w.-])/i;
-
-/**
- * Canonical forms one shell token may mean on Windows + Git Bash:
- * bash semantics (backslash = escape), Windows semantics (backslash =
- * separator, as in PowerShell and double-quoted paths), and the Git Bash
- * drive form `/c/Users/...` → `c:/users/...`.
- */
-const _drive = (p) => p.replace(/^\/([a-zA-Z])(?=\/|$)/, (_, d) => `${d}:`);
-const _pathVariants = (token, cwd) => {
-  const out = new Set();
-  const add = (v) => { if (v) out.add(v); };
-  add(_canonShellToken(token, cwd));
-  const unquoted = token.replace(/["']/g, '');
-  if (!unquoted || unquoted.startsWith('-')) return [...out];
-  const homeStr = (process.env.USERPROFILE || process.env.HOME || '').replace(/\\/g, '/');
-  let win = unquoted.replace(/\\/g, '/');
-  if (homeStr) win = win.replace(/^~(?=\/|$)/, homeStr).replace(/\$HOME\b|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE\b|\$USERPROFILE\b/gi, homeStr);
-  add(canonicalize(win, cwd));
-  add(canonicalize(_drive(win), cwd));
-  const bashForm = _canonShellToken(token, cwd);
-  if (bashForm) add(canonicalize(_drive(bashForm)));
-  return [...out];
-};
-
-const _tamperHit = (command, ctx) => {
-  const normHome = ctx?.daHome ? canonicalize(ctx.daHome) : '';
-  const destructive = DESTRUCTIVE_RE.test(command);
-  for (const token of command.split(/[\s;|&<>()`,]+/)) {
-    for (const normToken of _pathVariants(token, ctx?.cwd)) {
-      const reason = _protectedReason(normToken, ctx);
-      if (reason) return reason;
-      // `rm -rf <home>` removes the marker with it
-      if (destructive && normHome && normToken === normHome) return '上鎖紀錄';
-    }
-  }
-  if (destructive) {
-    // `cd <home> && rm -rf taint`: relative form the cwd check cannot resolve
-    if (/(?:^|[\s"'/\\])taint(?:[/\\"'\s]|$)/i.test(command)) return '上鎖紀錄';
-    // `rm -rf $SOME_VAR/.daily-agenda` and other forms the token check misses
-    const homeName = normHome ? normHome.split('/').pop() : '';
-    if (homeName) {
-      const esc = homeName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      if (new RegExp(`(?:^|[\\s"'/\\\\])${esc}(?:[/\\\\]?["'\\s]|[/\\\\]?$)`, 'i').test(command)) return '上鎖紀錄';
-    }
-  }
-  return null;
-};
-
-/**
- * Locked-session policy for a general local shell command (Bash that does
- * not invoke daily_agenda, or the PowerShell tool): allow, except obvious
- * network commands and lock tampering.
- */
-export const checkTaintedLocalCommand = (command, ctx, label = 'Bash') => {
-  if (typeof command !== 'string') return deny(`（${label}：指令格式無效）`);
-  const outbound = _outboundHit(command);
-  if (outbound) return deny(`（${label}：「${outbound}」會連網或把資料送出電腦）。${OUTBOUND_TAIL}`);
-  const tamper = _tamperHit(command, ctx);
-  if (tamper) return deny(`（${label}：不能修改或刪除${tamper}，否則鎖定會失效）。要解除鎖定請開新對話。`);
-  return { allow: true };
-};
-
-export const checkTaintedAllow = (toolName, toolInput, ctx) => {
-  if (typeof toolName !== 'string') return deny('（工具名稱無效）');
-
-  if (TAINTED_ALLOWED_TOOLS.has(toolName)) {
-    if (toolName === 'Monitor') return checkMonitorCommand(toolInput, ctx);
-    return { allow: true };
-  }
-
-  if (toolName.startsWith(ACTIONS_PREFIX)) return { allow: true };
-
-  if (toolName.startsWith('mcp__')) {
-    if (isReadOnlyMcpTool(toolName)) return { allow: true };
-    return deny(`（${toolName} 會對外送出或寫入外部系統）。${OUTBOUND_TAIL}`);
-  }
-
-  if (toolName === 'Skill') {
-    const skillName = toolInput?.skill;
-    if (typeof skillName === 'string' && ALLOWED_SKILLS.has(skillName)) return { allow: true };
-    return deny(`（skill: ${skillName || '(none)'}）。要用其他 skill 請開新對話。`);
-  }
-
-  if (toolName === 'Bash') return checkTaintedBash(toolInput, ctx);
-  if (toolName === 'PowerShell') {
-    const command = toolInput?.command;
-    if (typeof command === 'string' && /daily_agenda/i.test(command)) {
-      return deny('（PowerShell：daily-agenda 指令請用 Bash 的標準格式執行）');
-    }
-    return checkTaintedLocalCommand(command, ctx, 'PowerShell');
-  }
-  if (toolName === 'Write' || toolName === 'Edit') return checkTaintedWrite(toolInput, ctx);
-
-  if (toolName === 'WebFetch' || toolName === 'WebSearch') {
-    return deny(`（${toolName} 會連網）。${OUTBOUND_TAIL}`);
-  }
-
-  return deny();
-};
+const deny = (reason) => ({ allow: false, reason });
 
 // ---------------------------------------------------------------------------
 // Shared project path validation (H2 + L2: single implementation for Bash
@@ -924,7 +698,7 @@ export const _isAllowedProjectPath = (projectPath) => {
 };
 
 // ---------------------------------------------------------------------------
-// Tainted Bash check
+// Flag extraction
 // ---------------------------------------------------------------------------
 
 /**
@@ -946,87 +720,6 @@ const _extractAllFlag = (argsStr, flagName) => {
     values.push(m[2] || m[3] || m[4]);
   }
   return values;
-};
-
-/**
- * Locked-session Bash policy.
- *
- * Commands that mention daily_agenda keep the strict canonical-form policy
- * below (config set / consent --accept / schedule / trust … stay denied, and
- * a non-canonical invocation cannot route around it).  Every other command is
- * general local work → checkTaintedLocalCommand.
- */
-export const checkTaintedBash = (toolInput, ctx) => {
-  const command = toolInput?.command;
-  if (typeof command !== 'string') return deny('（Bash：指令格式無效）');
-  if (!/daily_agenda/i.test(command)) return checkTaintedLocalCommand(command, ctx, 'Bash');
-  if (command.includes('\n') || command.includes('\r')) return deny('（Bash：不允許多行指令）');
-
-  const sanitized = command.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, '__PLUGIN_ROOT__');
-  if (/[;|&`><()\n\r{}*?~]/.test(sanitized)) return deny('（Bash：不允許 shell 特殊字元）');
-  if (/\$/.test(sanitized)) return deny('（Bash：不允許變數展開，$CLAUDE_PLUGIN_ROOT 除外）');
-
-  const canonical = _parseCanonicalDA(command);
-  if (!canonical.ok) return deny('（Bash：鎖定中 daily-agenda 指令只能用標準格式單獨執行）');
-
-  const subcommand = canonical.subcommand;
-  const argsStr = canonical.argsStr;
-
-  // F3/item2: validate --progress-file (reject duplicates, =form, path)
-  const pfResult = _validateFlagOccurrences(argsStr, '--progress-file', ctx, true);
-  if (pfResult) return pfResult;
-
-  // Item3: validate --file (reject duplicates, =form, path)
-  // Only validate if it's present (some subcommands don't use --file)
-  const ffResult = _validateFlagOccurrences(argsStr, '--file', ctx, false);
-  if (ffResult) return ffResult;
-
-  if (command.includes('--with')) return deny('（Bash：不允許 --with）');
-
-  // Subcommand-specific rules
-
-  // Item1: consent --status is read-only (allowed); consent --accept is denied
-  if (subcommand === 'consent') {
-    if (argsStr === '--status' || argsStr === '') return { allow: true };
-    return deny('（Bash：不允許 consent --accept）');
-  }
-
-  if (subcommand === 'config') {
-    if (argsStr.startsWith('get') || argsStr === '') return { allow: true };
-    return deny('（Bash：不允許 config set）');
-  }
-
-  if (subcommand === 'criteria') {
-    if (argsStr.startsWith('show') || argsStr === '') return { allow: true };
-    if (argsStr.startsWith('draft')) return { allow: true };
-    if (argsStr.startsWith('save')) return _requireDraftFile(argsStr, 'criteria save', ctx);
-    if (argsStr.startsWith('restore')) return { allow: true };
-    return deny('（Bash：不允許修改判斷準則）');
-  }
-
-  if (subcommand === 'refine') {
-    if (['status', 'draft', 'skip'].some(s => argsStr.startsWith(s)) || argsStr === '') {
-      return { allow: true };
-    }
-    if (argsStr.startsWith('apply')) return _requireDraftFile(argsStr, 'refine apply', ctx);
-    return deny('（Bash：不允許此 refine 操作）');
-  }
-
-  if (subcommand === 'profile') {
-    if (argsStr === '' || argsStr.startsWith('show') || argsStr.startsWith('list') || argsStr.startsWith('next-question')) {
-      return { allow: true };
-    }
-    if (argsStr.startsWith('restore')) return { allow: true };
-    if (argsStr.startsWith('cadence')) return { allow: true };
-    if (argsStr.startsWith('save')) return _requireDraftFile(argsStr, 'profile save', ctx);
-    if (argsStr.startsWith('coverage save')) return _requireDraftFile(argsStr, 'profile coverage save', ctx);
-    if (argsStr.startsWith('coverage')) return { allow: true }; // coverage (read) without save
-    return deny('（Bash：不允許此 profile 操作）');
-  }
-
-  if (DENIED_SUBCOMMANDS.has(subcommand)) return deny(`（Bash：不允許 ${subcommand}）`);
-
-  return { allow: true };
 };
 
 // ---------------------------------------------------------------------------
@@ -1075,23 +768,6 @@ const _validateFlagOccurrences = (argsStr, flagName, ctx, isProgressFile) => {
   }
 
   return null;
-};
-
-/**
- * Require --file to be present, under <home>/runs/, with correct draft
- * basename per the shared draft_policy, no 'raw' segment.
- * Item 4: closes the locked CLI save laundering.
- */
-const _requireDraftFile = (argsStr, subcommand, ctx) => {
-  const values = _extractAllFlag(argsStr, '--file');
-  if (values.length === 0) return deny(`（Bash ${subcommand}：需要 --file 參數）`);
-  // _validateFlagOccurrences already checked under runs/ and no duplicates.
-  // Now enforce draft policy basename + no 'raw' segment.
-  const filePath = values[0];
-  if (!_isDraftFileForSubcommand(filePath, ctx, subcommand.split(' ')[0], argsStr)) {
-    return deny(`（Bash ${subcommand}：--file 必須是對應的草稿檔案，且不能在 raw/ 下）`);
-  }
-  return { allow: true };
 };
 
 // ---------------------------------------------------------------------------
@@ -1415,23 +1091,8 @@ export const checkMonitorPreTaint = (command, ctx) => {
 };
 
 // ---------------------------------------------------------------------------
-// Tainted Write/Edit scope check
+// Tainted-drafts recording scope
 // ---------------------------------------------------------------------------
-
-export const checkTaintedWrite = (toolInput, ctx) => {
-  const filePath = toolInput?.file_path;
-  if (typeof filePath !== 'string' || filePath.length === 0) return deny('（Write：路徑無效）');
-
-  // Check the plain path, the parent-realpath form (symlinked parents) and
-  // the Git Bash drive form (/c/Users/... → c:/users/...).
-  const keys = draftKeys(filePath, ctx?.cwd);
-  for (const k of [...keys]) keys.push(_drive(k));
-  for (const key of keys) {
-    const reason = _protectedReason(key, ctx);
-    if (reason) return deny(`（Write／Edit：不能修改${reason}，否則鎖定會失效）。要解除鎖定請開新對話。`);
-  }
-  return { allow: true };
-};
 
 /**
  * True when a written path is under <home>/runs/ — only those are recorded
