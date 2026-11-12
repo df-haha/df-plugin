@@ -670,7 +670,8 @@ const deny = (reason) => ({ allow: false, reason });
  *  - An absolute path that resolves to the same directory as PLUGIN_SCRIPTS_DIR
  *
  * On Windows: case-insensitive comparison (via realpath normalization).
- * Nonexistent paths → deny (fail closed in tainted state).
+ * Nonexistent paths → false: not treated as canonical, so no path exemption
+ * (the call may be marked; nothing is ever denied).
  *
  * Exported for testing.
  */
@@ -692,7 +693,7 @@ export const _isAllowedProjectPath = (projectPath) => {
     }
     return resolvedCandidate === resolvedPlugin;
   } catch {
-    // Path doesn't exist or can't be resolved → deny (fail closed)
+    // Path doesn't exist or can't be resolved → not canonical (no exemption)
     return false;
   }
 };
