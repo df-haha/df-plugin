@@ -79,8 +79,8 @@ node scripts/inbox-sync.js prefs show [--json] | prefs set fresh-days <N|all> | 
 ```
 
 - `--report R-XXX|latest`（2026-11-13 新增）：只建立該報表列出、而且登記簿現在仍是 `open` 的待辦；勾完成不受限。報表對照讀 daily-agenda CURRENT generation 的 `state.json`：`report_code`（`R-` 加 3 碼）與 `report_index`（`{"項次": "T-xxxx"}`，值再以 `^T-\d{4}$` 過濾）。daily-agenda 只保留最新一份報表的對照，所以只認最新一份；格式不符是參數錯誤（結束碼 1），不是最新一份或尚無報表是結束碼 2。彙整頁列出登記簿全部未完成項目，所以報表範圍本身只擋掉舊報表代碼；舊待辦由天數決定（見 `--fresh-days`）。與其他參數：`--only` 取交集、`--exclude` 再扣、`--priorities` 照樣收窄、`--no-create` 不能併用。
-- `--fresh-days N|all`（2026-11-13 新增）：只建立期限（沒期限看出現日期）在 N 天內的，`all` 不限；只收 1–3650 的整數或 `all`，否則結束碼 1。優先序：旗標 ＞ 本機偏好（只在報表模式採用）＞ 預設 7 天；不帶 `--report` 時維持原本的 7 天。摘要（文字與 `--json`）列出這次的天數與來源（`freshDays`、`freshDaysSource`＝flag／prefs／default、`prefsSaved`），以及「超過天數沒建立」筆數（`counts.stale`），不含標題。
-- `prefs`（2026-11-13 新增）：偏好存 `<狀態資料夾>/prefs.json`（`{"version":1,"freshDays":N|"all"}`，先寫 .tmp 再改名，可重跑）。`show`／`set fresh-days <N|all>`／`clear`。偏好檔損壞時同步退回預設 7 天、照常執行並提示一句（`--json` 的 `prefsError: true`）。skill 在「超過天數沒建立」大於 0 且沒存過偏好時問使用者一次：這次也寫、這次不用、以後都寫、以後都只收 7 天。
+- `--fresh-days N|all`（2026-11-13 新增）：只建立期限（沒期限看出現日期）在 N 天內的，`all` 不限；只收 1–3650 的整數或 `all`，否則結束碼 1。優先序：旗標 ＞ 本機偏好（只在報表模式採用）＞ 預設 7 天；不帶 `--report` 時維持原本的 7 天。摘要（文字與 `--json`）列出這次的天數與來源（`freshDays`、`freshDaysSource`＝flag／prefs／prefs-error／default、`prefsSaved`），以及「超過天數沒建立」筆數（`counts.stale`），不含標題。
+- `prefs`（2026-11-13 新增）：偏好存 `<狀態資料夾>/prefs.json`（`{"version":1,"freshDays":N|"all"}`，先寫 .tmp 再改名，可重跑）。`show`／`set fresh-days <N|all>`／`clear`。偏好檔損壞時同步退回預設 7 天、照常執行並如實提示（`freshDaysSource: prefs-error`、`prefsError: true`；`prefs show --json` 帶 `error: true`），skill 不問四選一、請使用者重說一次偏好。skill 在「超過天數沒建立」大於 0 且沒存過偏好時問使用者一次：這次也寫、這次不用、以後都寫、以後都只收 7 天。
 - `--no-create`：只勾完成、不建立任何待辦；不能和 `--only`、`--exclude`、`--report` 併用。用來取代「`--only` 給空值」：空值在部分 shell 會被丟掉或引號出錯，萬一變成沒帶 `--only` 就會全部建立，所以 `--only`／`--exclude` 缺值或值為空一律是參數錯誤（結束碼 1、不送任何請求）。
 - `--only`／`--exclude`：以 agenda 代碼挑選或排除「建立」的項目（只接受 `T-` 加 4 碼數字），完成同步不受影響。被排除的項目下次執行仍會出現；要永久不收，到 PM 建立後取消即可。
 

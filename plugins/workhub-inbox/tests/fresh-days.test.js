@@ -154,10 +154,10 @@ test("prefs：set／show／clear；可重跑；寫完沒有殘留暫存檔", asy
     }
     assert.deepEqual(fs.readdirSync(stateBase).sort(), [PREFS_FILE]);
     const show = await cli(["prefs", "show", "--json"]);
-    assert.deepEqual(JSON.parse(show.stdout), { saved: true, freshDays: "all" });
+    assert.deepEqual(JSON.parse(show.stdout), { saved: true, freshDays: "all", error: false });
     for (let i = 0; i < 2; i += 1) assert.equal((await cli(["prefs", "clear"])).code, 0);
     assert.equal(fs.existsSync(path.join(stateBase, PREFS_FILE)), false);
-    assert.deepEqual(JSON.parse((await cli(["prefs", "show", "--json"])).stdout), { saved: false, freshDays: null });
+    assert.deepEqual(JSON.parse((await cli(["prefs", "show", "--json"])).stdout), { saved: false, freshDays: null, error: false });
   });
 });
 
@@ -203,13 +203,20 @@ for (const [label, content] of [["不是 JSON", "{壞掉"], ["值不合法", JSO
       assert.equal(code, 0, stderr);
       const report = JSON.parse(stdout);
       assert.equal(report.freshDays, 7);
-      assert.equal(report.freshDaysSource, "default");
+      assert.equal(report.freshDaysSource, "prefs-error");
       assert.equal(report.prefsSaved, false);
       assert.equal(report.prefsError, true);
       assert.deepEqual(created(), ["T-1001"]);
+      const text = await cli(["sync", "--source", "daily-agenda", "--da-home", makeHome(), "--report", "R-7KQ"]);
+      assert.match(text.stdout, /天數：只收 7 天內（偏好檔讀不到，這次先用 7 天）/);
+      assert.ok(!text.stdout.includes("沒有存過偏好"));
       const show = await cli(["prefs", "show"]);
       assert.equal(show.code, 0);
-      assert.match(show.stdout, /偏好檔/);
+      assert.match(show.stdout, /偏好檔讀不到或格式不對/);
+      assert.deepEqual(JSON.parse((await cli(["prefs", "show", "--json"])).stdout), { saved: false, freshDays: null, error: true });
+      // 帶旗標時旗標照樣優先
+      const flagged = JSON.parse((await cli(sync(makeHome(), "--fresh-days", "all"))).stdout);
+      assert.equal(flagged.freshDaysSource, "flag");
     });
   });
 }
@@ -224,5 +231,17 @@ test("文字輸出：列出這次的天數與「超過天數沒建立」筆數�
     assert.ok(!stdout.includes("機密標題"));
     const all = await cli(["sync", "--source", "daily-agenda", "--da-home", home, "--report", "R-7KQ", "--fresh-days", "all"]);
     assert.match(all.stdout, /不限天數（這次指定）/);
+  });
+});
+
+test("prefs set：改名失敗時清掉暫存檔、結束碼 2、不留 .tmp", async () => {
+  await setup(async ({ cli, stateBase }) => {
+    // 目標位置是個非空資料夾，rename 一定失敗
+    fs.mkdirSync(path.join(stateBase, PREFS_FILE));
+    fs.writeFileSync(path.join(stateBase, PREFS_FILE, "keep"), "x");
+    const { code, stdout } = await cli(["prefs", "set", "fresh-days", "30"]);
+    assert.equal(code, 2);
+    assert.match(stdout, /偏好檔寫入失敗/);
+    assert.deepEqual(fs.readdirSync(stateBase).filter((f) => f.endsWith(".tmp")), []);
   });
 });

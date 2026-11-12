@@ -45,8 +45,13 @@ function savePrefs(dir, freshDays) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = path.join(dir, PREFS_FILE);
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify({ version: VERSION, freshDays }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  fs.renameSync(tmp, file);
+  try {
+    fs.writeFileSync(tmp, `${JSON.stringify({ version: VERSION, freshDays }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 function clearPrefs(dir) {

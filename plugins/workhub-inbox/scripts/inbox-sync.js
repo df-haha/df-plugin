@@ -31,7 +31,7 @@ const UNEXPECTED_ERROR = "UNEXPECTED_ERROR";
 
 const USAGE = "用法：inbox-sync.js sync --source daily-agenda [--apply] ...；或 inbox-sync.js prefs show|set fresh-days <天數|all>|clear";
 const FRESH_DAYS_USAGE = (name) => `${name} 只接受 1 到 ${MAX_FRESH_DAYS} 的整數天數，或 all（不限天數）`;
-const FRESH_SOURCE_LABEL = { flag: "這次指定", prefs: "偏好設定", default: "預設" };
+const FRESH_SOURCE_LABEL = { flag: "這次指定", prefs: "偏好設定", "prefs-error": `偏好檔讀不到，這次先用 ${FRESH_DAYS} 天`, default: "預設" };
 
 class UsageError extends Error {}
 
@@ -70,7 +70,7 @@ function runPrefs(rest, dir, print) {
     },
     show: () => {
       const prefs = loadPrefs(dir);
-      if (cmd.json) return JSON.stringify({ saved: prefs.saved, freshDays: prefs.freshDays });
+      if (cmd.json) return JSON.stringify({ saved: prefs.saved, freshDays: prefs.freshDays, error: prefs.error });
       if (prefs.error) return `偏好檔讀不到或格式不對，同步時會用預設（${describeDays(FRESH_DAYS)}）；可用 prefs set 重存或 prefs clear 清掉`;
       return prefs.saved ? `報表同步偏好：${describeDays(prefs.freshDays)}` : `還沒存過偏好；報表同步用預設，${describeDays(FRESH_DAYS)}`;
     },
@@ -88,6 +88,7 @@ function runPrefs(rest, dir, print) {
 function resolveFreshDays(opts, prefs) {
   if (opts.freshDays !== null) return { days: opts.freshDays, source: "flag" };
   if (opts.report !== null && prefs && prefs.saved) return { days: prefs.freshDays, source: "prefs" };
+  if (opts.report !== null && prefs && prefs.error) return { days: FRESH_DAYS, source: "prefs-error" };
   return { days: FRESH_DAYS, source: "default" };
 }
 
