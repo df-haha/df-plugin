@@ -1,9 +1,8 @@
 """open — open the latest published agenda file with the OS default app.
 
-Exists so a session that is already locked (it has seen raw third-party
-text) can still open the report: the lock allows daily-agenda subcommands
-but blocks `start`/`explorer`.  Only files recorded in our own publish
-receipt are opened, never an arbitrary path.
+The recommended way to open the report, locked session or not.  Only files
+recorded in our own publish receipt are opened, never an arbitrary path
+(and never a URL, which a locked session's network filter would block).
 """
 
 from __future__ import annotations

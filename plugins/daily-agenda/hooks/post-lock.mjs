@@ -11,8 +11,8 @@
  * Registered for BOTH PostToolUse and PostToolUseFailure (failed Bash exit
  * still carries stdout in the `error` field).
  *
- * Matched tools: Bash (stdout + stderr / error), Read (file content),
- * Grep (output), Monitor (event stream).
+ * Matched tools: Bash / PowerShell (stdout + stderr / error), Read (file
+ * content), Grep (output), Monitor (event stream).
  * NOT matched: Glob (returns paths only).
  *
  * Fail-safe: on parse errors or any exception, output {} (no-op).

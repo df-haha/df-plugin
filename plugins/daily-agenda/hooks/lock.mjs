@@ -3,6 +3,11 @@
 /**
  * PreToolUse hook: session taint lock.
  *
+ * Untainted: decide whether this call exposes third-party raw text (runs/,
+ * raw-emitting DA subcommands) and, if so, mark the session locked.
+ * Tainted: local work stays allowed; outbound actions (network, sending,
+ * writing to external systems) are denied — see checkTaintedAllow.
+ *
  * Fail-open when untainted: internal errors → allow.
  * Fail-closed when tainted: internal errors → deny.
  * Emits {} for allow (never "allow" — that suppresses permission prompts).
@@ -15,11 +20,11 @@ import {
   checkTaintedAllow,
   checkMonitorPreTaint,
   sanitizeSessionId,
-  canonicalize,
+  isUnderRuns,
 } from './lock-core.mjs';
 import {
   resolveHome, isSessionTainted, markSessionTainted,
-  cleanupOldMarkers, readExtraTaintPrefixes,
+  cleanupOldMarkers,
   appendTaintedDraft, loadTaintedDrafts,
 } from './lock-io.mjs';
 
@@ -67,9 +72,8 @@ try {
   const sanitizedId = sanitizeSessionId(sessionId);
   if (!sanitizedId) { outputAllow(); process.exit(0); }
 
-  const extraPrefixes = readExtraTaintPrefixes(daHome);
   const taintedDrafts = loadTaintedDrafts(daHome);
-  const taintCtx = { daHome, cwd: hookCwd, extraPrefixes, taintedDrafts };
+  const taintCtx = { daHome, cwd: hookCwd, taintedDrafts };
 
   // ── Fast path: check if already tainted ──
   alreadyTainted = isSessionTainted(daHome, sanitizedId);
@@ -79,7 +83,7 @@ try {
     let taintReason = '';
 
     // F4a: check Bash AND Monitor for taint in untainted path
-    if (toolName === 'Bash') {
+    if (toolName === 'Bash' || toolName === 'PowerShell') {
       const bashCheck = checkBashTaint(toolInput?.command, taintCtx);
       if (bashCheck.taint) { shouldTaint = true; taintReason = bashCheck.reason; }
     } else if (toolName === 'Monitor') {
@@ -97,7 +101,7 @@ try {
       }
     } else if (toolName === 'Read' || toolName === 'Grep') {
       const pathToCheck = toolInput?.file_path || toolInput?.path || '';
-      const readCheck = checkReadTaint(pathToCheck, daHome, extraPrefixes, hookCwd, taintedDrafts);
+      const readCheck = checkReadTaint(pathToCheck, daHome, [], hookCwd, taintedDrafts);
       if (readCheck.taint) { shouldTaint = true; taintReason = readCheck.reason; }
     }
 
@@ -115,13 +119,14 @@ try {
     process.exit(0);
   }
 
-  // ── Tainted path: strict allowlist ──
-  const ctx = { daHome, cwd: hookCwd, extraPrefixes };
+  // ── Tainted path: local work allowed, outbound denied ──
+  const ctx = { daHome, cwd: hookCwd };
   const result = checkTaintedAllow(toolName, toolInput, ctx);
 
   if (result.allow) {
-    // Draft laundering prevention: record draft paths written during tainted sessions
-    if ((toolName === 'Write' || toolName === 'Edit') && toolInput?.file_path) {
+    // Draft laundering prevention: record runs/ paths written during tainted
+    // sessions (ordinary project files are not recorded — see isUnderRuns).
+    if ((toolName === 'Write' || toolName === 'Edit') && isUnderRuns(toolInput?.file_path, ctx)) {
       if (!appendTaintedDraft(daHome, toolInput.file_path)) {
         outputDeny('（Write/Edit：無法記錄草稿路徑到鎖定記錄，為安全起見拒絕寫入。請檢查 .daily-agenda/taint/ 目錄權限。）');
         process.exit(0);
@@ -129,7 +134,7 @@ try {
     }
     outputAllow();
   } else {
-    outputDeny(result.reason || '這個對話已讀取外部訊息原文，為了防止訊息裡藏的指令被執行，已鎖定：只能繼續使用 daily-agenda 的功能。要做其他事請開新對話。');
+    outputDeny(result.reason || '這個對話已讀取外部訊息原文，為了防止訊息裡藏的指令被執行，已鎖定對外動作。要做對外動作請開新對話。');
   }
 } catch (err) {
   if (alreadyTainted) {

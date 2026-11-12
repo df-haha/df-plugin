@@ -1,5 +1,5 @@
 {
-  "description": "daily-agenda 縱深防護。(1) LINE guard。(2) PreToolUse taint lock：command-form + path-reference。(3) PostToolUse + PostToolUseFailure：sentinel + protected-path 偵測。",
+  "description": "daily-agenda 縱深防護。(1) LINE guard：送 LINE、建行事曆前要本人確認。(2) PreToolUse taint lock：讀到第三方原文（runs/、raw 子指令）就上鎖；上鎖後本機操作照常，只擋對外動作（連網、寄送、寫入外部系統）。(3) PostToolUse + PostToolUseFailure：輸出含 raw sentinel 就上鎖。",
   "hooks": {
     "PreToolUse": [
       {
@@ -25,7 +25,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|Read|Grep|Monitor",
+        "matcher": "Bash|PowerShell|Read|Grep|Monitor",
         "hooks": [
           {
             "type": "command",
@@ -37,7 +37,7 @@
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "Bash|Read|Grep|Monitor",
+        "matcher": "Bash|PowerShell|Read|Grep|Monitor",
         "hooks": [
           {
             "type": "command",

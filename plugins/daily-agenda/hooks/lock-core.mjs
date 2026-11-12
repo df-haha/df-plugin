@@ -482,6 +482,43 @@ const _buildExemptSet = (command, ctx) => {
 };
 
 // ---------------------------------------------------------------------------
+// Shell path-token canonicalization (shared by taint check + tainted Bash)
+// ---------------------------------------------------------------------------
+
+/**
+ * Turn one whitespace/operator-split shell token into a canonical path, the
+ * way bash would see it: ANSI-C $'..' decoded, quotes dropped, backslash
+ * escapes removed, ~ / $HOME / %USERPROFILE% expanded.  Returns '' for
+ * flags and empty tokens.
+ */
+const _canonShellToken = (token, cwd) => {
+  // Process ANSI-C $'...' BEFORE stripping quotes (it needs the $' wrapper)
+  let clean = token.replace(/\$'([^']*)'/g, (_, inner) =>
+    inner.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+         .replace(/\\'/g, "'").replace(/\\\\/g, '\\')
+         .replace(/\\(.)/g, '$1')
+  );
+  // Strip remaining quotes
+  clean = clean.replace(/["']/g, '');
+  if (!clean || clean.startsWith('-')) return '';
+
+  // Bash unescape: unquoted \x → x (same rule as shellTokenize)
+  clean = clean.replace(/\\(.)/g, '$1');
+
+  // Expand shell variables in the token
+  let expanded = clean;
+  const homeStr = process.env.USERPROFILE || process.env.HOME || '';
+  if (homeStr) {
+    const normHomePath = homeStr.replace(/\\/g, '/').toLowerCase();
+    expanded = expanded.replace(/^~/g, normHomePath);
+    // $HOME, ${HOME}, %USERPROFILE%, $USERPROFILE
+    expanded = expanded.replace(/\$HOME\b|\$\{HOME\}|%USERPROFILE%|\$USERPROFILE\b/gi, normHomePath);
+  }
+
+  return canonicalize(expanded, cwd);
+};
+
+// ---------------------------------------------------------------------------
 // Taint detection — mechanism 2 path-reference check
 // ---------------------------------------------------------------------------
 
@@ -490,7 +527,8 @@ const _buildExemptSet = (command, ctx) => {
  *
  * Two mechanisms:
  * 1. Registry: `python -m daily_agenda <registry-subcommand>` (N5-safe)
- * 2. Path references: command tokens that resolve inside DA taint dirs
+ * 2. Path references: command tokens that resolve inside <home>/runs/
+ *    (the only place third-party raw text lives on disk)
  *
  * Mechanism 2 exempts flag values from canonical DA invocations that point to
  * allowed locations (progress files under runs/progress/, draft files under
@@ -498,7 +536,7 @@ const _buildExemptSet = (command, ctx) => {
  * from locking a session that the user decided should stay unlocked.
  *
  * @param {string} command
- * @param {{ daHome?: string, cwd?: string, extraPrefixes?: string[] }} [ctx]
+ * @param {{ daHome?: string, cwd?: string, taintedDrafts?: Set<string> }} [ctx]
  */
 export const checkBashTaint = (command, ctx) => {
   if (typeof command !== 'string') return { taint: false };
@@ -528,69 +566,23 @@ export const checkBashTaint = (command, ctx) => {
       }
     }
 
-    const taintDirs = [
-      normHome + '/runs', normHome + '/gen', normHome + '/output',
-    ];
-    if (Array.isArray(ctx.extraPrefixes)) {
-      for (const ep of ctx.extraPrefixes) {
-        if (typeof ep === 'string' && ep.length > 0) taintDirs.push(canonicalize(ep));
-      }
-    }
+    // Only runs/ holds third-party raw text (LINE / mail originals).
+    // gen/ (ledger), output/ (agenda page), config.json and the DA home itself
+    // do not lock (2026-11-13 relaxation).
+    const runsDir = normHome + '/runs';
 
     // Tokenize: split on whitespace and shell operators, then drop every quote
     // char — the shell concatenates `~/.daily-agenda/"runs"/x` into one path.
     const tokens = command.split(/[\s;|&<>()`]+/);
     for (const token of tokens) {
-      // Process ANSI-C $'...' BEFORE stripping quotes (it needs the $' wrapper)
-      let clean = token.replace(/\$'([^']*)'/g, (_, inner) =>
-        inner.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
-             .replace(/\\'/g, "'").replace(/\\\\/g, '\\')
-             .replace(/\\(.)/g, '$1')
-      );
-      // Strip remaining quotes
-      clean = clean.replace(/["']/g, '');
-      if (!clean || clean.startsWith('-')) continue;
-
-      // Bash unescape: unquoted \x → x (same rule as shellTokenize)
-      clean = clean.replace(/\\(.)/g, '$1');
-
-      // Expand shell variables in the token
-      let expanded = clean;
-      const homeStr = process.env.USERPROFILE || process.env.HOME || '';
-      if (homeStr) {
-        const normHomePath = homeStr.replace(/\\/g, '/').toLowerCase();
-        expanded = expanded.replace(/^~/g, normHomePath);
-        // $HOME, ${HOME}, %USERPROFILE%, $USERPROFILE
-        expanded = expanded.replace(/\$HOME\b|\$\{HOME\}|%USERPROFILE%|\$USERPROFILE\b/gi, normHomePath);
-      }
-
-      const normToken = canonicalize(expanded, ctx.cwd);
+      const normToken = _canonShellToken(token, ctx.cwd);
       if (!normToken) continue;
 
       // Skip exempt paths (canonical DA flag values)
       if (exempt.has(normToken)) continue;
 
-      // Check if the token is inside a taint dir
-      for (const td of taintDirs) {
-        if (normToken === td || normToken.startsWith(td + '/')) {
-          return { taint: true, reason: `command references taint-protected dir: ${clean}` };
-        }
-      }
-
-      // Check if token is/inside daHome itself (covers `cd ~/.daily-agenda`)
-      if (normToken === normHome || normToken.startsWith(normHome + '/')) {
-        if (normToken === normHome) {
-          return { taint: true, reason: `command references DA home: ${clean}` };
-        }
-        // config.json contains raw chat names
-        if (normToken === normHome + '/config.json') {
-          return { taint: true, reason: `command references DA config (raw chat names): ${clean}` };
-        }
-        const relative = normToken.slice(normHome.length + 1);
-        const firstComponent = relative.split('/')[0];
-        if (['runs', 'gen', 'output'].includes(firstComponent)) {
-          return { taint: true, reason: `command references taint-protected dir: ${clean}` };
-        }
+      if (normToken === runsDir || normToken.startsWith(runsDir + '/')) {
+        return { taint: true, reason: `command references taint-protected dir: ${token}` };
       }
     }
   }
@@ -599,16 +591,23 @@ export const checkBashTaint = (command, ctx) => {
 };
 
 /**
- * Check if a Read/Grep/Glob path targets DA taint-protected directories
- * or a draft file that was written during a tainted session.
+ * Check if a Read/Grep path targets <home>/runs/ (third-party raw text) or a
+ * draft file that was written during a tainted session.
+ *
+ * gen/ (ledger), output/ (agenda page, incl. a custom output.dir),
+ * config.json and the DA home itself do not lock (2026-11-13 relaxation):
+ * they hold model-derived text or settings, not third-party originals.  Raw
+ * files carry the DA-RAW-3f9a sentinel on every line, so reaching them
+ * indirectly (Grep on the DA home, `cd` then relative path) still locks via
+ * the PostToolUse backstop.
  *
  * @param {string} filePath
  * @param {string} daHome
- * @param {string[]} [extraPrefixes]
+ * @param {string[]} [_extraPrefixes] - unused since 2026-11-13; kept for call compatibility
  * @param {string} [cwd]
  * @param {Set<string>} [taintedDrafts] - canonicalized paths from tainted-drafts.json
  */
-export const checkReadTaint = (filePath, daHome, extraPrefixes, cwd, taintedDrafts) => {
+export const checkReadTaint = (filePath, daHome, _extraPrefixes, cwd, taintedDrafts) => {
   if (typeof filePath !== 'string' || typeof daHome !== 'string') return { taint: false };
   if (filePath.length === 0) return { taint: false };
 
@@ -621,30 +620,9 @@ export const checkReadTaint = (filePath, daHome, extraPrefixes, cwd, taintedDraf
     return { taint: true, reason: `Read of draft written in a locked session: ${filePath}` };
   }
 
-  const taintDirs = [normHome + '/runs', normHome + '/gen', normHome + '/output'];
-
-  if (Array.isArray(extraPrefixes)) {
-    for (const ep of extraPrefixes) {
-      if (typeof ep !== 'string' || ep.length === 0) continue;
-      taintDirs.push(canonicalize(ep, cwd));
-    }
-  }
-
-  for (const td of taintDirs) {
-    if (!td) continue;
-    if (normPath === td || normPath.startsWith(td + '/')) {
-      return { taint: true, reason: `Read under taint-protected dir: ${filePath}` };
-    }
-  }
-
-  // config.json contains raw chat names in excluded_chats[].name
-  if (normPath === normHome + '/config.json') {
-    return { taint: true, reason: `Read of DA config (contains raw chat names): ${filePath}` };
-  }
-
-  // Narrow exception: path IS daHome itself
-  if (normPath === normHome) {
-    return { taint: true, reason: `Read/Grep of DA home: ${filePath}` };
+  const runsDir = normHome + '/runs';
+  if (normPath === runsDir || normPath.startsWith(runsDir + '/')) {
+    return { taint: true, reason: `Read under taint-protected dir: ${filePath}` };
   }
 
   return { taint: false };
@@ -673,16 +651,23 @@ export const sanitizeSessionId = (sessionId) => {
 // Unified deny reason
 // ---------------------------------------------------------------------------
 
+// The prefix is matched by skills (agenda-setup) — keep it stable.
 const DENY_BASE = '這個對話已讀取外部訊息原文，為了防止訊息裡藏的指令被執行，已鎖定';
-const DENY_DEFAULT = `${DENY_BASE}：只能繼續使用 daily-agenda 的功能。要做其他事請開新對話。`;
+const DENY_DEFAULT = `${DENY_BASE}對外動作：上網、寄信、寫入外部系統都會被擋；本機讀寫檔案和跑程式不受影響。要做對外動作請開新對話。`;
 
 const deny = (suffix) => ({
   allow: false,
   reason: suffix ? `${DENY_BASE}${suffix}` : DENY_DEFAULT,
 });
 
+const OUTBOUND_TAIL = '本機讀寫檔案和跑程式不受影響；要上網或對外送出請開新對話。';
+
 // ---------------------------------------------------------------------------
-// Tainted-state tool allowlist
+// Tainted-state tool policy (2026-11-13 relaxation)
+//
+// A locked session keeps local work and loses only actions that send data
+// out of the computer.  Default-deny stays: any tool not handled below is
+// denied (Artifact, SendMessage, Agent, Cron*, NotebookEdit, other skills…).
 // ---------------------------------------------------------------------------
 
 const TAINTED_ALLOWED_TOOLS = new Set([
@@ -702,6 +687,135 @@ const DENIED_SUBCOMMANDS = new Set([
   'schedule', 'uninstall', 'runtime', 'trust', 'ctx', 'docs',
 ]);
 
+// ── MCP: read-only name allowlist with a write-verb veto ──
+// Matched on whole words of the tool part (after `mcp__<server>__`), so
+// `mail_mark_read` (mark) and `mail_reply_draft` (reply) stay denied even
+// though they contain "read"/"draft".  A name with no read verb is denied.
+const MCP_READ_VERBS = new Set([
+  'list', 'get', 'search', 'read', 'find', 'query', 'view', 'show',
+  'lookup', 'describe', 'count', 'stats', 'status',
+]);
+const MCP_WRITE_VERBS = new Set([
+  'send', 'create', 'update', 'delete', 'remove', 'add', 'set', 'post', 'put',
+  'patch', 'insert', 'reply', 'forward', 'draft', 'upload', 'move', 'mark',
+  'complete', 'cancel', 'submit', 'assign', 'import', 'export', 'save', 'write',
+  'edit', 'approve', 'reject', 'publish', 'rsvp', 'schedule', 'reschedule',
+  'enable', 'disable', 'restore', 'reopen', 'snooze', 'pin', 'unpin', 'reorder',
+  'link', 'copy', 'execute', 'exec', 'run', 'mutation', 'mutate', 'manage',
+  'invoke', 'generate', 'refresh', 'acknowledge', 'resolve', 'share', 'invite',
+  'archive', 'rename', 'sync', 'trigger', 'notify', 'transfer', 'apply',
+  'merge', 'close', 'start', 'stop', 'login', 'authenticate', 'navigate',
+]);
+
+export const isReadOnlyMcpTool = (toolName) => {
+  if (typeof toolName !== 'string') return false;
+  const parts = toolName.split('__');
+  if (parts.length < 3 || parts[0] !== 'mcp') return false;
+  const words = parts.slice(2).join('_')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  if (words.some((w) => MCP_WRITE_VERBS.has(w))) return false;
+  return words.some((w) => MCP_READ_VERBS.has(w));
+};
+
+// ── Bash / PowerShell: commands that obviously reach the network ──
+// BEST-EFFORT ONLY.  A locked session may still write a script and run it,
+// and that script can open a socket; this list stops the obvious one-liners
+// (and the forms an injected instruction would most likely ask for), not a
+// determined program.  Matched case-insensitively anywhere in the command,
+// so `powershell -Command "iwr …"` and `xargs curl` are caught too.
+const OUTBOUND_COMMANDS = [
+  'curl', 'wget', 'aria2c',
+  'invoke-webrequest', 'invoke-restmethod', 'iwr', 'irm',
+  'start-bitstransfer', 'bitsadmin', 'send-mailmessage',
+  'ssh', 'scp', 'sftp', 'ftp', 'tftp', 'telnet',
+  'nc', 'ncat', 'netcat', 'socat',
+  'gh', 'rclone', 'gsutil', 'gcloud', 'aws', 'twine',
+  'sendmail', 'mutt', 'mailx',
+];
+const OUTBOUND_COMMAND_RE = new RegExp(
+  `(?<![\\w.$-])(${OUTBOUND_COMMANDS.map((c) => c.replace(/[-]/g, '\\-')).join('|')})(?:\\.exe)?(?![\\w.-])`,
+  'i',
+);
+const OUTBOUND_PATTERNS = [
+  ['git push / send-email', /(?<![\w.-])git(?:\.exe)?(?:\s+[^\s;|&]+)*?\s+(?:push|send-email)(?![\w-])/i],
+  ['npm publish', /(?<![\w.-])npm(?:\.cmd)?\s+publish\b/i],
+  ['/dev/tcp', /\/dev\/(?:tcp|udp)\//i],
+  // Any non-loopback URL: covers `python -c "urlopen('https://…')"`,
+  // `start https://…?q=<data>`, `git clone https://…`.
+  ['網址', /\b(?:https?|ftps?|wss?|sftp):\/\/(?!(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:[/?#'"\s]|$))/i],
+  ['網路函式庫', /net\.webclient|system\.net\.http|\bhttpclient\b|xmlhttprequest|\burllib\b|\bhttp\.client\b|\bsmtplib\b|\bftplib\b|\bhttpx\b|\baiohttp\b/i],
+];
+
+const _outboundHit = (command) => {
+  const m = command.match(OUTBOUND_COMMAND_RE);
+  if (m) return m[1];
+  for (const [label, re] of OUTBOUND_PATTERNS) {
+    if (re.test(command)) return label;
+  }
+  return null;
+};
+
+// ── Lock self-protection ──
+// With Write/Edit/Bash open, injected text could otherwise lift the lock by
+// deleting this session's marker or editing the hook code.  Protected:
+//   <home>/taint/          markers + tainted-drafts.json
+//   <plugin>/hooks/        this code, guard.mjs, hooks.json
+//   */.claude/settings(.local).json   hook / permission settings
+const HOOKS_DIR_KEYS = (() => {
+  const keys = new Set([canonicalize(__dirname)]);
+  try { keys.add(canonicalize(realpathSync(__dirname))); } catch { /* ignore */ }
+  keys.delete('');
+  return [...keys];
+})();
+const SETTINGS_FILE_RE = /\/\.claude\/settings(?:\.local)?\.json$/;
+
+const _within = (p, root) => p === root || p.startsWith(root + '/');
+
+const _protectedReason = (normPath, ctx) => {
+  if (!normPath) return null;
+  const normHome = ctx?.daHome ? canonicalize(ctx.daHome) : '';
+  if (normHome && _within(normPath, normHome + '/taint')) return '上鎖紀錄';
+  if (HOOKS_DIR_KEYS.some((k) => _within(normPath, k))) return '安全鎖程式';
+  if (SETTINGS_FILE_RE.test(normPath)) return 'Claude Code 設定檔';
+  return null;
+};
+
+const DESTRUCTIVE_RE = /(?<![\w.-])(?:rm|rmdir|mv|unlink|shred|truncate|del|erase|rd|ri|remove-item|move-item|rename-item)(?:\.exe)?(?![\w.-])/i;
+
+const _tamperHit = (command, ctx) => {
+  const normHome = ctx?.daHome ? canonicalize(ctx.daHome) : '';
+  const taintDir = normHome ? normHome + '/taint' : '';
+  const destructive = DESTRUCTIVE_RE.test(command);
+  for (const token of command.split(/[\s;|&<>()`,]+/)) {
+    const normToken = _canonShellToken(token, ctx?.cwd);
+    if (!normToken) continue;
+    const reason = _protectedReason(normToken, ctx);
+    if (reason) return reason;
+    // `rm -rf <home>` (or an ancestor) removes the marker with it
+    if (destructive && taintDir && taintDir.startsWith(normToken + '/')) return '上鎖紀錄';
+  }
+  // `cd <home> && rm -rf taint`: relative form the cwd check cannot resolve
+  if (destructive && /(?:^|[\s"'/\\])taint(?:[/\\"'\s]|$)/i.test(command)) return '上鎖紀錄';
+  return null;
+};
+
+/**
+ * Locked-session policy for a general local shell command (Bash that does
+ * not invoke daily_agenda, or the PowerShell tool): allow, except obvious
+ * network commands and lock tampering.
+ */
+export const checkTaintedLocalCommand = (command, ctx, label = 'Bash') => {
+  if (typeof command !== 'string') return deny(`（${label}：指令格式無效）`);
+  const outbound = _outboundHit(command);
+  if (outbound) return deny(`（${label}：「${outbound}」會連網或把資料送出電腦）。${OUTBOUND_TAIL}`);
+  const tamper = _tamperHit(command, ctx);
+  if (tamper) return deny(`（${label}：不能修改或刪除${tamper}，否則鎖定會失效）。要解除鎖定請開新對話。`);
+  return { allow: true };
+};
+
 export const checkTaintedAllow = (toolName, toolInput, ctx) => {
   if (typeof toolName !== 'string') return deny('（工具名稱無效）');
 
@@ -712,14 +826,30 @@ export const checkTaintedAllow = (toolName, toolInput, ctx) => {
 
   if (toolName.startsWith(ACTIONS_PREFIX)) return { allow: true };
 
+  if (toolName.startsWith('mcp__')) {
+    if (isReadOnlyMcpTool(toolName)) return { allow: true };
+    return deny(`（${toolName} 會對外送出或寫入外部系統）。${OUTBOUND_TAIL}`);
+  }
+
   if (toolName === 'Skill') {
     const skillName = toolInput?.skill;
     if (typeof skillName === 'string' && ALLOWED_SKILLS.has(skillName)) return { allow: true };
-    return deny(`（skill: ${skillName || '(none)'}）。要做其他事請開新對話。`);
+    return deny(`（skill: ${skillName || '(none)'}）。要用其他 skill 請開新對話。`);
   }
 
   if (toolName === 'Bash') return checkTaintedBash(toolInput, ctx);
+  if (toolName === 'PowerShell') {
+    const command = toolInput?.command;
+    if (typeof command === 'string' && /daily_agenda/i.test(command)) {
+      return deny('（PowerShell：daily-agenda 指令請用 Bash 的標準格式執行）');
+    }
+    return checkTaintedLocalCommand(command, ctx, 'PowerShell');
+  }
   if (toolName === 'Write' || toolName === 'Edit') return checkTaintedWrite(toolInput, ctx);
+
+  if (toolName === 'WebFetch' || toolName === 'WebSearch') {
+    return deny(`（${toolName} 會連網）。${OUTBOUND_TAIL}`);
+  }
 
   return deny();
 };
@@ -788,9 +918,18 @@ const _extractAllFlag = (argsStr, flagName) => {
   return values;
 };
 
+/**
+ * Locked-session Bash policy.
+ *
+ * Commands that mention daily_agenda keep the strict canonical-form policy
+ * below (config set / consent --accept / schedule / trust … stay denied, and
+ * a non-canonical invocation cannot route around it).  Every other command is
+ * general local work → checkTaintedLocalCommand.
+ */
 export const checkTaintedBash = (toolInput, ctx) => {
   const command = toolInput?.command;
   if (typeof command !== 'string') return deny('（Bash：指令格式無效）');
+  if (!/daily_agenda/i.test(command)) return checkTaintedLocalCommand(command, ctx, 'Bash');
   if (command.includes('\n') || command.includes('\r')) return deny('（Bash：不允許多行指令）');
 
   const sanitized = command.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, '__PLUGIN_ROOT__');
@@ -798,7 +937,7 @@ export const checkTaintedBash = (toolInput, ctx) => {
   if (/\$/.test(sanitized)) return deny('（Bash：不允許變數展開，$CLAUDE_PLUGIN_ROOT 除外）');
 
   const canonical = _parseCanonicalDA(command);
-  if (!canonical.ok) return deny();
+  if (!canonical.ok) return deny('（Bash：鎖定中 daily-agenda 指令只能用標準格式單獨執行）');
 
   const subcommand = canonical.subcommand;
   const argsStr = canonical.argsStr;
@@ -1163,19 +1302,13 @@ const _extractPathPositionals = (segTokens, tool) => {
 export const checkMonitorPreTaint = (command, ctx) => {
   if (typeof command !== 'string') return { taint: false };
 
-  // Build protected roots (canonical)
+  // Build protected roots (canonical): only runs/ holds raw third-party text
+  // (2026-11-13 relaxation; gen/ and output/ no longer lock).  A recursive
+  // tool pointed at the DA home is still an ancestor of runs/ → hit.
   const protectedRoots = [];
   if (ctx?.daHome) {
     const normHome = canonicalize(ctx.daHome);
-    if (normHome) protectedRoots.push(normHome);
-  }
-  if (Array.isArray(ctx?.extraPrefixes)) {
-    for (const ep of ctx.extraPrefixes) {
-      if (typeof ep === 'string' && ep.length > 0) {
-        const c = canonicalize(ep);
-        if (c) protectedRoots.push(c);
-      }
-    }
+    if (normHome) protectedRoots.push(normHome + '/runs');
   }
 
   // Check 1: whole-token match for daily_agenda module name
@@ -1257,34 +1390,26 @@ export const checkMonitorPreTaint = (command, ctx) => {
 
 export const checkTaintedWrite = (toolInput, ctx) => {
   const filePath = toolInput?.file_path;
-  if (typeof filePath !== 'string') return deny('（Write：路徑無效）');
+  if (typeof filePath !== 'string' || filePath.length === 0) return deny('（Write：路徑無效）');
 
-  const daHome = ctx?.daHome;
-  if (daHome) {
-    const normFile = canonicalize(filePath);
-    const normHome = canonicalize(daHome);
-    if (normFile.startsWith(normHome + '/runs/') && normFile.endsWith('/criteria-draft.md')) {
-      return { allow: true };
-    }
-    if (normFile.startsWith(normHome + '/runs/') && normFile.endsWith('/profile-draft.md')) {
-      return { allow: true };
-    }
-    if (normFile.startsWith(normHome + '/runs/') && normFile.endsWith('/coverage-draft.json')) {
-      return { allow: true };
-    }
-  } else {
-    if (/[/\\]\.daily-agenda[/\\]runs[/\\][^/\\]+[/\\]criteria-draft\.md$/i.test(filePath)) {
-      return { allow: true };
-    }
-    if (/[/\\]\.daily-agenda[/\\]runs[/\\][^/\\]+[/\\]profile-draft\.md$/i.test(filePath)) {
-      return { allow: true };
-    }
-    if (/[/\\]\.daily-agenda[/\\]runs[/\\][^/\\]+[/\\]coverage-draft\.json$/i.test(filePath)) {
-      return { allow: true };
-    }
+  // Check the plain path and the parent-realpath form (symlinked parents).
+  for (const key of draftKeys(filePath, ctx?.cwd)) {
+    const reason = _protectedReason(key, ctx);
+    if (reason) return deny(`（Write／Edit：不能修改${reason}，否則鎖定會失效）。要解除鎖定請開新對話。`);
   }
+  return { allow: true };
+};
 
-  return deny('（Write：只能寫入 .daily-agenda/runs/ 下的草稿檔案）');
+/**
+ * True when a written path is under <home>/runs/ — only those are recorded
+ * in tainted-drafts.json (draft laundering prevention).  Ordinary project
+ * files written while locked are not recorded: the list would grow without
+ * bound and re-lock later sessions that read them.
+ */
+export const isUnderRuns = (filePath, ctx) => {
+  if (!ctx?.daHome || typeof filePath !== 'string') return false;
+  const runsDir = canonicalize(ctx.daHome) + '/runs';
+  return draftKeys(filePath, ctx.cwd).some((k) => k.startsWith(runsDir + '/'));
 };
 
 // ---------------------------------------------------------------------------

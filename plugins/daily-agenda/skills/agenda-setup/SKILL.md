@@ -126,7 +126,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
 
 ## 第 5 步：串 Outlook（US-3）
 
-> ⚠️ **本步驟會觸發對話鎖定**：`outlook-preview` 讀取外部信件原文，之後本對話只能使用 daily-agenda 功能。
+> ⚠️ **本步驟會觸發對話鎖定**：`outlook-preview` 讀取外部信件原文，之後本對話不能上網、寄信或寫入外部系統，也不能再執行 `config set`、`schedule` 等設定指令（本機讀寫檔案照常）。
 
 1. 先確認使用者已安裝並登入 `df-graph`：`DA probe`，看 `sources.mail`。
    - `DF_GRAPH_NOT_REGISTERED`／`DF_GRAPH_AUTH` → 請使用者執行 `/df-graph-setup`（那是另一個 plugin 的設定流程，會開瀏覽器登入一次），完成後回來說「好了」，再跑一次 `DA probe`（本工具直接啟動 df-graph，不需要重啟 Claude Code）。

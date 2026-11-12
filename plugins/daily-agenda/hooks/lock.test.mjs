@@ -187,13 +187,26 @@ describe('lock hook integration', () => {
     assert.equal(result.stdout.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
-  it('denies Write when tainted', async () => {
+  it('allows a local Write when tainted (2026-11-13)', async () => {
     const sessionId = 'sess-locked-3';
     mkdirSync(path.join(testHome, 'taint'), { recursive: true });
     writeFileSync(path.join(testHome, 'taint', sessionId), '{}');
 
     const result = await runHook(
-      { tool_name: 'Write', tool_input: { file_path: '/tmp/x', content: 'y' }, session_id: sessionId },
+      { tool_name: 'Write', tool_input: { file_path: '/tmp/x', content: 'y' }, session_id: sessionId, cwd: TEST_BASE },
+      { DAILY_AGENDA_HOME: testHome },
+    );
+
+    assert.notEqual(result.stdout.hookSpecificOutput?.permissionDecision, 'deny');
+  });
+
+  it('denies Write of the taint marker when tainted', async () => {
+    const sessionId = 'sess-locked-3b';
+    mkdirSync(path.join(testHome, 'taint'), { recursive: true });
+    writeFileSync(path.join(testHome, 'taint', sessionId), '{}');
+
+    const result = await runHook(
+      { tool_name: 'Write', tool_input: { file_path: path.join(testHome, 'taint', sessionId), content: '' }, session_id: sessionId },
       { DAILY_AGENDA_HOME: testHome },
     );
 
@@ -438,9 +451,9 @@ describe('lock hook integration', () => {
       'Marker should record transcript_path from hook input');
   });
 
-  // ── gen/ taint ──
+  // ── gen/ no longer taints (2026-11-13) ──
 
-  it('creates taint marker on Read under gen/', async () => {
+  it('does not create a taint marker on Read under gen/', async () => {
     const sessionId = 'sess-taint-gen';
     await runHook(
       {
@@ -451,8 +464,8 @@ describe('lock hook integration', () => {
       { DAILY_AGENDA_HOME: testHome },
     );
 
-    assert.ok(existsSync(path.join(testHome, 'taint', sessionId)),
-      'Reading gen/ should taint the session');
+    assert.ok(!existsSync(path.join(testHome, 'taint', sessionId)),
+      'Reading gen/ should no longer taint the session');
   });
 
   // ── Guard hook compatibility ──

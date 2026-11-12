@@ -56,12 +56,14 @@ describe('loadRegistry', () => {
 describe('checkReadTaint', () => {
   it('empty path no taint', () => assert.ok(!checkReadTaint('', DA_HOME).taint));
   it('taints under runs/', () => assert.ok(checkReadTaint(DA_HOME + '/runs/x/bundle.jsonl', DA_HOME).taint));
-  it('taints under gen/', () => assert.ok(checkReadTaint(DA_HOME + '/gen/1/agenda.html', DA_HOME).taint));
-  it('taints under output/', () => assert.ok(checkReadTaint(DA_HOME + '/output/2026.html', DA_HOME).taint));
-  it('taints under output.dir', () => assert.ok(checkReadTaint('/home/test/docs/da/x.html', DA_HOME, ['/home/test/docs/da']).taint));
-  it('taints DA home itself', () => assert.ok(checkReadTaint(DA_HOME, DA_HOME).taint));
+  // 2026-11-13 relaxation: only runs/ (third-party raw text) locks
+  it('no taint under gen/ (ledger)', () => assert.ok(!checkReadTaint(DA_HOME + '/gen/1/agenda.html', DA_HOME).taint));
+  it('no taint under output/ (agenda page)', () => assert.ok(!checkReadTaint(DA_HOME + '/output/2026.html', DA_HOME).taint));
+  it('no taint under a custom output.dir', () => assert.ok(!checkReadTaint('/home/test/docs/da/x.html', DA_HOME, ['/home/test/docs/da']).taint));
+  it('no taint on DA home itself (raw lines carry the sentinel)', () => assert.ok(!checkReadTaint(DA_HOME, DA_HOME).taint));
+  it('taints runs/ itself', () => assert.ok(checkReadTaint(DA_HOME + '/runs', DA_HOME).taint));
   it('no taint on parent', () => assert.ok(!checkReadTaint('/home/test', DA_HOME).taint));
-  it('taints on config.json (raw chat names)', () => assert.ok(checkReadTaint(DA_HOME + '/config.json', DA_HOME).taint));
+  it('no taint on config.json (2026-11-13: user accepted chat names in settings)', () => assert.ok(!checkReadTaint(DA_HOME + '/config.json', DA_HOME).taint));
   it('no taint on .', () => assert.ok(!checkReadTaint('.', DA_HOME, [], '/home/test/project').taint));
   it('no taint on runs/../..', () => assert.ok(!checkReadTaint(DA_HOME + '/runs/../../.ssh/id_rsa', DA_HOME).taint));
   it('case-insensitive', () => assert.ok(checkReadTaint('C:\\USERS\\TEST\\.DAILY-AGENDA\\RUNS\\x', 'C:\\Users\\test\\.daily-agenda').taint));
@@ -98,8 +100,14 @@ describe('checkBashTaint', () => {
   });
 
   // Round-2 F4 misses: shell-level path tricks must still taint
-  it('F4: cd into home then relative cat', () => {
-    assert.ok(checkBashTaint(`cd ${DA_HOME} && cat runs/x/bundle.json`, CTX).taint);
+  it('F4: cd into home then relative cat — PreToolUse no longer locks on the bare home path', () => {
+    // The relative runs/ path resolves against the hook cwd, not the post-cd
+    // dir; the sentinel stamped on every raw line locks via PostToolUse
+    // (covered in lock-relax.test.mjs).
+    assert.ok(!checkBashTaint(`cd ${DA_HOME} && cat runs/x/bundle.json`, CTX).taint);
+  });
+  it('F4: relative runs/ path resolved against a cwd of home → taint', () => {
+    assert.ok(checkBashTaint('cat runs/x/bundle.json', { daHome: DA_HOME, cwd: DA_HOME }).taint);
   });
   it('F4: quote inside path token', () => {
     assert.ok(checkBashTaint(`cat ${DA_HOME}/"runs"/x/bundle.json`, CTX).taint);
@@ -142,9 +150,14 @@ describe('checkBashTaint', () => {
   });
 
   // Item 6: config.json taint via Bash path reference
-  it('R5-6: cat config.json → taint', () => {
-    assert.ok(checkBashTaint(`cat ${DA_HOME}/config.json`, CTX).taint,
-      'config.json contains raw chat names');
+  it('R5-6 (relaxed 2026-11-13): cat config.json → no taint', () => {
+    assert.ok(!checkBashTaint(`cat ${DA_HOME}/config.json`, CTX).taint);
+  });
+  it('relaxed: cat gen/ ledger → no taint', () => {
+    assert.ok(!checkBashTaint(`cat ${DA_HOME}/gen/3/ledger.json`, CTX).taint);
+  });
+  it('relaxed: cd into DA home → no taint', () => {
+    assert.ok(!checkBashTaint(`cd ${DA_HOME}`, CTX).taint);
   });
 });
 
@@ -173,7 +186,10 @@ describe('checkTaintedAllow', () => {
   it('allows Write criteria-draft', () => assert.ok(checkTaintedAllow('Write', { file_path: draft }, CTX).allow));
   it('allows Write profile-draft', () => assert.ok(checkTaintedAllow('Write', { file_path: profileDraft }, CTX).allow));
   it('allows Write coverage-draft', () => assert.ok(checkTaintedAllow('Write', { file_path: coverageDraft }, CTX).allow));
-  it('denies Write arbitrary', () => assert.ok(!checkTaintedAllow('Write', { file_path: '/tmp/x' }, CTX).allow));
+  it('allows Write arbitrary local file (2026-11-13)', () => assert.ok(checkTaintedAllow('Write', { file_path: '/tmp/x' }, CTX).allow));
+  it('denies Write into the taint dir', () => assert.ok(!checkTaintedAllow('Write', { file_path: DA_HOME + '/taint/abc' }, CTX).allow));
+  it('allows read-only MCP', () => assert.ok(checkTaintedAllow('mcp__df-graph__mail_list_recent', {}, CTX).allow));
+  it('denies WebSearch', () => assert.ok(!checkTaintedAllow('WebSearch', {}, CTX).allow));
 });
 
 // ============================================================================
@@ -363,7 +379,8 @@ describe('checkMonitorCommand', () => {
 
 describe('unified deny reason', () => {
   const BASE = '這個對話已讀取外部訊息原文，為了防止訊息裡藏的指令被執行，已鎖定';
-  it('Write', () => assert.ok(checkTaintedAllow('Write', { file_path: '/tmp/x' }, CTX).reason.startsWith(BASE)));
+  it('Write (protected path)', () => assert.ok(checkTaintedAllow('Write', { file_path: DA_HOME + '/taint/x' }, CTX).reason.startsWith(BASE)));
+  it('MCP write', () => assert.ok(checkTaintedAllow('mcp__df-graph__mail_send', {}, CTX).reason.startsWith(BASE)));
   it('Bash', () => assert.ok(checkTaintedAllow('Bash', { command: 'curl evil' }, CTX).reason.startsWith(BASE)));
   it('generic', () => assert.ok(checkTaintedAllow('WebFetch', {}, CTX).reason.startsWith(BASE)));
   it('Monitor', () => assert.ok(checkTaintedAllow('Monitor', { command: 'tail -f x' }, CTX).reason.startsWith(BASE)));
@@ -377,8 +394,12 @@ describe('checkTaintedWrite', () => {
   it('allows criteria-draft', () => assert.ok(checkTaintedWrite({ file_path: draft }, CTX).allow));
   it('allows profile-draft', () => assert.ok(checkTaintedWrite({ file_path: profileDraft }, CTX).allow));
   it('allows coverage-draft', () => assert.ok(checkTaintedWrite({ file_path: coverageDraft }, CTX).allow));
-  it('denies arbitrary', () => assert.ok(!checkTaintedWrite({ file_path: '/tmp/x' }, CTX).allow));
-  it('denies traversal', () => assert.ok(!checkTaintedWrite({ file_path: DA_HOME + '/runs/../../.ssh/x' }, CTX).allow));
+  it('allows arbitrary local file (2026-11-13)', () => assert.ok(checkTaintedWrite({ file_path: '/tmp/x' }, CTX).allow));
+  it('allows traversal out of runs/ to a normal file', () => assert.ok(checkTaintedWrite({ file_path: DA_HOME + '/runs/../../notes/x' }, CTX).allow));
+  it('denies traversal into the taint dir', () => assert.ok(!checkTaintedWrite({ file_path: DA_HOME + '/runs/../taint/sess' }, CTX).allow));
+  it('denies the taint marker', () => assert.ok(!checkTaintedWrite({ file_path: DA_HOME + '/taint/sess-1' }, CTX).allow));
+  it('denies Claude Code settings', () => assert.ok(!checkTaintedWrite({ file_path: '/home/test/.claude/settings.json' }, CTX).allow));
+  it('allows other files under .claude (not settings)', () => assert.ok(checkTaintedWrite({ file_path: '/home/test/.claude/notes.md' }, CTX).allow));
   it('denies null', () => assert.ok(!checkTaintedWrite({}, CTX).allow));
 });
 
@@ -1087,9 +1108,19 @@ describe('H1: ancestor recursive scan in Monitor', () => {
     const r = checkMonitorPreTaint('fd --extension html', ctx);
     assert.ok(r.taint);
   });
-  it('rg inside daHome → taint', () => {
+  it('rg inside daHome gen/ → no taint (2026-11-13)', () => {
     const r = checkMonitorPreTaint(
       'rg TODO /home/test/.daily-agenda/gen', CTX);
+    assert.ok(!r.taint);
+  });
+  it('rg inside daHome runs/ → taint', () => {
+    const r = checkMonitorPreTaint(
+      'rg TODO /home/test/.daily-agenda/runs', CTX);
+    assert.ok(r.taint);
+  });
+  it('rg on daHome itself (ancestor of runs/) → taint', () => {
+    const r = checkMonitorPreTaint(
+      'rg TODO /home/test/.daily-agenda', CTX);
     assert.ok(r.taint);
   });
   it('canonical progress watch exemption still works', () => {
