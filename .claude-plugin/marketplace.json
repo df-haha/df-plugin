@@ -182,6 +182,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/daily-agenda",
       "category": "productivity"
+    },
+    {
+      "name": "workhub-inbox",
+      "description": "外部待辦同步進 Work Hub（PM 系統）個人待辦收件匣 — v1 接 daily-agenda（LINE／Outlook 整理的待辦），不經 AI、預設試跑、重跑不重複，agenda 標完成時 PM 跟著勾完成",
+      "version": "0.1.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/workhub-inbox",
+      "category": "productivity"
     }
   ]
 }

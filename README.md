@@ -71,6 +71,7 @@ Deep Research 會使用已登入的 ChatGPT 訂閱網頁，不使用 OpenAI API 
 | **hermes-exchange** | Hermes／Telegram 輕量通知 relay。Hermes 使用者可安裝 bundled runtime；其他 agent/runtime 不必用同一 plugin，只要實作 `HERMES_NOTIFY/1`、sender ID＋username 白名單與「收件只進 owner inbox」安全邊界即可互通。另有預設關閉、綁定固定 repository alias 的 Claude Code／Codex 執行層。 |
 | **session-resume-inventory** | 重開機／交接前的 session 盤點 — 列出開著的 Claude Code、Codex、tmux 與 Orca 工作階段，依 repo／worktree 與分支分組、說明即時狀態（idle／busy／shell／open），並產出精確的 `claude --resume <id>`／`codex resume <id>` 指令（盤點唯讀）。另可關機前存快照、開機後把沒在跑的 session 開回 Orca（預覽確認後才開、已在跑的不重開）。Linux／WSL 與原生 Windows 都能跑。 |
 | **gpu-cloud-finetune** | 租雲端 GPU 的實戰手冊 — Colab CLI／gputw.ai／RunPod 三平台的開機、傳檔、停機與踩坑表；Hugging Face 釘版下載、vLLM 公平測模型、Unsloth QLoRA 微調、FP8／4-bit／GGUF 量化；三條互相獨立的停機保險（dead-man），避免機器空轉扣錢、結果丟失。附 API 腳本範本（金鑰只讀環境變數）。支援 Claude Code 與 Codex。 |
+| **workhub-inbox** | 外部待辦同步進 Work Hub（PM 系統）個人待辦收件匣 — v1 接 **daily-agenda** 從 LINE／Outlook 信件／行事曆整理的待辦；寫入全程由腳本直接呼叫 Work Hub MCP 端點、不經 AI（待辦標題屬不可信內容）；預設試跑、`--apply` 才寫入並有單次上限；以來源＋去重鍵判斷，重跑不重複；agenda 標完成時 PM 跟著勾完成，使用者在 PM 改的內容不會被覆蓋。需 Node 22+。 |
 
 ## 授權
 
