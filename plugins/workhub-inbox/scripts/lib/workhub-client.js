@@ -12,8 +12,14 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 const API_KEY_FORMAT = /^[\x21-\x7e]+$/;
 const ERROR_CODE_FORMAT = /^[A-Za-z0-9_]{1,40}$/;
 
+// 金鑰變數依序取第一個有值（非空字串）的：WORKHUB_INBOX_API_KEY 優先；
+// 沒設就用 PM 系統「AI 串接」頁教使用者設的 DF_WORKHUB_API_KEY（一人只有一把有效金鑰，不必設兩次）。
+// 前面的變數有值但格式錯，照樣用它並報錯，不悄悄改用後面那把。端點不設後備，只認 WORKHUB_INBOX_ENDPOINT。
+const API_KEY_VARS = ["WORKHUB_INBOX_API_KEY", "DF_WORKHUB_API_KEY"];
+
 const ENDPOINT_INVALID = "端點網址格式不正確：請確認 WORKHUB_INBOX_ENDPOINT 是 https 開頭的網址（例如 https://<Work Hub 網址>/mcp），且沒有把金鑰填到這個變數。";
-const API_KEY_INVALID = "API 金鑰格式不正確：WORKHUB_INBOX_API_KEY 不能有空白、換行或中文，請重新複製金鑰後再設定一次。";
+const API_KEY_MISSING = `缺少 Work Hub API 金鑰（${API_KEY_VARS.join(" 或 ")}）`;
+const apiKeyInvalid = (name) => `API 金鑰格式不正確：${name} 不能有空白、換行或中文，請重新複製金鑰後再設定一次。`;
 const SERVER_CODE_FORMAT = /^[A-Z][A-Z0-9_]{1,63}$/;
 const SERVER_TEXT_HIDDEN = "SERVER_ERROR_TEXT_HIDDEN";
 // Work Hub 工具錯誤是 HTTP 200＋structuredContent.error，沒有狀態碼；這兩個代碼代表金鑰本身無效或權限不足
@@ -83,11 +89,22 @@ function parseResult(result, tool) {
   }
 }
 
-function createClient({ endpoint, apiKey, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), maxAttempts = 3, timeoutMs = DEFAULT_TIMEOUT_MS }) {
+/**
+ * 從環境變數取金鑰。回傳實際使用的金鑰與變數名，以及所有金鑰變數的原值（給輸出遮蔽用，有值的都要遮）。
+ * @param {Record<string, string|undefined>} env
+ * @returns {{apiKey: string|undefined, apiKeyVar: string|null, secrets: Array<string|undefined>}}
+ */
+function resolveApiKey(env) {
+  const apiKeyVar = API_KEY_VARS.find((name) => typeof env[name] === "string" && env[name].length > 0) || null;
+  return { apiKey: apiKeyVar ? env[apiKeyVar] : undefined, apiKeyVar, secrets: API_KEY_VARS.map((name) => env[name]) };
+}
+
+function createClient({ endpoint, apiKey, apiKeyVar = API_KEY_VARS[0], fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), maxAttempts = 3, timeoutMs = DEFAULT_TIMEOUT_MS }) {
   if (!endpoint) throw new WorkhubError("缺少 Work Hub MCP 端點（WORKHUB_INBOX_ENDPOINT）");
-  if (!apiKey) throw new WorkhubError("缺少 Work Hub API 金鑰（WORKHUB_INBOX_API_KEY）");
+  if (!apiKey) throw new WorkhubError(API_KEY_MISSING);
   const target = validateEndpoint(endpoint);
-  if (!API_KEY_FORMAT.test(apiKey)) throw new WorkhubError(API_KEY_INVALID);
+  // 變數名只用固定清單裡的，錯誤訊息不帶呼叫端給的任意字串
+  if (!API_KEY_FORMAT.test(apiKey)) throw new WorkhubError(apiKeyInvalid(API_KEY_VARS.includes(apiKeyVar) ? apiKeyVar : API_KEY_VARS[0]));
   let nextId = 1;
 
   async function once(tool, args) {
@@ -147,4 +164,4 @@ function createClient({ endpoint, apiKey, fetchImpl = fetch, sleep = (ms) => new
   return { callTool };
 }
 
-module.exports = { WorkhubError, createClient, validateEndpoint };
+module.exports = { WorkhubError, createClient, resolveApiKey, validateEndpoint };

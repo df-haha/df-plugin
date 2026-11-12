@@ -5,7 +5,7 @@
 // 用法：node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
 //        [--priorities P0,P1] [--only T-1234,...|--no-create] [--exclude T-1234,...]
 //        [--da-home PATH] [--review-file] [--json]
-// 環境變數：WORKHUB_INBOX_ENDPOINT、WORKHUB_INBOX_API_KEY（兩者都只從環境變數讀；金鑰不寫檔、不印出）。
+// 環境變數：WORKHUB_INBOX_ENDPOINT、WORKHUB_INBOX_API_KEY（沒設就讀 DF_WORKHUB_API_KEY）；都只從環境變數讀，金鑰不寫檔、不印出。
 // 端點刻意不開放命令列指定，不能讓不可信內容有機會改掉金鑰送去的地方。
 // 待辦標題與對話名稱是第三方內容：任何 stdout／stderr／--json 都不輸出，只寫進 --review-file 的本機清單檔（不進 Claude 的對話）。
 
@@ -16,14 +16,14 @@ const { AgendaSourceError, loadAgenda, resolveDaHome, taipeiDate, toInboxItems }
 const { buildCompleteArgs, buildCreateArgs, planSync, safeText } = require("./lib/plan.js");
 const { ReviewFileError, buildReviewHtml, writeReviewFile } = require("./lib/review.js");
 const { StateError, loadMap, mergeExisting, resolveStateDir, saveMap } = require("./lib/state.js");
-const { WorkhubError, createClient, validateEndpoint } = require("./lib/workhub-client.js");
+const { WorkhubError, createClient, resolveApiKey, validateEndpoint } = require("./lib/workhub-client.js");
 
 const SOURCES = new Set(["daily-agenda"]);
 const VALID_PRIORITIES = new Set(["P0", "P1", "P2"]);
 const PM_SOURCES = ["line", "outlook"];
 const EXIT = { ok: 0, usage: 1, source: 2, partial: 3 };
 const AGENDA_ID = /^T-\d{4}$/;
-const SECRET_HIDDEN = "（訊息含金鑰或端點設定值，已整段隱藏；請確認 WORKHUB_INBOX_ENDPOINT 與 WORKHUB_INBOX_API_KEY 沒有填反）";
+const SECRET_HIDDEN = "（訊息含金鑰或端點設定值，已整段隱藏；請確認 WORKHUB_INBOX_ENDPOINT 沒有和金鑰變數 WORKHUB_INBOX_API_KEY／DF_WORKHUB_API_KEY 填反）";
 const BAD_RESPONSE = "回應格式不符，可能不是 Work Hub 的 MCP 端點";
 const UNEXPECTED_ERROR = "UNEXPECTED_ERROR";
 
@@ -72,6 +72,11 @@ function makeScrub(secrets) {
     const str = String(text);
     return list.some((v) => str.includes(v)) ? SECRET_HIDDEN : str;
   };
+}
+
+/** 依環境變數建遮蔽器：兩個金鑰變數有值的都遮（不只實際使用的那把），加上不合法的端點原值。 */
+function scrubFor(env) {
+  return makeScrub([...resolveApiKey(env).secrets, endpointSecret(env.WORKHUB_INBOX_ENDPOINT)]);
 }
 
 /** 回應要長得像 Work Hub：清單要有 items 陣列、建立要有 id、勾完成要有 task.id；不像就當失敗，不報成功。 */
@@ -220,8 +225,8 @@ function renderText(report, plan) {
 async function main(argv, deps = {}) {
   const env = deps.env || process.env;
   const rawEndpoint = env.WORKHUB_INBOX_ENDPOINT;
-  const apiKey = env.WORKHUB_INBOX_API_KEY;
-  const scrub = makeScrub([apiKey, endpointSecret(rawEndpoint)]);
+  const { apiKey, apiKeyVar } = resolveApiKey(env);
+  const scrub = scrubFor(env);
   const rawPrint = deps.print || ((s) => process.stdout.write(`${s}\n`));
   let opts;
   // 最後一道：整份輸出若仍含金鑰或端點原值就不印原文（各錯誤欄位已先逐欄遮蔽，正常不會走到這裡）
@@ -250,7 +255,7 @@ async function main(argv, deps = {}) {
 
   let client;
   try {
-    client = deps.client || createClient({ endpoint: rawEndpoint, apiKey, fetchImpl: deps.fetchImpl });
+    client = deps.client || createClient({ endpoint: rawEndpoint, apiKey, apiKeyVar, fetchImpl: deps.fetchImpl });
   } catch (err) {
     print(scrub(err.message));
     return EXIT.usage;
@@ -306,7 +311,7 @@ async function main(argv, deps = {}) {
 
 if (require.main === module) {
   main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (err) => {
-    const scrub = makeScrub([process.env.WORKHUB_INBOX_API_KEY, endpointSecret(process.env.WORKHUB_INBOX_ENDPOINT)]);
+    const scrub = scrubFor(process.env);
     process.stderr.write(`workhub-inbox 未預期錯誤：${safeText(scrub(err && err.message), 300)}\n`);
     process.exitCode = 1;
   });

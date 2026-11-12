@@ -20,21 +20,31 @@ claude plugin install workhub-inbox@df-haha-plugins
 
 ## 設定
 
-需要兩個環境變數：Work Hub 的 MCP 端點網址、你的個人 API 金鑰。金鑰只放環境變數，不要寫進任何檔案或貼到對話裡。
+需要兩樣設定：Work Hub 的 MCP 端點網址（`WORKHUB_INBOX_ENDPOINT`）、你的個人 API 金鑰（`WORKHUB_INBOX_API_KEY`）。金鑰只放環境變數，不要寫進任何檔案或貼到對話裡。
 
-**Windows（PowerShell）**，長期有效（建議）：
+已經照 PM 系統「AI 串接」頁設好 `DF_WORKHUB_API_KEY` 的話，只要再設 `WORKHUB_INBOX_ENDPOINT`。沒設 `WORKHUB_INBOX_API_KEY` 時會自動改用 `DF_WORKHUB_API_KEY`，同一把金鑰不用設兩次；兩個都有設時，以 `WORKHUB_INBOX_API_KEY` 為準。
+
+**Windows（PowerShell）**，長期有效（建議）。先設端點：
 
 ```powershell
 [Environment]::SetEnvironmentVariable("WORKHUB_INBOX_ENDPOINT", "https://<Work Hub 網址>/mcp", "User")
+```
+
+還沒設過 `DF_WORKHUB_API_KEY` 的人，再設金鑰（已經設過就跳過這行，不要把範例文字貼進去）：
+
+```powershell
 [Environment]::SetEnvironmentVariable("WORKHUB_INBOX_API_KEY", "<個人 API 金鑰>", "User")
 ```
 
 設完要把 Claude Code 和開著的終端機視窗全部關掉再重開，新的設定才會生效。
 
-只在目前這個 PowerShell 視窗有效（關掉就沒了，適合先試）：
+只在目前這個 PowerShell 視窗有效（關掉就沒了，適合先試）；第二行同樣只有還沒設 `DF_WORKHUB_API_KEY` 的人才需要：
 
 ```powershell
 $env:WORKHUB_INBOX_ENDPOINT = "https://<Work Hub 網址>/mcp"
+```
+
+```powershell
 $env:WORKHUB_INBOX_API_KEY = "<個人 API 金鑰>"
 ```
 
@@ -43,15 +53,20 @@ $env:WORKHUB_INBOX_API_KEY = "<個人 API 金鑰>"
 確認有設到（只顯示有沒有值，不印出金鑰）：
 
 ```powershell
-[bool]$env:WORKHUB_INBOX_ENDPOINT; [bool]$env:WORKHUB_INBOX_API_KEY
+[bool]$env:WORKHUB_INBOX_ENDPOINT; ($env:WORKHUB_INBOX_API_KEY -or $env:DF_WORKHUB_API_KEY)
 ```
 
-兩個都顯示 `True` 才算設好。
+兩行都顯示 `True` 才算設好（第二行看的是兩個金鑰變數有沒有任一個有值）。
 
 **macOS／Linux／WSL（bash）**：
 
 ```bash
 export WORKHUB_INBOX_ENDPOINT="https://<Work Hub 網址>/mcp"
+```
+
+還沒設過 `DF_WORKHUB_API_KEY` 的人才需要：
+
+```bash
 export WORKHUB_INBOX_API_KEY="<個人 API 金鑰>"
 ```
 
