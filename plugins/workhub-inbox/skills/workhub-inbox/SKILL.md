@@ -25,6 +25,17 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/inbox-sync.js" sync --source daily-agenda --
 
 `CLAUDE_PLUGIN_ROOT` 沒有值時，從本檔位置往上三層就是 plugin 根目錄。
 
+原生 Windows 上這兩行用 Git Bash 執行即可（daily-agenda 的指令也是同樣寫法）；若改用 PowerShell 而 回報找不到 `/scripts/inbox-sync.js`，表示路徑沒被換掉，改用本檔往上三層的完整路徑。
+
+腳本回「缺少 Work Hub MCP 端點」或「缺少 Work Hub API 金鑰」時，不要請使用者把金鑰貼進對話。請使用者在 PowerShell 自己執行下面兩行（網址與金鑰由使用者自己填），然後關掉並重開 Claude Code：
+
+```powershell
+[Environment]::SetEnvironmentVariable("WORKHUB_INBOX_ENDPOINT", "https://<Work Hub 網址>/mcp", "User")
+[Environment]::SetEnvironmentVariable("WORKHUB_INBOX_API_KEY", "<個人 API 金鑰>", "User")
+```
+
+macOS／Linux 用 `export WORKHUB_INBOX_ENDPOINT=...`、`export WORKHUB_INBOX_API_KEY=...`。
+
 常用參數：`--priorities P0,P1`（只收這些優先級，預設 P0–P2）、`--only T-1234,T-5678`／`--exclude T-1234`（依使用者指定的代碼挑選或排除；代碼是 agenda 產生的，可以放進參數）、`--da-home <路徑>`（daily-agenda 資料夾，預設自動找）、`--endpoint <URL>`、`--json`（機器可讀，不含標題）。
 
 結束碼：0 成功；1 參數或設定錯誤（含金鑰無效）；2 讀不到 daily-agenda 資料；3 有寫入失敗。

@@ -1,29 +1,72 @@
 # workhub-inbox
 
-把外部待辦單向同步進 Work Hub（marketing-pm-system）的個人待辦收件匣，讓 PM 系統成為唯一的待辦系統。
-以「來源轉接器」擴充；v1 只有 `daily-agenda`（LINE、Outlook 信件、行事曆整理出的待辦）。規格見 `docs/superpowers/specs/2026-11-10-workhub-inbox/spec.md`。
+把外部待辦單向同步進 Work Hub（PM 系統）的個人待辦收件匣，讓 PM 系統成為唯一的待辦系統。
+以「來源轉接器」擴充；目前只接 `daily-agenda`（LINE、Outlook 信件、行事曆整理出的待辦）。規格見 `docs/superpowers/specs/2026-11-10-workhub-inbox/spec.md`。
 
 ## 需求
 
-- Node.js 22 以上（用內建 `fetch`，不需安裝套件）
-- 已安裝並跑過 daily-agenda（要有 `~/.daily-agenda/CURRENT`）。WSL 上會自動換算 Windows 的 `%USERPROFILE%\.daily-agenda`
+- Node.js 22 以上（用內建 `fetch`，不需安裝套件；daily-agenda 已要求 Node.js 24，裝好 daily-agenda 就符合）
+- 已安裝並跑過 daily-agenda（要有 `%USERPROFILE%\.daily-agenda\CURRENT`）。資料夾會自動找：Windows 用 `%USERPROFILE%\.daily-agenda`，有設 `DAILY_AGENDA_HOME` 就用它，WSL 上會換算到 Windows 的使用者資料夾
 - Work Hub 個人 API 金鑰（PM 系統「MCP 連線」頁產生）
+
+## 安裝
+
+在 Claude Code 外的終端機（PowerShell 或 bash 都可以）執行：
+
+```
+claude plugin marketplace add df-haha/df-plugin
+claude plugin install workhub-inbox@df-haha-plugins
+```
 
 ## 設定
 
+需要兩個環境變數：Work Hub 的 MCP 端點網址、你的個人 API 金鑰。金鑰只放環境變數，不要寫進任何檔案或貼到對話裡。
+
+**Windows（PowerShell）**，長期有效（建議）：
+
+```powershell
+[Environment]::SetEnvironmentVariable("WORKHUB_INBOX_ENDPOINT", "https://<Work Hub 網址>/mcp", "User")
+[Environment]::SetEnvironmentVariable("WORKHUB_INBOX_API_KEY", "<個人 API 金鑰>", "User")
+```
+
+設完要把 Claude Code 和開著的終端機視窗全部關掉再重開，新的設定才會生效。
+
+只在目前這個 PowerShell 視窗有效（關掉就沒了，適合先試）：
+
+```powershell
+$env:WORKHUB_INBOX_ENDPOINT = "https://<Work Hub 網址>/mcp"
+$env:WORKHUB_INBOX_API_KEY = "<個人 API 金鑰>"
+```
+
+要在 Claude Code 裡用，得在同一個視窗裡用 `claude` 指令啟動 Claude Code。
+
+確認有設到（只顯示有沒有值，不印出金鑰）：
+
+```powershell
+[bool]$env:WORKHUB_INBOX_ENDPOINT; [bool]$env:WORKHUB_INBOX_API_KEY
+```
+
+兩個都顯示 `True` 才算設好。
+
+**macOS／Linux／WSL（bash）**：
+
 ```bash
-export WORKHUB_INBOX_ENDPOINT="https://<你的 Work Hub 網址>/mcp"
-export WORKHUB_INBOX_API_KEY="<個人 API 金鑰>"   # 只放環境變數，不要寫進 repo
+export WORKHUB_INBOX_ENDPOINT="https://<Work Hub 網址>/mcp"
+export WORKHUB_INBOX_API_KEY="<個人 API 金鑰>"
 ```
 
 ## 使用
 
-```bash
-node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --show-titles   # 試跑
-node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --apply          # 實寫
+在 Claude Code 裡說「同步待辦到 PM」。Claude 會先試跑，列出會建立、會勾完成哪些待辦；你確認後才實際寫入。第一次寫入正式環境只寫 3 筆，請先到 PM 看過再補其餘。
+
+也可以直接用命令列跑（以下路徑是在本 repo 根目錄；PowerShell 與 bash 寫法相同）：
+
+```
+node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --show-titles
+node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --apply --max-writes 3
 ```
 
-在 Claude Code 裡說「同步待辦到 PM」也會觸發 skill，流程一樣先試跑再確認。
+第一行是試跑，只列出、不寫入；第二行實際寫入。
 
 | 參數 | 說明 | 預設 |
 |---|---|---|
