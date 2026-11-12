@@ -2,7 +2,7 @@
 
 > 2026-11-10 起草。使用者拍板：1A（另開 plugin）、2（v1 範圍照建議）、3（/hi 段落先維持讀 agenda）、4（無期限待辦只收 7 天內出現的）。
 >
-> **2026-11-13 使用者裁決（v0.2.0）**：使用者覺得同一批待辦要確認兩次，改成「在 daily-agenda 彙整頁確認一次」——貼回「確認待辦 R-XXX」、daily-agenda 處理成功後，同一個對話直接跑 `sync --apply --report R-XXX`。拿掉三道保護：(1) 同步要另開新對話；(2) 先試跑、看另一份清單檔才實寫；(3) 正式環境第一次只寫 3 筆。下文標「2026-11-13 改」的段落以此為準；未標的舊段落保留作為沿革。
+> **2026-11-13 使用者裁決（v0.2.0）**：使用者覺得同一批待辦要確認兩次，改成「在 daily-agenda 彙整頁確認一次」——貼回「確認待辦 R-XXX」、daily-agenda 處理成功後，同一個對話直接跑 `sync --apply --report R-XXX`。拿掉三道保護：(1) 同步要另開新對話；(2) 先試跑、看另一份清單檔才實寫；(3) 正式環境第一次只寫 3 筆。同日再裁決：報表模式的舊待辦「讓使用者自己選，做得有彈性一點」——預設只建立 7 天內的，超過的列出筆數由使用者選這次補不補、要不要存成以後的偏好（`--fresh-days`、`prefs`）。「可能已完成」與收合項目維持不寫入。下文標「2026-11-13 改」的段落以此為準；未標的舊段落保留作為沿革。
 
 ## 1. 目的
 
@@ -73,11 +73,14 @@ plugin 以「來源轉接器（source adapter）」為單位擴充；v1 只有 `
 
 ```
 node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
-     [--report R-XXX|latest] [--priorities P0,P1] [--only T-1234,...|--no-create]
+     [--report R-XXX|latest] [--fresh-days N|all] [--priorities P0,P1] [--only T-1234,...|--no-create]
      [--exclude T-1234,...] [--da-home PATH] [--review-file] [--json]
+node scripts/inbox-sync.js prefs show [--json] | prefs set fresh-days <N|all> | prefs clear
 ```
 
-- `--report R-XXX|latest`（2026-11-13 新增）：只建立該報表列出、而且登記簿現在仍是 `open` 的待辦；勾完成不受限。報表對照讀 daily-agenda CURRENT generation 的 `state.json`：`report_code`（`R-` 加 3 碼）與 `report_index`（`{"項次": "T-xxxx"}`，值再以 `^T-\d{4}$` 過濾）。daily-agenda 只保留最新一份報表的對照，所以只認最新一份；格式不符是參數錯誤（結束碼 1），不是最新一份或尚無報表是結束碼 2。報表內的項目不套 7 天新鮮度。彙整頁列出登記簿全部未完成項目，所以實際效果是「擋掉舊報表代碼＋不套 7 天新鮮度」：第一次同步會把登記簿裡全部未完成的待辦寫進 PM，每次最多 `--max-writes` 筆，重跑到補完。與其他參數：`--only` 取交集、`--exclude` 再扣、`--priorities` 照樣收窄、`--no-create` 不能併用。
+- `--report R-XXX|latest`（2026-11-13 新增）：只建立該報表列出、而且登記簿現在仍是 `open` 的待辦；勾完成不受限。報表對照讀 daily-agenda CURRENT generation 的 `state.json`：`report_code`（`R-` 加 3 碼）與 `report_index`（`{"項次": "T-xxxx"}`，值再以 `^T-\d{4}$` 過濾）。daily-agenda 只保留最新一份報表的對照，所以只認最新一份；格式不符是參數錯誤（結束碼 1），不是最新一份或尚無報表是結束碼 2。彙整頁列出登記簿全部未完成項目，所以報表範圍本身只擋掉舊報表代碼；舊待辦由天數決定（見 `--fresh-days`）。與其他參數：`--only` 取交集、`--exclude` 再扣、`--priorities` 照樣收窄、`--no-create` 不能併用。
+- `--fresh-days N|all`（2026-11-13 新增）：只建立期限（沒期限看出現日期）在 N 天內的，`all` 不限；只收 1–3650 的整數或 `all`，否則結束碼 1。優先序：旗標 ＞ 本機偏好（只在報表模式採用）＞ 預設 7 天；不帶 `--report` 時維持原本的 7 天。摘要（文字與 `--json`）列出這次的天數與來源（`freshDays`、`freshDaysSource`＝flag／prefs／default、`prefsSaved`），以及「超過天數沒建立」筆數（`counts.stale`），不含標題。
+- `prefs`（2026-11-13 新增）：偏好存 `<狀態資料夾>/prefs.json`（`{"version":1,"freshDays":N|"all"}`，先寫 .tmp 再改名，可重跑）。`show`／`set fresh-days <N|all>`／`clear`。偏好檔損壞時同步退回預設 7 天、照常執行並提示一句（`--json` 的 `prefsError: true`）。skill 在「超過天數沒建立」大於 0 且沒存過偏好時問使用者一次：這次也寫、這次不用、以後都寫、以後都只收 7 天。
 - `--no-create`：只勾完成、不建立任何待辦；不能和 `--only`、`--exclude`、`--report` 併用。用來取代「`--only` 給空值」：空值在部分 shell 會被丟掉或引號出錯，萬一變成沒帶 `--only` 就會全部建立，所以 `--only`／`--exclude` 缺值或值為空一律是參數錯誤（結束碼 1、不送任何請求）。
 - `--only`／`--exclude`：以 agenda 代碼挑選或排除「建立」的項目（只接受 `T-` 加 4 碼數字），完成同步不受影響。被排除的項目下次執行仍會出現；要永久不收，到 PM 建立後取消即可。
 
@@ -105,5 +108,5 @@ node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
 - **待使用者確認（實作中新增或偏離原核准）**：
   1. 「可能已完成」由「貼標籤」改為「不寫入、只列筆數」（§4 第 3 條，原因：正式環境沒有替既有待辦加標籤的工具）。
   2. 新增 `--only`／`--exclude`，供首批挑選與排除已過去的事（只限制「建立」）。
-  2-1. 2026-11-13 使用者裁決：新增 `--report`，skill 預設流程改為彙整頁確認後直接實寫（見檔首裁決）。「可能已完成」與收合項目仍不寫入；agenda 改優先不同步到已在 PM 的待辦（沒有更新路徑）。「報表模式要不要套 7 天新鮮度」待使用者確認，目前不套。
+  2-1. 2026-11-13 使用者裁決：新增 `--report`，skill 預設流程改為彙整頁確認後直接實寫（見檔首裁決）。「可能已完成」與收合項目仍不寫入；agenda 改優先不同步到已在 PM 的待辦（沒有更新路徑）。報表模式的舊待辦：預設只收 7 天內，由使用者選擇是否補寫與存成偏好（同日裁決）。
   3. `--max-writes` 定義改為「送出的寫入都算、去重命中不算」，並新增本機對照檔（§4）。

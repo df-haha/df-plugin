@@ -3,8 +3,9 @@
 
 // workhub-inbox 命令列入口：外部待辦 → Work Hub 個人待辦（單向、可重跑）。
 // 用法：node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
-//        [--report R-XXX|latest] [--priorities P0,P1] [--only T-1234,...|--no-create] [--exclude T-1234,...]
+//        [--report R-XXX|latest] [--fresh-days N|all] [--priorities P0,P1] [--only T-1234,...|--no-create] [--exclude T-1234,...]
 //        [--da-home PATH] [--review-file] [--json]
+//        node scripts/inbox-sync.js prefs show [--json] | prefs set fresh-days <N|all> | prefs clear
 // 環境變數：WORKHUB_INBOX_ENDPOINT、WORKHUB_INBOX_API_KEY（沒設就讀 DF_WORKHUB_API_KEY）；都只從環境變數讀，金鑰不寫檔、不印出。
 // 端點刻意不開放命令列指定，不能讓不可信內容有機會改掉金鑰送去的地方。
 // 待辦標題與對話名稱是第三方內容：任何 stdout／stderr／--json 都不輸出，只寫進 --review-file 的本機清單檔（不進 Claude 的對話）。
@@ -13,7 +14,8 @@ const { createHash } = require("node:crypto");
 const path = require("node:path");
 
 const { AgendaSourceError, REPORT_CODE, loadAgenda, reportTodoIds, resolveDaHome, taipeiDate, toInboxItems } = require("./lib/agenda.js");
-const { buildCompleteArgs, buildCreateArgs, planSync, safeText } = require("./lib/plan.js");
+const { FRESH_DAYS, buildCompleteArgs, buildCreateArgs, planSync, safeText } = require("./lib/plan.js");
+const { MAX_FRESH_DAYS, clearPrefs, loadPrefs, parseFreshDays, savePrefs } = require("./lib/prefs.js");
 const { ReviewFileError, buildReviewHtml, writeReviewFile } = require("./lib/review.js");
 const { StateError, loadMap, mergeExisting, resolveStateDir, saveMap } = require("./lib/state.js");
 const { WorkhubError, createClient, resolveApiKey, validateEndpoint } = require("./lib/workhub-client.js");
@@ -27,13 +29,73 @@ const SECRET_HIDDEN = "（訊息含金鑰或端點設定值，已整段隱藏；
 const BAD_RESPONSE = "回應格式不符，可能不是 Work Hub 的 MCP 端點";
 const UNEXPECTED_ERROR = "UNEXPECTED_ERROR";
 
+const USAGE = "用法：inbox-sync.js sync --source daily-agenda [--apply] ...；或 inbox-sync.js prefs show|set fresh-days <天數|all>|clear";
+const FRESH_DAYS_USAGE = (name) => `${name} 只接受 1 到 ${MAX_FRESH_DAYS} 的整數天數，或 all（不限天數）`;
+const FRESH_SOURCE_LABEL = { flag: "這次指定", prefs: "偏好設定", default: "預設" };
+
 class UsageError extends Error {}
+
+/** prefs 子指令：show [--json]｜set fresh-days <N|all>｜clear。回傳 { action, freshDays?, json }。 */
+function parsePrefsArgs(rest) {
+  const json = rest.includes("--json");
+  const args = rest.filter((a) => a !== "--json");
+  const [action, key, value] = args;
+  const arity = { show: 1, clear: 1, set: 3 };
+  if (!arity[action] || args.length !== arity[action]) throw new UsageError(USAGE);
+  if (action !== "set") return { action, json };
+  if (key !== "fresh-days") throw new UsageError("prefs set 目前只有 fresh-days 這一項");
+  const freshDays = parseFreshDays(value);
+  if (freshDays === null) throw new UsageError(FRESH_DAYS_USAGE("fresh-days"));
+  return { action, freshDays, json };
+}
+
+const describeDays = (days) => (days === "all" ? "不限天數" : `只收 ${days} 天內`);
+
+function runPrefs(rest, dir, print) {
+  let cmd;
+  try {
+    cmd = parsePrefsArgs(rest);
+  } catch (err) {
+    print(err.message);
+    return EXIT.usage;
+  }
+  const actions = {
+    set: () => {
+      savePrefs(dir, cmd.freshDays);
+      return `已存偏好：報表同步${describeDays(cmd.freshDays)}`;
+    },
+    clear: () => {
+      clearPrefs(dir);
+      return `已清除偏好；報表同步回到預設，${describeDays(FRESH_DAYS)}`;
+    },
+    show: () => {
+      const prefs = loadPrefs(dir);
+      if (cmd.json) return JSON.stringify({ saved: prefs.saved, freshDays: prefs.freshDays });
+      if (prefs.error) return `偏好檔讀不到或格式不對，同步時會用預設（${describeDays(FRESH_DAYS)}）；可用 prefs set 重存或 prefs clear 清掉`;
+      return prefs.saved ? `報表同步偏好：${describeDays(prefs.freshDays)}` : `還沒存過偏好；報表同步用預設，${describeDays(FRESH_DAYS)}`;
+    },
+  };
+  try {
+    print(actions[cmd.action]());
+  } catch (err) {
+    print(`偏好檔寫入失敗（${err.code || err.name}）`);
+    return EXIT.source;
+  }
+  return EXIT.ok;
+}
+
+/** 這次用幾天：旗標 ＞ 偏好（只在報表模式）＞ 預設。 */
+function resolveFreshDays(opts, prefs) {
+  if (opts.freshDays !== null) return { days: opts.freshDays, source: "flag" };
+  if (opts.report !== null && prefs && prefs.saved) return { days: prefs.freshDays, source: "prefs" };
+  return { days: FRESH_DAYS, source: "default" };
+}
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  if (command !== "sync") throw new UsageError("用法：inbox-sync.js sync --source daily-agenda [--apply] ...");
-  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], daHome: null, json: false, reviewFile: false, only: null, exclude: [], noCreate: false, report: null };
-  const takesValue = { "--source": "source", "--max-writes": "maxWrites", "--priorities": "priorities", "--da-home": "daHome", "--only": "only", "--exclude": "exclude", "--report": "report" };
+  if (command !== "sync") throw new UsageError(USAGE);
+  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], daHome: null, json: false, reviewFile: false, only: null, exclude: [], noCreate: false, report: null, freshDays: null };
+  const takesValue = { "--source": "source", "--max-writes": "maxWrites", "--priorities": "priorities", "--da-home": "daHome", "--only": "only", "--exclude": "exclude", "--report": "report", "--fresh-days": "freshDays" };
   const flags = { "--apply": "apply", "--json": "json", "--review-file": "reviewFile", "--no-create": "noCreate" };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
@@ -58,6 +120,10 @@ function parseArgs(argv) {
   if (opts.noCreate && (opts.only || opts.exclude.length)) throw new UsageError("--no-create 不能和 --only、--exclude 一起用");
   if (opts.report !== null && opts.report !== "latest" && !REPORT_CODE.test(opts.report)) {
     throw new UsageError("--report 只接受報表代碼（R- 加 3 碼大寫英數，例 R-7KQ）或 latest");
+  }
+  if (opts.freshDays !== null) {
+    opts.freshDays = parseFreshDays(opts.freshDays);
+    if (opts.freshDays === null) throw new UsageError(FRESH_DAYS_USAGE("--fresh-days"));
   }
   if (opts.noCreate && opts.report !== null) throw new UsageError("--no-create 不能和 --report 一起用（--report 是用來挑要建立的項目）");
   opts.maxWrites = Number(opts.maxWrites);
@@ -185,11 +251,15 @@ function selectCreates(plan, opts) {
   return { ...plan, create, excluded: plan.create.length - create.length };
 }
 
-function summarize(opts, plan, reportScope) {
+function summarize(opts, plan, reportScope, fresh, prefs) {
   return {
     mode: opts.apply ? "apply" : "dry-run",
     source: opts.source,
     report: reportScope ? reportScope.code : null,
+    freshDays: fresh.days,
+    freshDaysSource: fresh.source,
+    prefsSaved: prefs ? prefs.saved : null,
+    prefsError: prefs ? prefs.error : false,
     priorities: opts.priorities,
     counts: { create: plan.create.length, complete: plan.complete.length, maybeDone: plan.maybeDone.length, excluded: plan.excluded, ...plan.skipped },
     create: plan.create.map((i) => ({ agendaId: i.agendaId, priority: i.agendaPriority, due: i.due, source: i.sourceLabel })),
@@ -197,15 +267,24 @@ function summarize(opts, plan, reportScope) {
   };
 }
 
+const staleLabel = (report) => (report.freshDays === "all" ? "超過天數沒建立" : `超過 ${report.freshDays} 天沒建立`);
+
+function freshSourceText(report) {
+  const label = FRESH_SOURCE_LABEL[report.freshDaysSource];
+  return report.freshDaysSource === "default" && report.prefsSaved === false ? `${label}，沒有存過偏好` : label;
+}
+
 function renderText(report, plan) {
   const c = report.counts;
   const lines = [
     `workhub-inbox ${report.mode}（來源 ${report.source}${report.report ? `，報表 ${report.report}` : ""}，優先級 ${report.priorities.join("/")}）`,
     `預計建立 ${c.create}、勾完成 ${c.complete}；可能已完成 ${c.maybeDone}（不寫入，請到 agenda 確認）`,
+    `天數：${describeDays(report.freshDays)}（${freshSourceText(report)}）`,
     report.report
-      ? `略過：PM 已有 ${c.exists}、不在這份報表 ${c.notInReport}、優先級不符 ${c.priority}、指定排除 ${c.excluded}`
-      : `略過：PM 已有 ${c.exists}、優先級不符 ${c.priority}、過期或太舊 ${c.stale}、指定排除 ${c.excluded}`,
+      ? `略過：PM 已有 ${c.exists}、不在這份報表 ${c.notInReport}、優先級不符 ${c.priority}、${staleLabel(report)} ${c.stale}、指定排除 ${c.excluded}`
+      : `略過：PM 已有 ${c.exists}、優先級不符 ${c.priority}、${staleLabel(report)} ${c.stale}、指定排除 ${c.excluded}`,
   ];
+  if (report.prefsError) lines.push("⚠️ 偏好檔讀不到或格式不對，這次用預設天數；可用 prefs set 重存或 prefs clear 清掉。");
   if (plan.create.length) {
     lines.push("", "預計建立：");
     // 只列代碼、優先級、期限與來源類別（LINE／信件／行事曆，是程式自己的分類）；標題與對話名稱只在清單檔
@@ -238,6 +317,7 @@ async function main(argv, deps = {}) {
   const scrub = scrubFor(env);
   const rawPrint = deps.print || ((s) => process.stdout.write(`${s}\n`));
   let opts;
+  if (argv[0] === "prefs") return runPrefs(argv.slice(1), deps.prefsDir || resolveStateDir({ env }), rawPrint);
   // 最後一道：整份輸出若仍含金鑰或端點原值就不印原文（各錯誤欄位已先逐欄遮蔽，正常不會走到這裡）
   const print = (s) => {
     const text = String(s);
@@ -292,8 +372,11 @@ async function main(argv, deps = {}) {
   }
 
   const existing = mergeExisting(listed, map);
-  const plan = selectCreates(planSync({ items, existing, today: taipeiDate(deps.now || new Date()), priorities: opts.priorities, reportIds: reportScope && reportScope.ids }), opts);
-  const report = summarize(opts, plan, reportScope);
+  // 偏好只在報表模式、而且沒帶 --fresh-days 時才讀；非報表模式維持預設 7 天
+  const prefs = opts.report !== null ? loadPrefs(deps.prefsDir || baseDir) : null;
+  const fresh = resolveFreshDays(opts, opts.freshDays === null ? prefs : null);
+  const plan = selectCreates(planSync({ items, existing, today: taipeiDate(deps.now || new Date()), priorities: opts.priorities, freshDays: fresh.days, reportIds: reportScope && reportScope.ids }), opts);
+  const report = summarize(opts, plan, reportScope, fresh, prefs);
   if (opts.reviewFile) {
     // 先寫清單檔再寫入 PM：清單檔寫不出來就整個停下，不送任何寫入
     try {

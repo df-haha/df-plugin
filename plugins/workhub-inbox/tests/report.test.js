@@ -214,7 +214,7 @@ test("--report：超過 --max-writes 被延後時，提示用同一行重跑（�
     assert.equal(code, 0, stderr);
     assert.match(stdout, /超過上限未執行 2/);
     assert.match(stdout, /有 2 筆超過上限還沒執行，請用同一行指令重跑/);
-    assert.ok(!/7 天/.test(stdout));
+    assert.ok(!/超過 7 天的會被略過/.test(stdout));
   });
   await withServer([], async ({ cli }) => {
     const { stdout } = await cli(["sync", "--source", "daily-agenda", "--da-home", home, "--apply", "--max-writes", "1"]);
@@ -237,7 +237,7 @@ test("--report 與 --only 取交集、--exclude 再扣掉、--priorities 照樣�
   });
 });
 
-test("--report：報表內的舊項目不套 7 天新鮮度（使用者在彙整頁看過、保留了）；不帶 --report 照舊略過", async () => {
+test("--report：報表內的舊項目預設照樣只收 7 天內（沒存偏好時），帶 --fresh-days all 才建立", async () => {
   const old = "2026-10-01T08:00:00+08:00";
   const rows = [row("T-1001", { created_at: old })];
   const fake = () => {
@@ -252,13 +252,16 @@ test("--report：報表內的舊項目不套 7 天新鮮度（使用者在彙整
     const out = [];
     const client = fake();
     const code = await main(["sync", "--source", "daily-agenda", "--apply", "--json", ...extra], {
-      client, env: {}, daHome: makeHome(rows), stateDir: fs.mkdtempSync(path.join(os.tmpdir(), "wi-state-")), now: new Date("2026-11-13T03:00:00Z"), print: (s) => out.push(s),
+      client, env: {}, daHome: makeHome(rows), stateDir: fs.mkdtempSync(path.join(os.tmpdir(), "wi-state-")), prefsDir: fs.mkdtempSync(path.join(os.tmpdir(), "wi-prefs-")), now: new Date("2026-11-13T03:00:00Z"), print: (s) => out.push(s),
     });
     return { code, report: JSON.parse(out.join("\n")), client };
   };
   const withReport = await runIn(["--report", "R-7KQ"]);
   assert.equal(withReport.code, 0);
-  assert.equal(withReport.report.results.created, 1);
+  assert.equal(withReport.report.results.created, 0);
+  assert.equal(withReport.report.counts.stale, 1);
+  const all = await runIn(["--report", "R-7KQ", "--fresh-days", "all"]);
+  assert.equal(all.report.results.created, 1);
   const without = await runIn([]);
   assert.equal(without.report.counts.stale, 1);
   assert.equal(without.client.calls.filter((n) => n === "pm_create_personal_task").length, 0);

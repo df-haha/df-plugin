@@ -30,16 +30,16 @@ function byPriorityThenDue(a, b) {
 }
 
 /**
- * reportIds（選用）：只建立這份報表列出的代碼；報表內的項目使用者在彙整頁看過、保留了，不再套 7 天新鮮度。
- * 勾完成不受 reportIds 限制。
- * @param {{items: object[], existing: object[], today: string, priorities: string[], freshDays?: number, reportIds?: Set<string>|null}} input
+ * reportIds（選用）：只建立這份報表列出的代碼；勾完成不受 reportIds 限制。
+ * freshDays：只建立期限（沒期限看出現日期）在這個天數內的；"all" 表示不限。
+ * @param {{items: object[], existing: object[], today: string, priorities: string[], freshDays?: number|"all", reportIds?: Set<string>|null}} input
  * @returns {{create: object[], complete: {item: object, taskId: number}[], maybeDone: object[],
  *            skipped: {stale: number, priority: number, exists: number, notInReport: number}}}
  */
 function planSync({ items, existing, today, priorities, freshDays = FRESH_DAYS, reportIds = null }) {
   const byExternalId = new Map(existing.filter((t) => t.external_id).map((t) => [t.external_id, t]));
   const allowed = new Set(priorities);
-  const cutoff = shiftDate(today, -freshDays);
+  const cutoff = freshDays === "all" ? null : shiftDate(today, -freshDays);
   const create = [];
   const complete = [];
   const maybeDone = [];
@@ -59,7 +59,7 @@ function planSync({ items, existing, today, priorities, freshDays = FRESH_DAYS, 
     if (task) skipped.exists += 1;
     else if (reportIds && !reportIds.has(item.agendaId)) skipped.notInReport += 1;
     else if (!allowed.has(item.agendaPriority)) skipped.priority += 1;
-    else if (!reportIds && !isFresh(item, cutoff)) skipped.stale += 1;
+    else if (cutoff && !isFresh(item, cutoff)) skipped.stale += 1;
     else create.push(item);
   }
   return { create: [...create].sort(byPriorityThenDue), complete, maybeDone, skipped };
@@ -103,4 +103,4 @@ function buildCompleteArgs({ item, taskId }) {
   return { idempotency_key: idempotencyKey("complete", item.externalId), task_id: taskId };
 }
 
-module.exports = { buildCompleteArgs, buildCreateArgs, idempotencyKey, planSync, safeText };
+module.exports = { FRESH_DAYS, buildCompleteArgs, buildCreateArgs, idempotencyKey, planSync, safeText };

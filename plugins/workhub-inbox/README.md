@@ -78,6 +78,8 @@ export WORKHUB_INBOX_API_KEY="<個人 API 金鑰>"
 
 想先看清單再寫的話，直接跟 Claude 說「先給我看清單」：它會先試跑，把標題寫進本機的清單檔（`inbox-review.html`，Windows 通常在 `C:\Users\<你的帳號>\.workhub-inbox\`）讓你自己打開看，你回覆要哪些代碼後才寫入。
 
+舊待辦怎麼處理由你決定：預設只把 7 天內的寫進 PM，有更舊的會問你一次（這次也寫、這次不用、以後都寫、以後都只收 7 天）。你的選擇存在本機 `~/.workhub-inbox/prefs.json`（可用 `WORKHUB_INBOX_STATE_DIR` 改位置），隨時說「舊的也同步」「改成收 30 天」都可以。
+
 **不要開「略過權限確認」模式。** 金鑰放在環境變數，這台電腦上的 Claude 對話都讀得到。Claude 要執行連線或寄送類的指令時會跳出確認視窗，這是最後一道防線：看到不是你要的動作，就按拒絕。
 
 **開發者**：在本 repo 根目錄可以直接跑命令列（PowerShell 與 bash 寫法相同）。從市集安裝的人電腦裡沒有這個資料夾，不適用。
@@ -86,13 +88,16 @@ export WORKHUB_INBOX_API_KEY="<個人 API 金鑰>"
 node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --apply --report R-7KQ
 node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --report latest --review-file
 node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --apply --report latest --only T-1234,T-5678
+node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --apply --report R-7KQ --fresh-days all
+node plugins/workhub-inbox/scripts/inbox-sync.js prefs set fresh-days all
 ```
 
-第一行是預設流程：把彙整頁 R-7KQ 列出、登記簿現在仍未完成的待辦寫進 PM，並把 agenda 已完成或不處理的在 PM 勾完成。第二行是試跑，只列出、不寫入，標題寫進清單檔。第三行只寫最新彙整頁裡你挑的代碼。
+第一行是預設流程：把彙整頁 R-7KQ 列出、登記簿現在仍未完成、而且在天數內（偏好，沒存過是 7 天）的待辦寫進 PM，並把 agenda 已完成或不處理的在 PM 勾完成。第二行是試跑，只列出、不寫入，標題寫進清單檔。第三行只寫最新彙整頁裡你挑的代碼。第四行連超過天數的舊待辦也寫進去。第五行把「以後都不限天數」存成偏好；`prefs show` 看目前設定、`prefs clear` 清掉回到預設 7 天。
 
 | 參數 | 說明 | 預設 |
 |---|---|---|
 | `--apply` | 實際寫入；沒帶就是試跑 | 試跑 |
+| `--fresh-days N` | 只建立期限（沒期限看出現日期）在 N 天內的；`all` 不限；1–3650 | 帶 `--report` 時用偏好，沒存過是 7；不帶是 7 |
 | `--report R-XXX` | 只建立這份彙整頁列出、登記簿現在仍未完成的待辦（`R-` 加 3 碼大寫英數；`latest`＝最新一份）。daily-agenda 只保留最新一份的對照，舊代碼會回結束碼 2 | 不限報表 |
 | `--max-writes N` | 單次最多送出幾筆寫入（失敗也算，已存在的不算），超過的用同一行重跑補；不帶 `--report` 時一直補不完，超過 7 天的會被略過 | 20 |
 | `--only T-1234,T-5678` | 只建立這些 agenda 代碼（格式是 `T-` 加四碼數字，至少一個）；和 `--report` 一起用時取交集 | 全部 |
@@ -107,12 +112,12 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 
 | agenda 狀態 | PM 動作 |
 |---|---|
-| 未完成，列在 `--report` 指定的彙整頁上，PM 還沒有（不看出現多久） | 建立（同下） |
+| 未完成，列在 `--report` 指定的彙整頁上，期限或出現日期在天數內（偏好，沒存過是 7 天），PM 還沒有 | 建立（同下） |
 | 未完成，不帶 `--report`，期限或出現日期在 7 天內，PM 還沒有 | 建立（P0→優先 1、P1→2、P2→3；期限填全天到期日；來源 `line`／`outlook`；標籤 LINE／信件／行事曆） |
 | 已完成、不處理 | PM 對應待辦勾完成（不限報表） |
 | 可能已完成（含放太久被收起來的） | 不寫入，只列筆數；要進 PM 請先在 agenda 改回未完成（例如「T-1234 還沒做完」或「恢復 T-1234」） |
 
-彙整頁會列出登記簿裡全部未完成的待辦，所以帶 `--report` 第一次同步會把它們全部寫進 PM（每次最多 20 筆，重跑到補完）。在 agenda 改優先不會同步到已經在 PM 的待辦（只建立與勾完成，沒有更新）。使用者在 PM 改過的內容不會被覆蓋；PM 勾完成不回寫 agenda；在 PM 取消的待辦不會被重建（伺服器去重含已取消）。去重鍵是 `agenda:<代碼>:<建立時間>`（agenda 代碼是 4 碼隨機數字，單用可能重複）。
+彙整頁會列出登記簿裡全部未完成的待辦；帶 `--report` 時超過天數的不會建立，摘要會列出「超過 N 天沒建立」的筆數，Claude 會問你這次要不要也寫進去、以後要不要都這樣。在 agenda 改優先不會同步到已經在 PM 的待辦（只建立與勾完成，沒有更新）。使用者在 PM 改過的內容不會被覆蓋；PM 勾完成不回寫 agenda；在 PM 取消的待辦不會被重建（伺服器去重含已取消）。去重鍵是 `agenda:<代碼>:<建立時間>`（agenda 代碼是 4 碼隨機數字，單用可能重複）。
 
 ## 本機對照檔
 
