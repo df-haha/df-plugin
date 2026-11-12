@@ -239,6 +239,17 @@ test("SKILL：「全部同步」也要帶 --only 列出試跑時的代碼；要�
   assert.match(readme, /^1\. 開一個新的對話/m);
 });
 
+test("README：實寫範例一律限定範圍，範例代碼符合 T- 加四碼數字", () => {
+  const readme = fs.readFileSync(path.join(__dirname, "../README.md"), "utf8");
+  const applyLines = readme.split("\n").filter((l) => l.includes("inbox-sync.js") && l.includes("--apply"));
+  assert.ok(applyLines.length > 0);
+  for (const line of applyLines) assert.match(line, /--only T-\d{4}|--no-create/, line);
+  // 文件裡出現的每個範例代碼都要是程式接受的格式，照抄才跑得動
+  const codes = readme.match(/\bT-[0-9A-Za-z]+/g) || [];
+  assert.ok(codes.length > 0);
+  for (const code of codes) assert.match(code, /^T-\d{4}$/, code);
+});
+
 test("文字輸出的清單檔路徑去除控制字元", { skip: process.platform === "win32" && "Windows 路徑不能含控制字元" }, async () => {
   const reviewDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "wi-review-")), "a\u001b[31mb\u0007c");
   const { code, out } = await run(["sync", "--source", "daily-agenda", "--review-file"], { reviewDir });

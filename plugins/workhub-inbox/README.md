@@ -71,17 +71,17 @@ export WORKHUB_INBOX_API_KEY="<個人 API 金鑰>"
 
 ```
 node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --review-file
-node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --apply --max-writes 3
+node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --apply --max-writes 3 --only T-1234,T-5678
 ```
 
-第一行是試跑，只列出、不寫入，標題寫進清單檔；第二行實際寫入。
+第一行是試跑，只列出、不寫入，標題寫進清單檔；第二行實際寫入，`--only` 填試跑列出、你看過的代碼。實寫請一律帶 `--only`（或只勾完成時帶 `--no-create`）：不帶的話，試跑之後才整理出來、你還沒看過的待辦也會一起寫進去。
 
 | 參數 | 說明 | 預設 |
 |---|---|---|
 | `--apply` | 實際寫入；沒帶就是試跑 | 試跑 |
 | `--max-writes N` | 單次最多送出幾筆寫入（失敗也算，已存在的不算），超過的下次再補；一直補不完時超過 7 天的會被略過 | 20 |
-| `--only T-1,T-2` | 只建立這些 agenda 代碼 | 全部 |
-| `--exclude T-3` | 這些代碼這次不建立 | — |
+| `--only T-1234,T-5678` | 只建立這些 agenda 代碼（格式是 `T-` 加四碼數字，至少一個） | 全部 |
+| `--exclude T-9012` | 這些代碼這次不建立 | — |
 | `--no-create` | 只勾完成，不建立任何待辦（不能和 `--only`、`--exclude` 一起用） | — |
 | `--priorities P0,P1` | 只收這些優先級 | P0,P1,P2 |
 | `--da-home PATH` | daily-agenda 資料夾 | 自動找 |
