@@ -48,6 +48,7 @@ uv run --quiet --project "${CLAUDE_PLUGIN_ROOT}/scripts" python -I -X utf8 -m da
 0. **先確認 uv 與 Node 在不在**（`DA` 本身要靠 uv 才能跑，uv 不在時 `DA envcheck` 根本沒機會回報）：分兩行各跑一次 `uv --version`、`node --version`。
    - 出現 `command not found` → 請使用者在 **PowerShell 視窗**（不是這個對話）執行：uv 用 `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`；Node 用 `winget install OpenJS.NodeJS.LTS`。裝好後請使用者**完全關掉 Claude Code 再重新打開**（舊視窗抓不到新裝程式的路徑），重開後再執行 `/agenda-setup`，結束 skill。
    - 這兩行是唯讀檢查，可以在第 0 步同意之前執行。
+   - 被安全鎖擋下（訊息是「這個對話已讀取外部訊息原文…已鎖定」）→ 代表這個對話先前已經跑過 daily-agenda，uv 與 Node 一定都在；略過這項檢查直接往下做，不要請使用者開新對話。
 1. 剛安裝或剛更新 daily-agenda 的話，要先完全關掉 Claude Code 再打開，新版的設定流程與安全鎖才會載入。使用者提到「剛裝好」「剛更新」而這個對話是在那之前開的，先請他重開。
 
 先跑 `DA consent --status` 與 `DA config get`。如果已經完成過設定，問使用者要「從頭重設」「只改排除的 LINE 對話（跳到第 6 步）」「只改信箱資料夾（跳到第 7 步）」「只改輸出或排程（跳到第 4 步）」「重建判斷準則（重新掃描並重建，會包含你目前的工作檔案；跳到第 8 步）」「解除安裝」。
