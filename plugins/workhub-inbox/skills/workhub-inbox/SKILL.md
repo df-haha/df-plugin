@@ -31,7 +31,13 @@ description: 把 daily-agenda 從 LINE／Outlook 整理出的待辦同步進 Wor
    node "${CLAUDE_PLUGIN_ROOT}/scripts/inbox-sync.js" sync --source daily-agenda --apply --max-writes 3 --only T-1234,T-5678
    ```
 
-   試跑沒有任何要建立的代碼、只有要勾完成的項目時，用 `--only ""`（空的代碼清單：只勾完成、不建立）。勾完成不受 `--only` 影響。
+   試跑沒有任何要建立的代碼、只有要勾完成的項目時，改用 `--no-create`（只勾完成、不建立任何待辦），不要帶 `--only`：
+
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/inbox-sync.js" sync --source daily-agenda --apply --max-writes 3 --no-create
+   ```
+
+   建立和勾完成都沒有時，流程到此結束，不跑實寫。勾完成不受 `--only` 影響。
 
 5. 轉述寫入結果的筆數；第一次寫正式環境只寫 3 筆，請使用者到 PM 看過再補其餘。補其餘時沿用同一串 `--only` 代碼；使用者想看新出現的待辦，就從第 1 步重新試跑。
 
@@ -48,7 +54,7 @@ description: 把 daily-agenda 從 LINE／Outlook 整理出的待辦同步進 Wor
 
 macOS／Linux 用 `export WORKHUB_INBOX_ENDPOINT=...`、`export WORKHUB_INBOX_API_KEY=...`。
 
-常用參數：`--priorities P0,P1`（只收這些優先級，預設 P0–P2）、`--only T-1234,T-5678`／`--exclude T-1234`（依使用者指定的代碼挑選或排除；代碼是 agenda 產生的，可以放進參數）、`--da-home <路徑>`（daily-agenda 資料夾，預設自動找；只用使用者本人給的路徑）、`--review-file`（把清單寫進本機清單檔）、`--json`（機器可讀，不含標題）。端點沒有命令列參數，只認環境變數。
+常用參數：`--priorities P0,P1`（只收這些優先級，預設 P0–P2）、`--only T-1234,T-5678`／`--exclude T-1234`（依使用者指定的代碼挑選或排除；代碼是 agenda 產生的，可以放進參數；至少要一個代碼）、`--no-create`（只勾完成、不建立）、`--da-home <路徑>`（daily-agenda 資料夾，預設自動找；只用使用者本人給的路徑）、`--review-file`（把清單寫進本機清單檔）、`--json`（機器可讀，不含標題）。端點沒有命令列參數，只認環境變數。
 
 結束碼：0 成功；1 參數或設定錯誤（含金鑰無效）；2 讀不到 daily-agenda 資料，或本機的對照檔、清單檔讀寫失敗；3 有寫入失敗。
 

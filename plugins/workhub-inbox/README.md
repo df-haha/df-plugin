@@ -82,6 +82,7 @@ node plugins/workhub-inbox/scripts/inbox-sync.js sync --source daily-agenda --ap
 | `--max-writes N` | 單次最多送出幾筆寫入（失敗也算，已存在的不算），超過的下次再補；一直補不完時超過 7 天的會被略過 | 20 |
 | `--only T-1,T-2` | 只建立這些 agenda 代碼 | 全部 |
 | `--exclude T-3` | 這些代碼這次不建立 | — |
+| `--no-create` | 只勾完成，不建立任何待辦（不能和 `--only`、`--exclude` 一起用） | — |
 | `--priorities P0,P1` | 只收這些優先級 | P0,P1,P2 |
 | `--da-home PATH` | daily-agenda 資料夾 | 自動找 |
 | `--review-file` | 把清單（含標題與來源）寫進 `~/.workhub-inbox/inbox-review.html`，每次覆蓋；畫面上只顯示代碼與檔案位置 | 不寫 |

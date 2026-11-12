@@ -256,6 +256,21 @@ test("說明文件不再教 --endpoint", () => {
   }
 });
 
+for (const [label, extra] of [["後面沒有值", ["--only"]], ["後面接著別的參數", ["--only", "--apply"]], ["值是空字串", ["--only", ""]], ["值只有逗號與空白", ["--only", " , "]], ["--exclude 值是空字串", ["--exclude", ""]]]) {
+  test(`--only／--exclude ${label}：參數錯誤、結束碼 1、不送任何請求`, async () => {
+    const client = fakeClient();
+    const { code, out } = await run(["sync", "--source", "daily-agenda", "--apply", ...extra], client, makeHome([row("T-1001")]));
+    assert.equal(code, 1);
+    assert.equal(client.calls.length, 0);
+    assert.match(out, /--(only|exclude)/);
+  });
+}
+
+test("parseArgs：--no-create 與 --only 不能同時用", () => {
+  assert.equal(parseArgs(["sync", "--no-create"]).noCreate, true);
+  assert.throws(() => parseArgs(["sync", "--no-create", "--only", "T-1234"]), /--no-create/);
+});
+
 test("parseArgs：--only 代碼格式不符報錯", () => {
   assert.throws(() => parseArgs(["sync", "--only", "T-1;rm"]), /代碼/);
 });

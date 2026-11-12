@@ -3,7 +3,8 @@
 
 // workhub-inbox 命令列入口：外部待辦 → Work Hub 個人待辦（單向、可重跑）。
 // 用法：node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
-//        [--priorities P0,P1] [--da-home PATH] [--review-file] [--json]
+//        [--priorities P0,P1] [--only T-1234,...|--no-create] [--exclude T-1234,...]
+//        [--da-home PATH] [--review-file] [--json]
 // 環境變數：WORKHUB_INBOX_ENDPOINT、WORKHUB_INBOX_API_KEY（兩者都只從環境變數讀；金鑰不寫檔、不印出）。
 // 端點刻意不開放命令列指定，不能讓不可信內容有機會改掉金鑰送去的地方。
 // 待辦標題與對話名稱是第三方內容：任何 stdout／stderr／--json 都不輸出，只寫進 --review-file 的本機清單檔（不進 Claude 的對話）。
@@ -31,14 +32,18 @@ class UsageError extends Error {}
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (command !== "sync") throw new UsageError("用法：inbox-sync.js sync --source daily-agenda [--apply] ...");
-  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], daHome: null, json: false, reviewFile: false, only: null, exclude: [] };
+  const opts = { source: "daily-agenda", apply: false, maxWrites: 20, priorities: ["P0", "P1", "P2"], daHome: null, json: false, reviewFile: false, only: null, exclude: [], noCreate: false };
   const takesValue = { "--source": "source", "--max-writes": "maxWrites", "--priorities": "priorities", "--da-home": "daHome", "--only": "only", "--exclude": "exclude" };
-  const flags = { "--apply": "apply", "--json": "json", "--review-file": "reviewFile" };
+  const flags = { "--apply": "apply", "--json": "json", "--review-file": "reviewFile", "--no-create": "noCreate" };
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
     if (flags[arg]) opts[flags[arg]] = true;
-    else if (takesValue[arg] && i + 1 < rest.length) opts[takesValue[arg]] = rest[++i];
-    else throw new UsageError(`不認得的參數：${arg}`);
+    else if (takesValue[arg]) {
+      const value = rest[i + 1];
+      if (value === undefined || value.startsWith("--")) throw new UsageError(`${arg} 後面要接一個值`);
+      opts[takesValue[arg]] = value;
+      i += 1;
+    } else throw new UsageError(`不認得的參數：${arg}`);
   }
   if (!SOURCES.has(opts.source)) throw new UsageError(`不支援的來源：${opts.source}（目前只有 daily-agenda）`);
   if (typeof opts.priorities === "string") opts.priorities = opts.priorities.split(",").map((p) => p.trim()).filter(Boolean);
@@ -46,8 +51,11 @@ function parseArgs(argv) {
   for (const key of ["only", "exclude"]) {
     if (typeof opts[key] !== "string") continue;
     opts[key] = opts[key].split(",").map((s) => s.trim()).filter(Boolean);
+    // 空值不當成「一筆都不選」：引號一出錯就會變成這種值，不能讓它悄悄改變要寫入的範圍
+    if (!opts[key].length) throw new UsageError(`--${key} 至少要一個 agenda 代碼（例 T-1234）；只想勾完成、不建立，請改用 --no-create`);
     if (opts[key].some((id) => !AGENDA_ID.test(id))) throw new UsageError(`--${key} 只接受 agenda 代碼（例 T-1234，逗號分隔）`);
   }
+  if (opts.noCreate && (opts.only || opts.exclude.length)) throw new UsageError("--no-create 不能和 --only、--exclude 一起用");
   opts.maxWrites = Number(opts.maxWrites);
   if (!Number.isInteger(opts.maxWrites) || opts.maxWrites < 0) throw new UsageError("--max-writes 要是 0 以上的整數");
   return opts;
@@ -160,9 +168,9 @@ async function applyPlan(client, plan, maxWrites, map, scrub = String) {
   return results;
 }
 
-/** --only／--exclude 只篩「建立」；完成同步不受影響。 */
+/** --only／--exclude／--no-create 只篩「建立」；完成同步不受影響。 */
 function selectCreates(plan, opts) {
-  const only = opts.only ? new Set(opts.only) : null;
+  const only = opts.noCreate ? new Set() : opts.only ? new Set(opts.only) : null;
   const exclude = new Set(opts.exclude);
   const create = plan.create.filter((i) => (!only || only.has(i.agendaId)) && !exclude.has(i.agendaId));
   return { ...plan, create, excluded: plan.create.length - create.length };

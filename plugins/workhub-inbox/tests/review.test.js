@@ -231,7 +231,9 @@ test("SKILL：「全部同步」也要帶 --only 列出試跑時的代碼；要�
   // 流程裡每一行實寫指令都要帶 --only，不能有不帶 --only 的 --apply
   const applyLines = skill.split("\n").filter((l) => l.includes("inbox-sync.js") && l.includes("--apply"));
   assert.ok(applyLines.length > 0);
-  for (const line of applyLines) assert.match(line, /--only /, line);
+  // 每一行都要限定範圍：帶 --only 代碼，或明確用 --no-create（只勾完成）
+  for (const line of applyLines) assert.match(line, /--only T-|--no-create/, line);
+  assert.ok(applyLines.some((l) => /--only T-/.test(l)));
   assert.match(skill, /新的對話/);
   assert.match(skill, /請開一個新對話再說一次『同步待辦到 PM』/);
   assert.match(readme, /^1\. 開一個新的對話/m);
@@ -246,8 +248,15 @@ test("文字輸出的清單檔路徑去除控制字元", { skip: process.platfor
   assert.ok(!/[\u0000-\u001f\u007f]/.test(line), JSON.stringify(line));
 });
 
-test("--only \"\"：只勾完成、不建立（SKILL 在試跑沒有要建立的代碼時用這個寫法）", async () => {
-  const { code, client } = await run(["sync", "--source", "daily-agenda", "--apply", "--only", ""]);
+test("--no-create：只送勾完成、不送任何建立", async () => {
+  const { code, client } = await run(["sync", "--source", "daily-agenda", "--apply", "--no-create"]);
   assert.equal(code, 0);
   assert.deepEqual(writes(client).map((c) => c.name), ["pm_complete_personal_task"]);
+});
+
+test("說明文件不出現空字串參數", () => {
+  for (const rel of ["../README.md", "../skills/workhub-inbox/SKILL.md", "../../../docs/superpowers/specs/2026-11-10-workhub-inbox/spec.md"]) {
+    const text = fs.readFileSync(path.join(__dirname, rel), "utf8");
+    assert.ok(!/--(only|exclude) (""|'')/.test(text), rel);
+  }
 });

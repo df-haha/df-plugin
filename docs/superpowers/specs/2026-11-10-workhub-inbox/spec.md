@@ -70,10 +70,11 @@ plugin 以「來源轉接器（source adapter）」為單位擴充；v1 只有 `
 
 ```
 node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
-     [--priorities P0,P1] [--only T-1234,...] [--exclude T-1234,...]
+     [--priorities P0,P1] [--only T-1234,...|--no-create] [--exclude T-1234,...]
      [--da-home PATH] [--review-file] [--json]
 ```
 
+- `--no-create`：只勾完成、不建立任何待辦；不能和 `--only`、`--exclude` 併用。用來取代「`--only` 給空值」：空值在部分 shell 會被丟掉或引號出錯，萬一變成沒帶 `--only` 就會全部建立，所以 `--only`／`--exclude` 缺值或值為空一律是參數錯誤（結束碼 1、不送任何請求）。
 - `--only`／`--exclude`：以 agenda 代碼挑選或排除「建立」的項目（只接受 `T-` 加 4 碼數字），完成同步不受影響。被排除的項目下次執行仍會出現；要永久不收，到 PM 建立後取消即可。
 
 - 預設 dry-run，輸出動作摘要（建立／完成／可能已完成／略過筆數，及每筆的 agenda 代碼、優先級、期限）。
