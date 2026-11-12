@@ -195,13 +195,30 @@ for (const [label, opts, requested] of [
   });
 }
 
-test("--report：report_index 裡格式不符的值不當成代碼", async () => {
-  const rows = [row("T-1001"), row("T-1002")];
-  const home = makeHome(rows, { reportIndex: { 1: "T-1001", 2: "T-1002; rm -rf /", 3: 42 } });
+test("--report：report_index 裡格式不符的值不當成代碼（即使登記簿有同名的列也不建立）", async () => {
+  // 登記簿的列代碼若不是 T- 加 4 碼，報表對照裡同樣的值要被濾掉；沒濾的話這些列會被建立
+  const rows = [row("T-1001"), row("T-12"), row("T-1002; rm -rf /"), row("T-1003")];
+  const home = makeHome(rows, { reportIndex: { 1: "T-1001", 2: "T-12", 3: "T-1002; rm -rf /", 4: 42, 5: null } });
   await withServer([], async ({ cli, writes }) => {
-    const { code, stderr } = await cli(sync(home, "--report", "R-7KQ"));
+    const { code, stdout, stderr } = await cli(sync(home, "--report", "R-7KQ"));
     assert.equal(code, 0, stderr);
     assert.deepEqual(createdIds(writes()), ["T-1001"]);
+    assert.equal(JSON.parse(stdout).counts.notInReport, 3);
+  });
+});
+
+test("--report：超過 --max-writes 被延後時，提示用同一行重跑（不提 7 天略過）", async () => {
+  const home = makeHome([row("T-1001"), row("T-1002"), row("T-1003")]);
+  await withServer([], async ({ cli }) => {
+    const { code, stdout, stderr } = await cli(["sync", "--source", "daily-agenda", "--da-home", home, "--apply", "--report", "R-7KQ", "--max-writes", "1"]);
+    assert.equal(code, 0, stderr);
+    assert.match(stdout, /超過上限未執行 2/);
+    assert.match(stdout, /有 2 筆超過上限還沒執行，請用同一行指令重跑/);
+    assert.ok(!/7 天/.test(stdout));
+  });
+  await withServer([], async ({ cli }) => {
+    const { stdout } = await cli(["sync", "--source", "daily-agenda", "--da-home", home, "--apply", "--max-writes", "1"]);
+    assert.match(stdout, /超過 7 天的會被略過/);
   });
 });
 

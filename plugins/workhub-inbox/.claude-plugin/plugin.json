@@ -1,7 +1,7 @@
 {
   "name": "workhub-inbox",
   "version": "0.2.0",
-  "description": "把外部待辦（v1：daily-agenda 從 LINE／Outlook 整理的待辦）單向同步進 Work Hub 個人待辦收件匣；不經 AI、預設試跑、可重跑不重複",
+  "description": "把外部待辦（v1：daily-agenda 從 LINE／Outlook 整理的待辦）單向同步進 Work Hub 個人待辦收件匣；在彙整頁確認後直接寫入該報表保留的待辦，不經 AI、可重跑不重複",
   "author": {
     "name": "df-haha"
   }

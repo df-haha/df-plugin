@@ -1,6 +1,8 @@
 # workhub-inbox：外部待辦單向同步到 Work Hub 個人待辦（v1：daily-agenda）
 
 > 2026-11-10 起草。使用者拍板：1A（另開 plugin）、2（v1 範圍照建議）、3（/hi 段落先維持讀 agenda）、4（無期限待辦只收 7 天內出現的）。
+>
+> **2026-11-13 使用者裁決（v0.2.0）**：使用者覺得同一批待辦要確認兩次，改成「在 daily-agenda 彙整頁確認一次」——貼回「確認待辦 R-XXX」、daily-agenda 處理成功後，同一個對話直接跑 `sync --apply --report R-XXX`。拿掉三道保護：(1) 同步要另開新對話；(2) 先試跑、看另一份清單檔才實寫；(3) 正式環境第一次只寫 3 筆。下文標「2026-11-13 改」的段落以此為準；未標的舊段落保留作為沿革。
 
 ## 1. 目的
 
@@ -14,6 +16,7 @@ plugin 以「來源轉接器（source adapter）」為單位擴充；v1 只有 `
 - 待辦標題是 AI 從第三方訊息整理出的不可信內容。**寫入全程不經 AI**：腳本直接以 HTTP 呼叫 Work Hub 的 MCP 端點（stateless JSON-RPC `tools/call`），標題只當資料傳遞。skill 只負責跑腳本、轉述筆數，不把標題放進任何工具參數。
 - 金鑰與端點只從環境變數讀取（`WORKHUB_INBOX_API_KEY`、`WORKHUB_INBOX_ENDPOINT`；命令列不提供端點參數，避免不可信的標題內容誘導 AI 改掉金鑰的去處），不寫檔、不進 log。端點送出前先驗證：只接受 `https:`，`http:` 只放行 127.0.0.1、localhost、[::1]，網址不得含帳號密碼；不跟隨轉址。錯誤訊息只帶錯誤代碼，不帶底層訊息、伺服器的錯誤文字與端點原字串：Work Hub 工具錯誤取 `structuredContent.error.code`（只接受 `^[A-Z][A-Z0-9_]{1,63}$`），JSON-RPC 錯誤取數字代碼，HTTP 錯誤取狀態碼，連線錯誤取錯誤代碼，都沒有時輸出固定字串 `SERVER_ERROR_TEXT_HIDDEN`；輸出前另以金鑰與驗證不過的端點原值做保底遮蔽。plugin 不認個人機器上的其他變數名，由呼叫端（例如排程腳本）對應。標題與來源名稱（含 LINE 對話名稱）不得出現在任何 stdout、stderr 或 `--json` 輸出：Claude 的 Bash 工具讀得到環境變數裡的金鑰，腳本擋不住被說動的模型自己連線，所以要守的邊界是「不把不可信標題送進拿得到金鑰的對話」。人看的試跑清單用 `--review-file` 寫成本機的自足 HTML（`<狀態資料夾>/inbox-review.html`，狀態資料夾預設 `~/.workhub-inbox`、可用 `WORKHUB_INBOX_STATE_DIR` 改；每次覆蓋、先寫暫存檔再改名、權限比照對照檔；內容全部 HTML 跳脫、沒有 script 與外部資源，並以 CSP 禁止載入任何東西），stdout 只印筆數、代碼與檔案路徑。清單檔在送出任何寫入前產生，寫不出來就停止（結束碼 2）。伺服器錯誤文字可能回印送出的標題或說明，所以一律不輸出（上一條的代碼規則），不靠比對標題決定隱藏與否。skill 不得讀清單檔與 daily-agenda 資料夾，由使用者自己打開後用代碼回覆。
 - 預設 dry-run（試跑，只列出不寫入）；`--apply` 才寫入，且受 `--max-writes`（預設 20）上限保護。
+- **2026-11-13 改**：上一條「不把不可信標題送進拿得到金鑰的對話」的邊界，在 skill 層已依使用者裁決放寬——同步改在看得到彙整內容的同一個對話執行。腳本本身的輸出規則不變（stdout、stderr、`--json` 仍不含標題）。skill 的預設流程直接帶 `--apply --report`，不試跑、不產清單檔、不帶 `--max-writes`；剩下的防線是 skill 規則（標題只當資料、端點只認環境變數）與權限確認視窗。`--review-file` 與試跑保留為使用者要求先看清單時的選用做法，該做法下 skill 仍不得讀清單檔。
 
 ## 3. 資料對應
 
@@ -70,11 +73,12 @@ plugin 以「來源轉接器（source adapter）」為單位擴充；v1 只有 `
 
 ```
 node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
-     [--priorities P0,P1] [--only T-1234,...|--no-create] [--exclude T-1234,...]
-     [--da-home PATH] [--review-file] [--json]
+     [--report R-XXX|latest] [--priorities P0,P1] [--only T-1234,...|--no-create]
+     [--exclude T-1234,...] [--da-home PATH] [--review-file] [--json]
 ```
 
-- `--no-create`：只勾完成、不建立任何待辦；不能和 `--only`、`--exclude` 併用。用來取代「`--only` 給空值」：空值在部分 shell 會被丟掉或引號出錯，萬一變成沒帶 `--only` 就會全部建立，所以 `--only`／`--exclude` 缺值或值為空一律是參數錯誤（結束碼 1、不送任何請求）。
+- `--report R-XXX|latest`（2026-11-13 新增）：只建立該報表列出、而且登記簿現在仍是 `open` 的待辦；勾完成不受限。報表對照讀 daily-agenda CURRENT generation 的 `state.json`：`report_code`（`R-` 加 3 碼）與 `report_index`（`{"項次": "T-xxxx"}`，值再以 `^T-\d{4}$` 過濾）。daily-agenda 只保留最新一份報表的對照，所以只認最新一份；格式不符是參數錯誤（結束碼 1），不是最新一份或尚無報表是結束碼 2。報表內的項目不套 7 天新鮮度。彙整頁列出登記簿全部未完成項目，所以實際效果是「擋掉舊報表代碼＋不套 7 天新鮮度」：第一次同步會把登記簿裡全部未完成的待辦寫進 PM，每次最多 `--max-writes` 筆，重跑到補完。與其他參數：`--only` 取交集、`--exclude` 再扣、`--priorities` 照樣收窄、`--no-create` 不能併用。
+- `--no-create`：只勾完成、不建立任何待辦；不能和 `--only`、`--exclude`、`--report` 併用。用來取代「`--only` 給空值」：空值在部分 shell 會被丟掉或引號出錯，萬一變成沒帶 `--only` 就會全部建立，所以 `--only`／`--exclude` 缺值或值為空一律是參數錯誤（結束碼 1、不送任何請求）。
 - `--only`／`--exclude`：以 agenda 代碼挑選或排除「建立」的項目（只接受 `T-` 加 4 碼數字），完成同步不受影響。被排除的項目下次執行仍會出現；要永久不收，到 PM 建立後取消即可。
 
 - 預設 dry-run，輸出動作摘要（建立／完成／可能已完成／略過筆數，及每筆的 agenda 代碼、優先級、期限）。
@@ -89,7 +93,7 @@ node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
 - 純函式（篩選、對應、差額計算）有單元測試，涵蓋：新鮮度邊界、無期限、優先級過濾、已存在不重建、done/dismissed 觸發完成、已完成不重複完成、maybe_done 不寫入、external_id 組成、標題截斷。
 - HTTP 客戶端以假 fetch 測：成功、`isError`、HTTP 非 200、重試只對 429/502/503/504 與網路錯誤。
 - 開發環境實寫兩次：第二次建立數為 0。
-- 正式環境 dry-run 清單經使用者確認；首批實寫 3 筆經使用者在 PM 確認後才補其餘。
+- 正式環境 dry-run 清單經使用者確認；首批實寫 3 筆經使用者在 PM 確認後才補其餘。（2026-11-13 改：使用者裁決拿掉這條；確認改在 daily-agenda 彙整頁做一次。）
 
 ## Product Flow Approval
 
@@ -101,4 +105,5 @@ node scripts/inbox-sync.js sync --source daily-agenda [--apply] [--max-writes N]
 - **待使用者確認（實作中新增或偏離原核准）**：
   1. 「可能已完成」由「貼標籤」改為「不寫入、只列筆數」（§4 第 3 條，原因：正式環境沒有替既有待辦加標籤的工具）。
   2. 新增 `--only`／`--exclude`，供首批挑選與排除已過去的事（只限制「建立」）。
+  2-1. 2026-11-13 使用者裁決：新增 `--report`，skill 預設流程改為彙整頁確認後直接實寫（見檔首裁決）。「可能已完成」與收合項目仍不寫入；agenda 改優先不同步到已在 PM 的待辦（沒有更新路徑）。「報表模式要不要套 7 天新鮮度」待使用者確認，目前不套。
   3. `--max-writes` 定義改為「送出的寫入都算、去重命中不算」，並新增本機對照檔（§4）。
