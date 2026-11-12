@@ -157,7 +157,7 @@ describe('lock hook integration', () => {
     assert.ok(!existsSync(path.join(testHome, 'taint', sessionId)));
   });
 
-  // ── Tainted session: nothing is blocked (2026-11-13) ──
+  // ── Tainted session: only three kinds are blocked (2026-11-13, see lock-marked-deny.test.mjs) ──
 
   it('allows WebFetch when tainted', async () => {
     const sessionId = 'sess-locked-1';

@@ -100,6 +100,11 @@ const BLOCKED = {
     ['Bash', { command: 'python -Imdaily_agenda trust probe' }],
     ['Bash', { command: 'python -m daily_agenda.__main__ trust probe' }],
     ['Bash', { command: 'python scripts/daily_agenda/__main__.py config set tz=UTC' }],
+    ['Bash', { command: `${DA} \\\n  config set tz=UTC` }],
+    ['PowerShell', { command: 'uv run --project "C:\\p\\scripts" python -m daily_agenda `\r\n  trust probe' }],
+    ['Bash', { command: `${DA} config $SUB tz=UTC` }],
+    ['Bash', { command: `${DA} $(echo config) set tz=UTC` }],
+    ['Bash', { command: `${DA} consent \`echo --accept\`` }],
   ],
 };
 
@@ -115,6 +120,7 @@ const READ_ONLY_TWINS = [
   ['Bash', { command: `${DA} run --progress-file "x.jsonl"` }],
   ['Bash', { command: `${DA} runtime status` }],
   ['Bash', { command: `${DA} exclude --add r1 r2` }],
+  ['Bash', { command: `${DA} \\\n  config get` }],
   ['Monitor', { command: `${DA} progress watch --file "x.jsonl"` }],
   ['Bash', { command: 'node scripts/line_collect.mjs --vendor some/dir' }],
   ['Bash', { command: 'grep -rn calendar_create docs/' }],
@@ -170,7 +176,7 @@ describe('deny message wording', () => {
       const r = checkMarkedSessionDeny(tool, input);
       assert.equal(r.deny, true, tool);
       assert.doesNotMatch(r.reason, /taint|marker|sentinel|hook|MCP|runs\//i, r.reason);
-      assert.match(r.reason, /自己/);
+      assert.match(r.reason, /請使用者自己執行/);
     }
   });
 });
