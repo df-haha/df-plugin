@@ -224,3 +224,30 @@ test("說明文件：不再教 --show-titles；SKILL 用 --review-file、禁止�
   assert.match(docs.skill, /不得用 Read、cat、type/);
   for (const name of ["readme", "skill"]) assert.match(docs[name], /略過權限確認/, name);
 });
+
+test("SKILL：「全部同步」也要帶 --only 列出試跑時的代碼；要求在新的對話進行；README 第一步寫開新對話", () => {
+  const skill = fs.readFileSync(path.join(__dirname, "../skills/workhub-inbox/SKILL.md"), "utf8");
+  const readme = fs.readFileSync(path.join(__dirname, "../README.md"), "utf8");
+  // 流程裡每一行實寫指令都要帶 --only，不能有不帶 --only 的 --apply
+  const applyLines = skill.split("\n").filter((l) => l.includes("inbox-sync.js") && l.includes("--apply"));
+  assert.ok(applyLines.length > 0);
+  for (const line of applyLines) assert.match(line, /--only /, line);
+  assert.match(skill, /新的對話/);
+  assert.match(skill, /請開一個新對話再說一次『同步待辦到 PM』/);
+  assert.match(readme, /^1\. 開一個新的對話/m);
+});
+
+test("文字輸出的清單檔路徑去除控制字元", { skip: process.platform === "win32" && "Windows 路徑不能含控制字元" }, async () => {
+  const reviewDir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "wi-review-")), "a\u001b[31mb\u0007c");
+  const { code, out } = await run(["sync", "--source", "daily-agenda", "--review-file"], { reviewDir });
+  assert.equal(code, 0);
+  const line = out.split("\n").find((l) => l.startsWith("標題與來源寫在試跑清單檔"));
+  assert.ok(line);
+  assert.ok(!/[\u0000-\u001f\u007f]/.test(line), JSON.stringify(line));
+});
+
+test("--only \"\"：只勾完成、不建立（SKILL 在試跑沒有要建立的代碼時用這個寫法）", async () => {
+  const { code, client } = await run(["sync", "--source", "daily-agenda", "--apply", "--only", ""]);
+  assert.equal(code, 0);
+  assert.deepEqual(writes(client).map((c) => c.name), ["pm_complete_personal_task"]);
+});

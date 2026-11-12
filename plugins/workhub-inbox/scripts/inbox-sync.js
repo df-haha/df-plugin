@@ -192,7 +192,7 @@ function renderText(report, plan) {
     for (const i of plan.create) lines.push(`- ${i.agendaId}  ${i.agendaPriority}  期限 ${i.due || "—"}  ${i.sourceLabel}`);
   }
   if (report.reviewFile) {
-    lines.push("", `標題與來源寫在試跑清單檔（請使用者自己打開看）：${report.reviewFile}`);
+    lines.push("", `標題與來源寫在試跑清單檔（請使用者自己打開看）：${safeText(report.reviewFile, 1000)}`);
   }
   if (report.results) {
     const r = report.results;
