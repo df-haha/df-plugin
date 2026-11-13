@@ -16,6 +16,8 @@ const SOURCE_BY_PREFIX = [
   { prefix: "event:", source: "outlook", label: "行事曆" },
 ];
 const LINE_CHAT = /^line:(chat:[0-9a-f]+):/;
+const REPORT_CODE = /^R-[A-Z0-9]{3}$/;
+const AGENDA_ID = /^T-\d{4}$/;
 
 class AgendaSourceError extends Error {
   constructor(message) {
@@ -66,6 +68,24 @@ function loadAgenda(home) {
   }
 }
 
+/**
+ * 報表（彙整頁）→ 它列出的 agenda 代碼。對照存在 CURRENT generation 的 state.json：
+ * report_code（R-加 3 碼）與 report_index（{"項次": "T-xxxx"}，含頁上的未完成、可能已完成、收合項目）。
+ * daily-agenda 只保留最新一份報表的對照，所以只認最新一份（和它的 confirm 一樣，舊代碼視為過期）。
+ * @param {object} state
+ * @param {string} requested 已驗過格式的 R-XXX 或 "latest"
+ * @returns {{code: string, ids: Set<string>}}
+ */
+function reportTodoIds(state, requested) {
+  const current = typeof state.report_code === "string" && REPORT_CODE.test(state.report_code) ? state.report_code : null;
+  if (!current) throw new AgendaSourceError("daily-agenda 還沒有產生過彙整頁（找不到任何報表代碼）；請先跑一次 daily-agenda");
+  if (requested !== "latest" && requested !== current) {
+    throw new AgendaSourceError(`找不到報表 ${requested}：daily-agenda 只保留最新一份報表，目前是 ${current}。請用最新彙整頁的代碼，或改用 --report latest`);
+  }
+  const index = state.report_index && typeof state.report_index === "object" ? Object.values(state.report_index) : [];
+  return { code: current, ids: new Set(index.filter((id) => typeof id === "string" && AGENDA_ID.test(id))) };
+}
+
 function sourceOf(srcId) {
   return SOURCE_BY_PREFIX.find((s) => srcId.startsWith(s.prefix)) || null;
 }
@@ -103,4 +123,4 @@ function toInboxItems(ledger, state) {
   return items;
 }
 
-module.exports = { AgendaSourceError, loadAgenda, resolveDaHome, taipeiDate, toInboxItems };
+module.exports = { AgendaSourceError, REPORT_CODE, loadAgenda, reportTodoIds, resolveDaHome, taipeiDate, toInboxItems };

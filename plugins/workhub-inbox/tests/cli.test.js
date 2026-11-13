@@ -140,7 +140,7 @@ test("401 中止的文字摘要不誤報「超過上限」", async () => {
   })(client.callTool);
   const { out } = await run(["sync", "--source", "daily-agenda", "--apply"], client, makeHome([row("T-1"), row("T-2"), row("T-3")]));
   assert.match(out, /中止後未執行 2/);
-  assert.doesNotMatch(out, /7 天/);
+  assert.doesNotMatch(out, /超過上限，下次執行再補|超過 7 天的會被略過/);
 });
 
 test("對照檔：清單看得到的狀態覆寫舊紀錄", async () => {
