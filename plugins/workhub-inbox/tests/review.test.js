@@ -225,25 +225,29 @@ test("說明文件：不再教 --show-titles；SKILL 用 --review-file、禁止�
   for (const name of ["readme", "skill"]) assert.match(docs[name], /略過權限確認/, name);
 });
 
-test("SKILL：「全部同步」也要帶 --only 列出試跑時的代碼；要求在新的對話進行；README 第一步寫開新對話", () => {
+test("SKILL：預設流程在同一個對話直接實寫報表範圍（使用者 2026-11-13 決定拿掉三道保護）；每行實寫都限定範圍", () => {
   const skill = fs.readFileSync(path.join(__dirname, "../skills/workhub-inbox/SKILL.md"), "utf8");
   const readme = fs.readFileSync(path.join(__dirname, "../README.md"), "utf8");
-  // 流程裡每一行實寫指令都要帶 --only，不能有不帶 --only 的 --apply
   const applyLines = skill.split("\n").filter((l) => l.includes("inbox-sync.js") && l.includes("--apply"));
   assert.ok(applyLines.length > 0);
-  // 每一行都要限定範圍：帶 --only 代碼，或明確用 --no-create（只勾完成）
-  for (const line of applyLines) assert.match(line, /--only T-|--no-create/, line);
-  assert.ok(applyLines.some((l) => /--only T-/.test(l)));
-  assert.match(skill, /新的對話/);
-  assert.match(skill, /請開一個新對話再說一次『同步待辦到 PM』/);
-  assert.match(readme, /^1\. 開一個新的對話/m);
+  // 每一行實寫都要限定範圍：--report 報表、--only 代碼，或明確用 --no-create（只勾完成）
+  for (const line of applyLines) assert.match(line, /--report (R-[A-Z0-9]{3}|latest)\b|--only T-|--no-create/, line);
+  assert.ok(applyLines.some((l) => /--report R-[A-Z0-9]{3}\b/.test(l) && !/--only|--max-writes/.test(l)));
+  // 三道保護已拿掉，不能留下互相矛盾的指示
+  for (const text of [skill, readme]) {
+    assert.ok(!/--max-writes 3/.test(text));
+    assert.ok(!/請開一個新對話/.test(text));
+    assert.ok(!/開一個新的對話/.test(text));
+  }
+  assert.ok(!/待辦標題不進這個對話/.test(skill));
+  assert.match(skill, /確認待辦 R-XXX/);
 });
 
-test("README：實寫範例一律限定範圍，範例代碼符合 T- 加四碼數字", () => {
+test("README：實寫範例一律限定範圍（--report／--only／--no-create），範例代碼符合 T- 加四碼數字", () => {
   const readme = fs.readFileSync(path.join(__dirname, "../README.md"), "utf8");
   const applyLines = readme.split("\n").filter((l) => l.includes("inbox-sync.js") && l.includes("--apply"));
   assert.ok(applyLines.length > 0);
-  for (const line of applyLines) assert.match(line, /--only T-\d{4}|--no-create/, line);
+  for (const line of applyLines) assert.match(line, /--report (R-[A-Z0-9]{3}|latest)\b|--only T-\d{4}|--no-create/, line);
   // 文件裡出現的每個範例代碼都要是程式接受的格式，照抄才跑得動
   const codes = readme.match(/\bT-[0-9A-Za-z]+/g) || [];
   assert.ok(codes.length > 0);
