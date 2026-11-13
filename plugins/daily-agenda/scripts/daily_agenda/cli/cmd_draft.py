@@ -1,11 +1,12 @@
 """draft new --kind criteria|profile|coverage / draft show --file F
 
-Creates draft files in ``<home>/runs/drafts/<timestamp>/`` so Claude can
-Write to a path that satisfies the lock-core hook's allowlist
-(``runs/…/criteria-draft.md``, ``profile-draft.md``, ``coverage-draft.json``).
+Creates draft files in ``<home>/runs/drafts/<timestamp>/`` with the
+basenames that ``criteria save`` / ``profile save`` / ``profile coverage
+save`` accept (raw-commands.json ``draft_policy``).  Drafts Claude writes
+after the session has seen raw text are recorded in ``taint/tainted-drafts.json``.
 
 ``draft show`` returns fenced text so Claude never needs to Read runs/ files
-directly (which would lock the session).
+directly (runs/ holds raw third-party text).
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from daily_agenda.fence import fence_untrusted
 from daily_agenda.fsutil import atomic_write_text
 from ._common import Deps, emit, require_consent, validate_file_flag
 
-# Allowed draft filenames — must match lock-core hook's checkTaintedWrite allowlist.
+# Allowed draft filenames — must match raw-commands.json draft_policy.
 _KIND_FILENAME: dict[str, str] = {
     "criteria": "criteria-draft.md",
     "profile": "profile-draft.md",

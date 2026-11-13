@@ -1,9 +1,13 @@
 /**
- * Pure logic for the session taint-lock system.
+ * Pure logic for the session taint marker.
  * No I/O, no process.exit — testable as a module.
  *
- * Fail-open when untainted (internal errors must not block normal sessions).
- * Fail-closed when tainted (internal errors deny the call for safety).
+ * Since 2026-11-13 the marker blocks nothing: it only records that a session
+ * has seen third-party raw text (runs/, raw-emitting subcommands, the
+ * DA-RAW-3f9a sentinel).  Whether to act on instructions found in that text
+ * is left to the model; the fence markers in CLI output tell it the text is
+ * untrusted.  guard.mjs (denies direct LINE send-class tools in every
+ * session) is separate and unchanged; no hook covers calendar tools.
  */
 
 import { readFileSync, realpathSync } from 'node:fs';
@@ -283,14 +287,14 @@ const _checkRegistryInvocation = (command) => {
 };
 
 // ---------------------------------------------------------------------------
-// Canonical DA invocation parser (shared by tainted allowlist + exemption)
+// Canonical DA invocation parser (shared by the taint exemption + Monitor check)
 // ---------------------------------------------------------------------------
 
 /**
  * Parse a canonical DA invocation from a Bash command.
  * Returns {ok, projectPath, subcommand, argsStr} or {ok:false}.
  * This is the ONLY canonical-form regex in lock-core.mjs.  Used by both
- * tainted allowlist (checkTaintedBash) and untainted exemption (checkBashTaint),
+ * the untainted exemption (checkBashTaint)
  * and by checkMonitorCommand, so they cannot drift.
  *
  * Canonical form: `uv run --quiet --project "..." python -I -X utf8 -m daily_agenda <sub> ...`
@@ -482,6 +486,43 @@ const _buildExemptSet = (command, ctx) => {
 };
 
 // ---------------------------------------------------------------------------
+// Shell path-token canonicalization (shared by taint check + tainted Bash)
+// ---------------------------------------------------------------------------
+
+/**
+ * Turn one whitespace/operator-split shell token into a canonical path, the
+ * way bash would see it: ANSI-C $'..' decoded, quotes dropped, backslash
+ * escapes removed, ~ / $HOME / %USERPROFILE% expanded.  Returns '' for
+ * flags and empty tokens.
+ */
+const _canonShellToken = (token, cwd) => {
+  // Process ANSI-C $'...' BEFORE stripping quotes (it needs the $' wrapper)
+  let clean = token.replace(/\$'([^']*)'/g, (_, inner) =>
+    inner.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+         .replace(/\\'/g, "'").replace(/\\\\/g, '\\')
+         .replace(/\\(.)/g, '$1')
+  );
+  // Strip remaining quotes
+  clean = clean.replace(/["']/g, '');
+  if (!clean || clean.startsWith('-')) return '';
+
+  // Bash unescape: unquoted \x → x (same rule as shellTokenize)
+  clean = clean.replace(/\\(.)/g, '$1');
+
+  // Expand shell variables in the token
+  let expanded = clean;
+  const homeStr = process.env.USERPROFILE || process.env.HOME || '';
+  if (homeStr) {
+    const normHomePath = homeStr.replace(/\\/g, '/').toLowerCase();
+    expanded = expanded.replace(/^~/g, normHomePath);
+    // $HOME, ${HOME}, %USERPROFILE%, $USERPROFILE
+    expanded = expanded.replace(/\$HOME\b|\$\{HOME\}|%USERPROFILE%|\$USERPROFILE\b/gi, normHomePath);
+  }
+
+  return canonicalize(expanded, cwd);
+};
+
+// ---------------------------------------------------------------------------
 // Taint detection — mechanism 2 path-reference check
 // ---------------------------------------------------------------------------
 
@@ -490,7 +531,8 @@ const _buildExemptSet = (command, ctx) => {
  *
  * Two mechanisms:
  * 1. Registry: `python -m daily_agenda <registry-subcommand>` (N5-safe)
- * 2. Path references: command tokens that resolve inside DA taint dirs
+ * 2. Path references: command tokens that resolve inside <home>/runs/
+ *    (the only place third-party raw text lives on disk)
  *
  * Mechanism 2 exempts flag values from canonical DA invocations that point to
  * allowed locations (progress files under runs/progress/, draft files under
@@ -498,7 +540,7 @@ const _buildExemptSet = (command, ctx) => {
  * from locking a session that the user decided should stay unlocked.
  *
  * @param {string} command
- * @param {{ daHome?: string, cwd?: string, extraPrefixes?: string[] }} [ctx]
+ * @param {{ daHome?: string, cwd?: string, taintedDrafts?: Set<string> }} [ctx]
  */
 export const checkBashTaint = (command, ctx) => {
   if (typeof command !== 'string') return { taint: false };
@@ -528,69 +570,23 @@ export const checkBashTaint = (command, ctx) => {
       }
     }
 
-    const taintDirs = [
-      normHome + '/runs', normHome + '/gen', normHome + '/output',
-    ];
-    if (Array.isArray(ctx.extraPrefixes)) {
-      for (const ep of ctx.extraPrefixes) {
-        if (typeof ep === 'string' && ep.length > 0) taintDirs.push(canonicalize(ep));
-      }
-    }
+    // Only runs/ holds third-party raw text (LINE / mail originals).
+    // gen/ (ledger), output/ (agenda page), config.json and the DA home itself
+    // do not lock (2026-11-13 relaxation).
+    const runsDir = normHome + '/runs';
 
     // Tokenize: split on whitespace and shell operators, then drop every quote
     // char — the shell concatenates `~/.daily-agenda/"runs"/x` into one path.
     const tokens = command.split(/[\s;|&<>()`]+/);
     for (const token of tokens) {
-      // Process ANSI-C $'...' BEFORE stripping quotes (it needs the $' wrapper)
-      let clean = token.replace(/\$'([^']*)'/g, (_, inner) =>
-        inner.replace(/\\n/g, '\n').replace(/\\t/g, '\t')
-             .replace(/\\'/g, "'").replace(/\\\\/g, '\\')
-             .replace(/\\(.)/g, '$1')
-      );
-      // Strip remaining quotes
-      clean = clean.replace(/["']/g, '');
-      if (!clean || clean.startsWith('-')) continue;
-
-      // Bash unescape: unquoted \x → x (same rule as shellTokenize)
-      clean = clean.replace(/\\(.)/g, '$1');
-
-      // Expand shell variables in the token
-      let expanded = clean;
-      const homeStr = process.env.USERPROFILE || process.env.HOME || '';
-      if (homeStr) {
-        const normHomePath = homeStr.replace(/\\/g, '/').toLowerCase();
-        expanded = expanded.replace(/^~/g, normHomePath);
-        // $HOME, ${HOME}, %USERPROFILE%, $USERPROFILE
-        expanded = expanded.replace(/\$HOME\b|\$\{HOME\}|%USERPROFILE%|\$USERPROFILE\b/gi, normHomePath);
-      }
-
-      const normToken = canonicalize(expanded, ctx.cwd);
+      const normToken = _canonShellToken(token, ctx.cwd);
       if (!normToken) continue;
 
       // Skip exempt paths (canonical DA flag values)
       if (exempt.has(normToken)) continue;
 
-      // Check if the token is inside a taint dir
-      for (const td of taintDirs) {
-        if (normToken === td || normToken.startsWith(td + '/')) {
-          return { taint: true, reason: `command references taint-protected dir: ${clean}` };
-        }
-      }
-
-      // Check if token is/inside daHome itself (covers `cd ~/.daily-agenda`)
-      if (normToken === normHome || normToken.startsWith(normHome + '/')) {
-        if (normToken === normHome) {
-          return { taint: true, reason: `command references DA home: ${clean}` };
-        }
-        // config.json contains raw chat names
-        if (normToken === normHome + '/config.json') {
-          return { taint: true, reason: `command references DA config (raw chat names): ${clean}` };
-        }
-        const relative = normToken.slice(normHome.length + 1);
-        const firstComponent = relative.split('/')[0];
-        if (['runs', 'gen', 'output'].includes(firstComponent)) {
-          return { taint: true, reason: `command references taint-protected dir: ${clean}` };
-        }
+      if (normToken === runsDir || normToken.startsWith(runsDir + '/')) {
+        return { taint: true, reason: `command references taint-protected dir: ${token}` };
       }
     }
   }
@@ -599,16 +595,23 @@ export const checkBashTaint = (command, ctx) => {
 };
 
 /**
- * Check if a Read/Grep/Glob path targets DA taint-protected directories
- * or a draft file that was written during a tainted session.
+ * Check if a Read/Grep path targets <home>/runs/ (third-party raw text) or a
+ * draft file that was written during a tainted session.
+ *
+ * gen/ (ledger), output/ (agenda page, incl. a custom output.dir),
+ * config.json and the DA home itself do not lock (2026-11-13 relaxation):
+ * they hold model-derived text or settings, not third-party originals.  Raw
+ * files carry the DA-RAW-3f9a sentinel on every line, so reaching them
+ * indirectly (Grep on the DA home, `cd` then relative path) still locks via
+ * the PostToolUse backstop.
  *
  * @param {string} filePath
  * @param {string} daHome
- * @param {string[]} [extraPrefixes]
+ * @param {string[]} [_extraPrefixes] - unused since 2026-11-13; kept for call compatibility
  * @param {string} [cwd]
  * @param {Set<string>} [taintedDrafts] - canonicalized paths from tainted-drafts.json
  */
-export const checkReadTaint = (filePath, daHome, extraPrefixes, cwd, taintedDrafts) => {
+export const checkReadTaint = (filePath, daHome, _extraPrefixes, cwd, taintedDrafts) => {
   if (typeof filePath !== 'string' || typeof daHome !== 'string') return { taint: false };
   if (filePath.length === 0) return { taint: false };
 
@@ -621,30 +624,9 @@ export const checkReadTaint = (filePath, daHome, extraPrefixes, cwd, taintedDraf
     return { taint: true, reason: `Read of draft written in a locked session: ${filePath}` };
   }
 
-  const taintDirs = [normHome + '/runs', normHome + '/gen', normHome + '/output'];
-
-  if (Array.isArray(extraPrefixes)) {
-    for (const ep of extraPrefixes) {
-      if (typeof ep !== 'string' || ep.length === 0) continue;
-      taintDirs.push(canonicalize(ep, cwd));
-    }
-  }
-
-  for (const td of taintDirs) {
-    if (!td) continue;
-    if (normPath === td || normPath.startsWith(td + '/')) {
-      return { taint: true, reason: `Read under taint-protected dir: ${filePath}` };
-    }
-  }
-
-  // config.json contains raw chat names in excluded_chats[].name
-  if (normPath === normHome + '/config.json') {
-    return { taint: true, reason: `Read of DA config (contains raw chat names): ${filePath}` };
-  }
-
-  // Narrow exception: path IS daHome itself
-  if (normPath === normHome) {
-    return { taint: true, reason: `Read/Grep of DA home: ${filePath}` };
+  const runsDir = normHome + '/runs';
+  if (normPath === runsDir || normPath.startsWith(runsDir + '/')) {
+    return { taint: true, reason: `Read under taint-protected dir: ${filePath}` };
   }
 
   return { taint: false };
@@ -670,59 +652,11 @@ export const sanitizeSessionId = (sessionId) => {
 };
 
 // ---------------------------------------------------------------------------
-// Unified deny reason
+// Internal check result (used by checkMonitorCommand for the Monitor pre-taint
+// exemption; never shown to the user)
 // ---------------------------------------------------------------------------
 
-const DENY_BASE = '這個對話已讀取外部訊息原文，為了防止訊息裡藏的指令被執行，已鎖定';
-const DENY_DEFAULT = `${DENY_BASE}：只能繼續使用 daily-agenda 的功能。要做其他事請開新對話。`;
-
-const deny = (suffix) => ({
-  allow: false,
-  reason: suffix ? `${DENY_BASE}${suffix}` : DENY_DEFAULT,
-});
-
-// ---------------------------------------------------------------------------
-// Tainted-state tool allowlist
-// ---------------------------------------------------------------------------
-
-const TAINTED_ALLOWED_TOOLS = new Set([
-  'Read', 'Glob', 'Grep', 'AskUserQuestion',
-  'TodoRead', 'TodoWrite', 'Monitor', 'TaskStop', 'ToolSearch',
-]);
-
-const ACTIONS_PREFIX = 'mcp__plugin_daily-agenda_actions__';
-
-const ALLOWED_SKILLS = new Set([
-  'agenda', 'agenda-setup', 'agenda-reply',
-  'daily-agenda:agenda', 'daily-agenda:agenda-setup', 'daily-agenda:agenda-reply',
-]);
-
-// Fully denied (cannot be scoped safely)
-const DENIED_SUBCOMMANDS = new Set([
-  'schedule', 'uninstall', 'runtime', 'trust', 'ctx', 'docs',
-]);
-
-export const checkTaintedAllow = (toolName, toolInput, ctx) => {
-  if (typeof toolName !== 'string') return deny('（工具名稱無效）');
-
-  if (TAINTED_ALLOWED_TOOLS.has(toolName)) {
-    if (toolName === 'Monitor') return checkMonitorCommand(toolInput, ctx);
-    return { allow: true };
-  }
-
-  if (toolName.startsWith(ACTIONS_PREFIX)) return { allow: true };
-
-  if (toolName === 'Skill') {
-    const skillName = toolInput?.skill;
-    if (typeof skillName === 'string' && ALLOWED_SKILLS.has(skillName)) return { allow: true };
-    return deny(`（skill: ${skillName || '(none)'}）。要做其他事請開新對話。`);
-  }
-
-  if (toolName === 'Bash') return checkTaintedBash(toolInput, ctx);
-  if (toolName === 'Write' || toolName === 'Edit') return checkTaintedWrite(toolInput, ctx);
-
-  return deny();
-};
+const deny = (reason) => ({ allow: false, reason });
 
 // ---------------------------------------------------------------------------
 // Shared project path validation (H2 + L2: single implementation for Bash
@@ -736,7 +670,8 @@ export const checkTaintedAllow = (toolName, toolInput, ctx) => {
  *  - An absolute path that resolves to the same directory as PLUGIN_SCRIPTS_DIR
  *
  * On Windows: case-insensitive comparison (via realpath normalization).
- * Nonexistent paths → deny (fail closed in tainted state).
+ * Nonexistent paths → false: not treated as canonical, so no path exemption
+ * (the call may be marked; nothing is ever denied).
  *
  * Exported for testing.
  */
@@ -758,13 +693,13 @@ export const _isAllowedProjectPath = (projectPath) => {
     }
     return resolvedCandidate === resolvedPlugin;
   } catch {
-    // Path doesn't exist or can't be resolved → deny (fail closed)
+    // Path doesn't exist or can't be resolved → not canonical (no exemption)
     return false;
   }
 };
 
 // ---------------------------------------------------------------------------
-// Tainted Bash check
+// Flag extraction
 // ---------------------------------------------------------------------------
 
 /**
@@ -786,78 +721,6 @@ const _extractAllFlag = (argsStr, flagName) => {
     values.push(m[2] || m[3] || m[4]);
   }
   return values;
-};
-
-export const checkTaintedBash = (toolInput, ctx) => {
-  const command = toolInput?.command;
-  if (typeof command !== 'string') return deny('（Bash：指令格式無效）');
-  if (command.includes('\n') || command.includes('\r')) return deny('（Bash：不允許多行指令）');
-
-  const sanitized = command.replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, '__PLUGIN_ROOT__');
-  if (/[;|&`><()\n\r{}*?~]/.test(sanitized)) return deny('（Bash：不允許 shell 特殊字元）');
-  if (/\$/.test(sanitized)) return deny('（Bash：不允許變數展開，$CLAUDE_PLUGIN_ROOT 除外）');
-
-  const canonical = _parseCanonicalDA(command);
-  if (!canonical.ok) return deny();
-
-  const subcommand = canonical.subcommand;
-  const argsStr = canonical.argsStr;
-
-  // F3/item2: validate --progress-file (reject duplicates, =form, path)
-  const pfResult = _validateFlagOccurrences(argsStr, '--progress-file', ctx, true);
-  if (pfResult) return pfResult;
-
-  // Item3: validate --file (reject duplicates, =form, path)
-  // Only validate if it's present (some subcommands don't use --file)
-  const ffResult = _validateFlagOccurrences(argsStr, '--file', ctx, false);
-  if (ffResult) return ffResult;
-
-  if (command.includes('--with')) return deny('（Bash：不允許 --with）');
-
-  // Subcommand-specific rules
-
-  // Item1: consent --status is read-only (allowed); consent --accept is denied
-  if (subcommand === 'consent') {
-    if (argsStr === '--status' || argsStr === '') return { allow: true };
-    return deny('（Bash：不允許 consent --accept）');
-  }
-
-  if (subcommand === 'config') {
-    if (argsStr.startsWith('get') || argsStr === '') return { allow: true };
-    return deny('（Bash：不允許 config set）');
-  }
-
-  if (subcommand === 'criteria') {
-    if (argsStr.startsWith('show') || argsStr === '') return { allow: true };
-    if (argsStr.startsWith('draft')) return { allow: true };
-    if (argsStr.startsWith('save')) return _requireDraftFile(argsStr, 'criteria save', ctx);
-    if (argsStr.startsWith('restore')) return { allow: true };
-    return deny('（Bash：不允許修改判斷準則）');
-  }
-
-  if (subcommand === 'refine') {
-    if (['status', 'draft', 'skip'].some(s => argsStr.startsWith(s)) || argsStr === '') {
-      return { allow: true };
-    }
-    if (argsStr.startsWith('apply')) return _requireDraftFile(argsStr, 'refine apply', ctx);
-    return deny('（Bash：不允許此 refine 操作）');
-  }
-
-  if (subcommand === 'profile') {
-    if (argsStr === '' || argsStr.startsWith('show') || argsStr.startsWith('list') || argsStr.startsWith('next-question')) {
-      return { allow: true };
-    }
-    if (argsStr.startsWith('restore')) return { allow: true };
-    if (argsStr.startsWith('cadence')) return { allow: true };
-    if (argsStr.startsWith('save')) return _requireDraftFile(argsStr, 'profile save', ctx);
-    if (argsStr.startsWith('coverage save')) return _requireDraftFile(argsStr, 'profile coverage save', ctx);
-    if (argsStr.startsWith('coverage')) return { allow: true }; // coverage (read) without save
-    return deny('（Bash：不允許此 profile 操作）');
-  }
-
-  if (DENIED_SUBCOMMANDS.has(subcommand)) return deny(`（Bash：不允許 ${subcommand}）`);
-
-  return { allow: true };
 };
 
 // ---------------------------------------------------------------------------
@@ -906,23 +769,6 @@ const _validateFlagOccurrences = (argsStr, flagName, ctx, isProgressFile) => {
   }
 
   return null;
-};
-
-/**
- * Require --file to be present, under <home>/runs/, with correct draft
- * basename per the shared draft_policy, no 'raw' segment.
- * Item 4: closes the locked CLI save laundering.
- */
-const _requireDraftFile = (argsStr, subcommand, ctx) => {
-  const values = _extractAllFlag(argsStr, '--file');
-  if (values.length === 0) return deny(`（Bash ${subcommand}：需要 --file 參數）`);
-  // _validateFlagOccurrences already checked under runs/ and no duplicates.
-  // Now enforce draft policy basename + no 'raw' segment.
-  const filePath = values[0];
-  if (!_isDraftFileForSubcommand(filePath, ctx, subcommand.split(' ')[0], argsStr)) {
-    return deny(`（Bash ${subcommand}：--file 必須是對應的草稿檔案，且不能在 raw/ 下）`);
-  }
-  return { allow: true };
 };
 
 // ---------------------------------------------------------------------------
@@ -1163,19 +1009,13 @@ const _extractPathPositionals = (segTokens, tool) => {
 export const checkMonitorPreTaint = (command, ctx) => {
   if (typeof command !== 'string') return { taint: false };
 
-  // Build protected roots (canonical)
+  // Build protected roots (canonical): only runs/ holds raw third-party text
+  // (2026-11-13 relaxation; gen/ and output/ no longer lock).  A recursive
+  // tool pointed at the DA home is still an ancestor of runs/ → hit.
   const protectedRoots = [];
   if (ctx?.daHome) {
     const normHome = canonicalize(ctx.daHome);
-    if (normHome) protectedRoots.push(normHome);
-  }
-  if (Array.isArray(ctx?.extraPrefixes)) {
-    for (const ep of ctx.extraPrefixes) {
-      if (typeof ep === 'string' && ep.length > 0) {
-        const c = canonicalize(ep);
-        if (c) protectedRoots.push(c);
-      }
-    }
+    if (normHome) protectedRoots.push(normHome + '/runs');
   }
 
   // Check 1: whole-token match for daily_agenda module name
@@ -1252,39 +1092,19 @@ export const checkMonitorPreTaint = (command, ctx) => {
 };
 
 // ---------------------------------------------------------------------------
-// Tainted Write/Edit scope check
+// Tainted-drafts recording scope
 // ---------------------------------------------------------------------------
 
-export const checkTaintedWrite = (toolInput, ctx) => {
-  const filePath = toolInput?.file_path;
-  if (typeof filePath !== 'string') return deny('（Write：路徑無效）');
-
-  const daHome = ctx?.daHome;
-  if (daHome) {
-    const normFile = canonicalize(filePath);
-    const normHome = canonicalize(daHome);
-    if (normFile.startsWith(normHome + '/runs/') && normFile.endsWith('/criteria-draft.md')) {
-      return { allow: true };
-    }
-    if (normFile.startsWith(normHome + '/runs/') && normFile.endsWith('/profile-draft.md')) {
-      return { allow: true };
-    }
-    if (normFile.startsWith(normHome + '/runs/') && normFile.endsWith('/coverage-draft.json')) {
-      return { allow: true };
-    }
-  } else {
-    if (/[/\\]\.daily-agenda[/\\]runs[/\\][^/\\]+[/\\]criteria-draft\.md$/i.test(filePath)) {
-      return { allow: true };
-    }
-    if (/[/\\]\.daily-agenda[/\\]runs[/\\][^/\\]+[/\\]profile-draft\.md$/i.test(filePath)) {
-      return { allow: true };
-    }
-    if (/[/\\]\.daily-agenda[/\\]runs[/\\][^/\\]+[/\\]coverage-draft\.json$/i.test(filePath)) {
-      return { allow: true };
-    }
-  }
-
-  return deny('（Write：只能寫入 .daily-agenda/runs/ 下的草稿檔案）');
+/**
+ * True when a written path is under <home>/runs/ — only those are recorded
+ * in tainted-drafts.json (draft laundering prevention).  Ordinary project
+ * files written while locked are not recorded: the list would grow without
+ * bound and re-lock later sessions that read them.
+ */
+export const isUnderRuns = (filePath, ctx) => {
+  if (!ctx?.daHome || typeof filePath !== 'string') return false;
+  const runsDir = canonicalize(ctx.daHome) + '/runs';
+  return draftKeys(filePath, ctx.cwd).some((k) => k.startsWith(runsDir + '/'));
 };
 
 // ---------------------------------------------------------------------------

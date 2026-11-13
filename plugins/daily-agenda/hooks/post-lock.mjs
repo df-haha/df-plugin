@@ -3,21 +3,21 @@
 /**
  * PostToolUse + PostToolUseFailure hook: content-based taint detection.
  *
- * Layer 2 backstop — taints the session when tool output contains the raw
- * sentinel (DA-RAW-3f9a), which makes shell-form bypasses irrelevant.
+ * Layer 2 backstop — marks the session tainted when tool output contains the
+ * raw sentinel (DA-RAW-3f9a), which makes shell-form bypasses irrelevant.
  * (Guessing raw content from protected paths in output was removed: it
  * missed many output shapes and tainted unrelated sessions.)
  *
  * Registered for BOTH PostToolUse and PostToolUseFailure (failed Bash exit
  * still carries stdout in the `error` field).
  *
- * Matched tools: Bash (stdout + stderr / error), Read (file content),
- * Grep (output), Monitor (event stream).
+ * Matched tools: Bash / PowerShell (stdout + stderr / error), Read (file
+ * content), Grep (output), Monitor (event stream).
  * NOT matched: Glob (returns paths only).
  *
- * Fail-safe: on parse errors or any exception, output {} (no-op).
- * When markSessionTainted fails, emit continue:false to stop the session.
- * Never crashes the tool flow.
+ * Fail-safe: on parse errors, marker-write failure or any exception, output
+ * {} (no-op).  Never blocks or stops the tool flow: since 2026-11-13 the
+ * marker is a record only.
  */
 
 import { readFileSync } from 'node:fs';
@@ -34,20 +34,6 @@ import { extractText } from './post-lock-core.mjs';
 
 const outputNoop = () => {
   process.stdout.write(JSON.stringify({}));
-};
-
-/**
- * Emit continue:false to hard-stop the session when we detect raw content
- * but can't write the taint marker.  This is the universal hook stop signal
- * (code.claude.com/docs/en/hooks § JSON output: "Every event accepts them",
- * "Takes precedence over any event-specific decision fields").
- * Works for both PostToolUse and PostToolUseFailure events.
- */
-const outputStop = (stopReason) => {
-  process.stdout.write(JSON.stringify({
-    continue: false,
-    stopReason,
-  }));
 };
 
 // ---------------------------------------------------------------------------
@@ -84,14 +70,11 @@ try {
 
   if (text.includes(loadSentinel())) {
     const taintReason = `raw sentinel detected in ${toolName} output`;
-    const marked = markSessionTainted(daHome, sanitizedId, taintReason, transcriptPath);
-    if (!marked) {
-      // Item 5a: marker write failed — block the turn so raw content
-      // doesn't proceed in an unlocked session.
-      outputStop('daily-agenda 安全鎖無法寫入上鎖紀錄，為安全起見已停止。請檢查 .daily-agenda/taint 資料夾權限或磁碟空間，並開新對話。');
-      process.exit(0);
+    // The marker is a record only (2026-11-13): a failed write never stops
+    // the session.
+    if (markSessionTainted(daHome, sanitizedId, taintReason, transcriptPath)) {
+      cleanupOldMarkers(daHome);
     }
-    cleanupOldMarkers(daHome);
   }
 
   outputNoop();

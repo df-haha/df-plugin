@@ -120,7 +120,7 @@ def check_environment(
 
 
 # ---------------------------------------------------------------------------
-# F8: lock hook self-test
+# F8: hook runtime self-test
 # ---------------------------------------------------------------------------
 
 _LOCK_SELFTEST_TIMEOUT_S = 15
@@ -133,10 +133,13 @@ def check_lock_hook(
     plugin_root: Path | None = None,
     tmp_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """Run the lock hook with a tainted fixture and verify it denies.
+    """Run the lock hook with a tainted fixture and verify it answers.
 
     Creates a temporary DA home with a taint marker, feeds a WebFetch
-    PreToolUse fixture on stdin, and checks for a deny response.
+    PreToolUse fixture on stdin, and checks that the hook runs and returns a
+    JSON object that does not deny (since 2026-11-13 the taint marker blocks
+    nothing).  What this really verifies is that ``node`` can run the
+    plugin's hooks — guard.mjs (denies direct LINE send-class tools) needs it.
     Cross-platform: only requires ``node`` on PATH (not Windows-specific).
 
     Parameters
@@ -200,11 +203,12 @@ def check_lock_hook(
         except (json.JSONDecodeError, ValueError):
             return _check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE")
 
+        if not isinstance(result, dict):
+            return _check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE")
         decision = result.get("hookSpecificOutput", {}).get("permissionDecision")
         if decision == "deny":
-            return _check("lock_hook", True)
-        else:
             return _check("lock_hook", False, "LOCK_HOOK_UNAVAILABLE")
+        return _check("lock_hook", True)
 
     finally:
         # 7. Clean up

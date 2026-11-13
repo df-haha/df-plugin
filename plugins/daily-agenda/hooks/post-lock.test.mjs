@@ -375,9 +375,9 @@ describe('PostToolUse sentinel detection', () => {
 
   // ── Item 5a: marker write failure → decision:block ──
 
-  // ── H3: marker write failure → continue:false (universal hard stop) ──
+  // ── H3 (changed 2026-11-13): marker write failure no longer stops the session ──
 
-  it('H3: outputs continue:false when PostToolUse marker write fails', async () => {
+  it('H3: PostToolUse marker write failure is a no-op', async () => {
     const sessionId = 'sess-post-write-fail';
     const badHome = '/dev/null/impossible';
     const result = await runHook(
@@ -388,15 +388,10 @@ describe('PostToolUse sentinel detection', () => {
       },
       { DAILY_AGENDA_HOME: badHome },
     );
-    assert.strictEqual(result.stdout?.continue, false,
-      'Must emit continue:false when marker write fails');
-    assert.ok(typeof result.stdout?.stopReason === 'string',
-      'Must include a stopReason');
-    assert.ok(result.stdout.stopReason.includes('安全'),
-      'stopReason must mention safety');
+    assert.deepEqual(result.stdout, {}, 'marker is a record only; never stop the turn');
   });
 
-  it('H3: outputs continue:false when PostToolUseFailure marker write fails', async () => {
+  it('H3: PostToolUseFailure marker write failure is a no-op', async () => {
     const sessionId = 'sess-post-failure-write-fail';
     const badHome = '/dev/null/impossible';
     const result = await runHook(
@@ -408,9 +403,7 @@ describe('PostToolUse sentinel detection', () => {
       },
       { DAILY_AGENDA_HOME: badHome },
     );
-    assert.strictEqual(result.stdout?.continue, false,
-      'PostToolUseFailure must also emit continue:false on marker failure');
-    assert.ok(typeof result.stdout?.stopReason === 'string');
+    assert.deepEqual(result.stdout, {});
   });
 
   // ── H2: Windows backslash in structured Grep output → taint ──

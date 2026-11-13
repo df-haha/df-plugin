@@ -115,27 +115,13 @@ export const cleanupOldMarkers = (daHome) => {
 };
 
 // ---------------------------------------------------------------------------
-// Read extra taint prefixes from config
-// ---------------------------------------------------------------------------
-
-export const readExtraTaintPrefixes = (daHome) => {
-  try {
-    const raw = readFileSync(join(daHome, 'config.json'), 'utf8');
-    const cfg = JSON.parse(raw);
-    const outputDir = cfg?.output?.dir;
-    if (typeof outputDir === 'string' && outputDir.length > 0) return [outputDir];
-  } catch { /* fail-open */ }
-  return [];
-};
-
-// ---------------------------------------------------------------------------
 // Tainted-drafts list (draft laundering prevention)
 // ---------------------------------------------------------------------------
 
 const DRAFTS_LIST_PATH = 'taint/tainted-drafts.json';
 
 /**
- * Load the set of canonicalized draft paths written during tainted sessions.
+ * Load the set of canonicalized runs/ paths written during tainted sessions.
  */
 export const loadTaintedDrafts = (daHome) => {
   try {
@@ -148,7 +134,7 @@ export const loadTaintedDrafts = (daHome) => {
 };
 
 /**
- * Record a draft path written during a tainted session.
+ * Record a runs/ path written during a tainted session.
  * Atomic: re-reads + merges + writes to unique tmp then renames.
  * Returns true on success, false on failure.
  */
