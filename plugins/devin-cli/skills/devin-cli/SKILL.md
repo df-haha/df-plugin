@@ -11,7 +11,7 @@ description: 呼叫 Devin CLI（`devin -p` 非互動模式）把工作派出去�
 ## 一行用法
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" <ask|review|edit|code> <prompt 檔> -C <工作目錄> -o <輸出資料夾>
+bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" <ask|review|edit|code> <prompt 檔> [--trust] -C <工作目錄> -o <輸出資料夾>
 ```
 
 包裝腳本固定帶安全旗標、存回覆與紀錄、檢查靜默失敗。**不要手拼 `devin -p`**，除非腳本不支援該用法。
@@ -23,19 +23,25 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" <ask|review|e
 | `edit` | `accept-edits` | 可改檔。**非唯讀指令會被拒**（`pytest` 實測被拒） | `swe-2-high`（免費） |
 | `code` | `smart` | 可改檔，也可跑快速模型判定安全的指令（`pytest` 實測可跑） | `swe-2-high`（免費） |
 
-選項：`-m <模型>` 換模型、`-r <session_id>` 續接上一輪、`-t <秒>` 逾時（預設 1800）。
+選項：`--trust` 略過 devin 的工作區信任檢查（規則見「硬規則」）、`-m <模型>` 換模型、`-r <session_id>` 續接上一輪、`-t <秒>` 逾時（預設 1800）。
 
-結束碼：`0` 成功｜`3` 有工具呼叫被拒（可能只做一半，讀 `answer.md` 判斷缺什麼）｜`4` 沒有回覆｜`5` 唯讀模式（`ask`、`review`）卻改動了工作目錄｜`124` 逾時。
+結束碼：`0` 成功｜`3` 有工具呼叫被拒（可能只做一半，讀 `answer.md` 判斷缺什麼）｜`4` 沒有回覆｜`5` 唯讀模式（`ask`、`review`）卻改動了工作目錄｜`6` `.git` 的設定或 hooks 被改（任何模式都算；不要跑 git，處理方式見下方）｜`124` 逾時。
 
 結束碼 3 的判定方式：devin 自己回 0，但 `stderr.log` 出現 `rejected a tool call`。
 
-結束碼 5 的判定方式：比對執行前後的 `git status` 與 `git diff`。限制有四個：
-- 只偵測、不還原。看到 5 就跑 `git status --short` 與 `git diff`，確認後自己還原。
-- 抓不到「改了原本就未追蹤的檔」與「被 `.gitignore` 忽略的檔」。
-- 分不出是誰改的。同時有別的程序在改同一個資料夾也會回 5。
+結束碼 5 的判定方式：比對執行前後整個 repo 的 `git status`、未暫存與已暫存的 `git diff`、HEAD 與目前分支、所有分支與標籤、stash、skip-worktree 等索引標記，以及未追蹤檔的內容。輸出資料夾（`-o`）在 repo 裡、且裡面沒有追蹤中的檔時不算在內。
+
+`.git` 裡的設定檔、hooks、`info/`（含 include 進來的設定檔與全域設定）也會比對。這些一有變動，腳本就不再跑任何 git 指令，直接當成有改動，回結束碼 6（四種模式都一樣），並多印一行 `devin-run: git_config_changed=1`。看到結束碼 6 先不要跑任何 git 指令（`git status` 就可能執行被埋進設定的程式），改用 `cat .git/config`、`ls -la .git/hooks` 檢查。連結 worktree 的 `.git` 是一個檔案：先 `cat .git` 看它指到哪個 repo，再去那個主 repo 的 `.git` 檢查設定與 hooks。
+
+限制有六個：
+- 只偵測、不還原。看到 5 就跑 `git status --short` 與 `git diff`，確認後自己還原（結束碼 6 時照上一段先檢查，不要跑 git）。
+- 抓不到被 `.gitignore` 忽略的檔。未追蹤檔超過 2000 個時只比對檔名（多印一行 `devin-run: untracked_hash_skipped=<個數>`）；單一未追蹤檔超過 50 MB 只比對大小與修改時間。
+- 子模組只看指到哪個 commit，不看子模組裡面的改動。
+- 分不出是誰改的。比對範圍是整個 repo，連同所有分支、stash、`.git` 設定與全域 git 設定；同一個 repo 的其他 worktree 在這段時間 commit、背景 fetch、別的程序改了 git 設定，也會回 5 或 6。
+- git 指令本身出錯、或解析不到 `.git` 位置時，一律當成有改動（後者多印一行 `devin-run: git_unresolved=1`）。
 - 工作目錄不是 git repo 時不檢查（輸出 `workdir_changed=na`）。
 
-結束碼 5 會蓋掉其他結束碼（含逾時的 124）。逾時與否另看 `stderr.log`。
+結束碼 6 蓋掉所有其他結束碼；結束碼 5 蓋掉 6 以外的結束碼（含逾時的 124）。逾時與否另看 `stderr.log`。
 
 產物：`<輸出資料夾>/answer.md`（回覆）、`stderr.log`、`export.json`（完整過程，含 `final_metrics` token 用量）。
 
@@ -43,7 +49,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" <ask|review|e
 
 1. **`devin -p` 結束碼是 0 不代表做完。** `accept-edits` 模式下跑測試被拒，結束碼仍是 0，只在 stderr 印 `warning: rejected a tool call that requires confirmation`。包裝腳本把這種情況改成結束碼 3。
 2. **不帶 `--model` 時用 `~/.config/devin/config.json` 的 `agent.model`**（實測當時是 `claude-fable-5-2-medium`，輸入 8、輸出 40 美元／百萬 token）。新 session 不帶 `--model` 就會用它。續接（`-r`、`-c`）不帶 `--model` 時沿用該 session 原本的模型。包裝腳本一律帶 `--model`，所以用 `-r` 續接時要再帶一次 `-m`，否則會被換回該模式的預設模型。
-3. **沒信任過的資料夾，`-p` 直接失敗**（`Refusing to run in an untrusted workspace`）。包裝腳本帶 `--respect-workspace-trust false`，不改全域設定。
+3. **沒信任過的資料夾，`-p` 直接失敗**（`Refusing to run in an untrusted workspace`）。包裝腳本預設不略過這個檢查；帶 `--trust` 才傳 `--respect-workspace-trust false`，不改全域設定。被拒時腳本保留 devin 自己的結束碼，並多印 `devin-run: untrusted_workspace=1`。
 4. **Devin 會自動讀工作目錄的 `AGENTS.md` 與 `CLAUDE.md`。** repo 規則不用重貼進 prompt。使用者層的 `~/.claude/CLAUDE.md` 與 `~/.claude/rules/` 會不會讀：未驗證，重要規則仍寫進 prompt。
 5. **Devin 會接 `~/.claude.json` 裡的 MCP 伺服器，包含你接上的可寫入正式系統、可寄信的那些。** 它也載入 `~/.claude/skills/` 全部 skill。
 6. **Claude Code 的 hook 管不到 Devin。** 你在 Claude Code 設的攔截（例：擋正式資料庫寫入、擋 `.env` 寫入）對 Devin 都不會生效。
@@ -52,6 +58,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" <ask|review|e
 ## 硬規則
 
 - **禁用 `--permission-mode dangerous`。** 理由見上面第 5、6 點：它會自動核准 MCP 寫入與任何指令。使用者當輪點名才用，且只在拋棄式 worktree。
+- **`--trust` 只用在使用者自己的 repo 或使用者指定的工作目錄。** 外部來源的程式碼（別人的 PR、剛下載的 repo）不加 `--trust`，除非使用者當輪同意；要看這類程式碼時開拋棄式 worktree、用 `ask` 模式。
 - **禁用 `--cloud`、`devin cloud`、`devin ssh`、`devin forward`，除非使用者當輪點名。** 雲端 session 在 Devin 的機器上跑，不在本機。哪些本機程式碼會被上傳：未查原文，當作會上傳處理。
 - **每個派工 prompt 都貼「固定禁令段」**（見下）。
 - **Devin 的產出是輸入，不是已驗證結果。** 寫 code 的派工：Claude 自己讀 diff、自己重跑測試，才回報完成。review 的派工：逐項判採納或反駁並寫理由，不照單全收。
@@ -78,9 +85,9 @@ Constraints (hard):
    Orca 內改用 `orca worktree create`（見 orca-cli skill）。
 2. 寫 prompt 檔。必含：固定禁令段、目標、為什麼、動哪些檔、不動哪些檔、完成標準（要跑哪個測試指令、預期輸出）。
 3. 派工：
-   `bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" code <prompt 檔> -C <worktree> -o <輸出資料夾>`
+   `bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" code <prompt 檔> --trust -C <worktree> -o <輸出資料夾>`（使用者自己 repo 開出來的 worktree 才加 `--trust`）
 4. 看結束碼。`3`＝有步驟被拒：讀 `stderr.log` 與 `answer.md`，判斷缺哪一步，Claude 自己補跑，或用 `-r` 續接。
-5. 驗收：`git -C <worktree> status --short`、`git -C <worktree> diff`，Claude 自己重跑測試。
+5. 驗收：結束碼 6 先不要跑任何 git，照「結束碼 5 的判定方式」後面那段用 `cat`、`ls` 檢查 `.git` 的設定與 hooks。其他結束碼才跑 `git -C <worktree> status --short`、`git -C <worktree> diff`，Claude 自己重跑測試。
 6. 不合格就續接修正：先 `cd <worktree> && devin list --format json` 取最新的 `id`，再加 `-r <id>` 重派。同一模型失敗兩次就升級模型或收回自己做，不做第三次重試。
 7. 合格後照原本流程：code review → commit → PR。
 
@@ -90,7 +97,7 @@ Constraints (hard):
 
 1. 寫 prompt 檔。必含：固定禁令段、審查範圍（例：`git diff <merge-base>...HEAD`）、背景與需求原文、輸出格式。
 2. 派工：
-   `bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" review <prompt 檔> -C <repo 或 worktree> -o <輸出資料夾>`
+   `bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" review <prompt 檔> --trust -C <repo 或 worktree> -o <輸出資料夾>`（審使用者自己的改動才加 `--trust`；別人的 PR 照硬規則處理）
 3. 讀 `answer.md`，逐項寫採納或反駁與理由。要對審就用 `-r <id>` 把回應送回去；輪數一般兩輪，最多三輪；開審前先寫好停止條件。
 
 review prompt 的輸出格式段（可直接用）：
@@ -108,7 +115,9 @@ End with one line: "VERDICT: PASS" or "VERDICT: FAIL".
 
 ## 用法三：問答與偵察
 
-`bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" ask <prompt 檔> -C <repo>`
+`bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" ask <prompt 檔> --trust -C <使用者自己的 repo>`
+
+目標是外部來源的程式碼時拿掉 `--trust`，改指向拋棄式 worktree；devin 拒跑時由使用者決定要不要加。
 
 適合「這段怎麼運作」「X 在哪裡用到」這類只讀問題。Devin 內建 `web_search`、`webfetch`，也能查網路。
 
@@ -157,9 +166,10 @@ session 依資料夾分開。在 A 資料夾 `list` 看不到 B 資料夾的 ses
 
 | 症狀 | 原因 | 做法 |
 |---|---|---|
-| `Refusing to run in an untrusted workspace` | 手拼指令漏了信任旗標 | 改用包裝腳本 |
+| `Refusing to run in an untrusted workspace`（輸出有 `untrusted_workspace=1`） | 包裝腳本沒帶 `--trust` | 照「硬規則」判斷：使用者自己的 repo、或使用者當輪同意，才加 `--trust` 重跑；不要一看到就加 |
 | 結束碼 3 | 權限模式不夠，步驟被拒 | 先讀 `answer.md`：主要工作有做完就照用（例：審查完成，只是想多跑一次驗證被拒）；沒做完就換 `code` 模式，或 Claude 自己補跑那一步 |
 | 結束碼 5 | 唯讀模式下 Devin 改了檔 | `git status --short`、`git diff` 確認後還原 |
+| 結束碼 6 | `.git` 的設定或 hooks 被改 | 不要跑 git；先用 `cat`／`ls` 檢查 `.git/config` 與 `.git/hooks`（連結 worktree 先 `cat .git` 找主 repo），確認沒被埋指令再處理 |
 | 回覆說「command was rejected」 | 同上 | 同上 |
 | 找不到模型 | 代號打錯，或帳號沒有這個模型 | `devin models \| grep <關鍵字>` |
 | 跑出來的模型不是預期的那個 | 用了別名（別名有效，但可能指到舊版） | 改寫完整代號 |
@@ -183,3 +193,6 @@ session 依資料夾分開。在 A 資料夾 `list` 看不到 B 資料夾的 ses
 | 包裝腳本 `review` 卻要求它改檔 | 檔案被改，腳本回結束碼 5 |
 | 包裝腳本 `edit` 要求跑 pytest | 結束碼 3 |
 | 包裝腳本 `code` 修 bug＋跑 pytest | 結束碼 0，Claude 重跑 `1 passed` |
+| 包裝腳本 `ask` 不帶 `--trust`，在沒信任過的新資料夾 | devin 拒跑，腳本回結束碼 1，印 `untrusted_workspace=1` 與提示 |
+| 包裝腳本 `ask` 帶 `--trust`，同一個資料夾 | 答案正確；中途一個工具呼叫被拒，結束碼 3 |
+| 包裝腳本 `ask`、`review`（`swe-2-medium`）在本 repo | 結束碼 0，沒有誤報改檔 |
