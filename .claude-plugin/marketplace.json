@@ -190,6 +190,14 @@
       "author": { "name": "df-haha" },
       "source": "./plugins/workhub-inbox",
       "category": "productivity"
+    },
+    {
+      "name": "devin-cli",
+      "description": "把工作派給 Devin CLI（devin -p 非互動模式）— 寫 code、修 bug、code review、偵察問答；包裝腳本固定帶安全旗標、存回覆與完整紀錄，並把「結束碼 0 卻沒做完」「唯讀模式卻改了檔」等靜默失敗轉成明確結束碼",
+      "version": "1.0.0",
+      "author": { "name": "df-haha" },
+      "source": "./plugins/devin-cli",
+      "category": "development"
     }
   ]
 }
