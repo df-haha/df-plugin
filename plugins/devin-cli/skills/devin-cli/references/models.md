@@ -34,7 +34,7 @@
 | `swe-2-medium`、`swe-2-high`、`swe-2-max` | 262K |
 | `swe-2-flash-medium`、`swe-2-flash-high`、`swe-2-flash-max` | 262K |
 
-Fusion 組合的「Sidekick」部分免費，主模型照價收費。
+Fusion 組合的副手（Sidekick）是 SWE-2 系列時免費，主模型照價收費。
 
 ## 常用付費模型
 
@@ -58,9 +58,11 @@ Fusion 組合的「Sidekick」部分免費，主模型照價收費。
 
 ## Fusion（主模型＋免費副手）
 
-- 代號：`fusion-<主模型代號>-sidekick-<swe-2-medium|swe-2-high|swe-2-flash-max>`。
-- 例：`fusion-claude-opus-5-5-medium-sidekick-swe-2-medium`（主模型 4 · 0.2 · 20，副手免費）。
-- 主模型與副手怎麼分工：未查原文。
+- 代號：`fusion-<主模型代號>-sidekick-<副手代號>`。副手可選 SWE-2（`swe-2-medium`、`swe-2-high`、`swe-2-flash-max`，免費），也可選 GPT、GLM、Claude Sonnet 5.5、Haiku 5.5 等付費模型（2026-11-22 `devin models` 實跑）。
+- 例：`fusion-claude-fable-5-2-high-sidekick-swe-2-high`（主模型 8 · 0.2 · 40，副手免費）。
+- 分工（官方文件 https://docs.devin.ai/cli/fusion 原文）：「The lead model owns your task — it plans, reasons through the hard parts, and reviews the work — while the sidekick handles the mechanical implementation.」兩個模型各照自己的價格計費。官方推薦組合是 Fable＋SWE-2。
+- 適合寫 code（`code`、`edit`）；審查幾乎都在讀和想，副手能分擔的不多。
+- `-p` 非互動模式下的行為：未驗證。
 
 ## 本 skill 的預設
 

@@ -39,6 +39,10 @@ case "${FAKE_ACTION:-none}" in
   plant-hook) printf '#!/bin/sh\ntouch /nonexistent\n' > .git/hooks/pre-commit ;;
   reject) echo "warning: rejected a tool call that requires confirmation" >&2 ;;
   untrusted) echo "Error: Refusing to run in an untrusted workspace" >&2; exit 1 ;;
+  plant-hookspath) printf '#!/bin/sh\ntouch /nonexistent\n' > "$FAKE_PAYLOAD/pre-commit"; chmod +x "$FAKE_PAYLOAD/pre-commit" ;;
+  plant-outdir)  # 從 --export 的路徑找出輸出資料夾，在裡面多放一個檔
+    prev=""; for a in "$@"; do [ "$prev" != "--export" ] || out=$(dirname "$a"); prev=$a; done
+    printf '#!/bin/sh\necho pwned\n' > "$out/planted.sh" ;;
   poison-exit124) printf '[core]\n\tfsmonitor = %s\n' "$FAKE_PAYLOAD" >> .git/config; echo partial; exit 124 ;;
   *) echo "unknown FAKE_ACTION" >&2; exit 99 ;;
 esac
@@ -199,6 +203,41 @@ expect_rc c18d-untrusted-rc 1; expect_line c18d-untrusted-line "devin-run: untru
 # 19. .git 設定被改＋devin 自己回非零（像逾時的 124）：仍回 6
 R=$(new_repo c19); P=$(payload c19); FAKE_ACTION=poison-exit124 FAKE_PAYLOAD=$P run code "$R"
 expect_rc c19-config-changed-overrides-124 6; expect_absent c19-marker "$ROOT/marker-c19"
+
+# 20. core.hooksPath 指到 .git 以外（在 HOME 底下），代理在那裡放 hook
+R=$(new_repo c20a); mkdir "$HOME/hooks-c20a"
+# shellcheck disable=SC2088  # 故意寫字面的 ~，測 git 自己的展開
+git -C "$R" config core.hooksPath '~/hooks-c20a'
+FAKE_ACTION=plant-hookspath FAKE_PAYLOAD="$HOME/hooks-c20a" run edit "$R"
+expect_rc c20a-hookspath-outside-git 6; expect_line c20a-hookspath-warn "devin-run: git_config_changed=1"
+# 20b. hooksPath 指到的是符號連結資料夾
+R=$(new_repo c20b); mkdir "$HOME/real-hooks-c20b"; ln -s "$HOME/real-hooks-c20b" "$HOME/hooks-c20b"
+git -C "$R" config core.hooksPath "$HOME/hooks-c20b"
+FAKE_ACTION=plant-hookspath FAKE_PAYLOAD="$HOME/real-hooks-c20b" run review "$R"
+expect_rc c20b-hookspath-symlink 6; expect_line c20b-hookspath-symlink-warn "devin-run: git_config_changed=1"
+# 20c. hooksPath 有設定、沒被動過：不誤報
+R=$(new_repo c20c); mkdir "$HOME/hooks-c20c"
+# shellcheck disable=SC2088
+git -C "$R" config core.hooksPath '~/hooks-c20c'
+FAKE_ACTION=none run review "$R"
+expect_rc c20c-hookspath-untouched 0
+# 20d. hooksPath 有設定但展開不了（不存在的使用者）：git 每個指令都拒跑，不能當成「不是 repo」放行
+R=$(new_repo c20d)
+# shellcheck disable=SC2088
+git -C "$R" config core.hooksPath '~no-such-user-c20d/hooks'
+FAKE_ACTION=none run ask "$R"
+expect_rc c20d-hookspath-unresolvable 5; expect_line c20d-hookspath-unresolvable-line "devin-run: git_unresolved=1"
+# 20e. 真的不是 git repo：照舊不檢查
+mkdir "$ROOT/plain-c20e"; FAKE_ACTION=none run ask "$ROOT/plain-c20e"
+expect_rc c20e-not-a-repo 0; expect_line c20e-not-a-repo-na "workdir_changed=na"
+
+# 21. 輸出資料夾在 repo 裡，代理在裡面多放一個檔（c15c 是只有腳本自己的檔，要回 0）
+R=$(new_repo c21)
+if [ "$(command -v devin)" = "$ROOT/bin/devin" ]; then
+  OUT=$(cd "$R" && FAKE_ACTION=plant-outdir timeout 120 bash "$SCRIPT" review "$ROOT/prompt.md" -C "$R" -o "$R/devin-out" 2>&1); RC=$?
+else echo "ABORT" >&2; exit 2; fi
+expect_rc c21-outdir-planted-file 5
+r=1; [ -f "$R/devin-out/planted.sh" ] && r=0; check c21-planted-file-exists "假 devin 真的放了 planted.sh" "$r"
 
 # 16. 未追蹤檔太多：只比對檔名並註明
 R=$(new_repo c16); mkdir "$R/many"; (cd "$R/many" && touch f{0001..2001}); FAKE_ACTION=none run ask "$R"

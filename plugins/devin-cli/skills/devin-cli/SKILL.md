@@ -29,16 +29,16 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" <ask|review|e
 
 結束碼 3 的判定方式：devin 自己回 0，但 `stderr.log` 出現 `rejected a tool call`。
 
-結束碼 5 的判定方式：比對執行前後整個 repo 的 `git status`、未暫存與已暫存的 `git diff`、HEAD 與目前分支、所有分支與標籤、stash、skip-worktree 等索引標記，以及未追蹤檔的內容。輸出資料夾（`-o`）在 repo 裡、且裡面沒有追蹤中的檔時不算在內。
+結束碼 5 的判定方式：比對執行前後整個 repo 的 `git status`、未暫存與已暫存的 `git diff`、HEAD 與目前分支、所有分支與標籤、stash、skip-worktree 等索引標記，以及未追蹤檔的內容。輸出資料夾（`-o`）在 repo 裡時，只有腳本自己寫的 `answer.md`、`answer.md.tmp`、`stderr.log`、`export.json` 四個檔不算在內；資料夾裡出現其他檔照樣算改動。
 
-`.git` 裡的設定檔、hooks、`info/`（含 include 進來的設定檔與全域設定）也會比對。這些一有變動，腳本就不再跑任何 git 指令，直接當成有改動，回結束碼 6（四種模式都一樣），並多印一行 `devin-run: git_config_changed=1`。看到結束碼 6 先不要跑任何 git 指令（`git status` 就可能執行被埋進設定的程式），改用 `cat .git/config`、`ls -la .git/hooks` 檢查。連結 worktree 的 `.git` 是一個檔案：先 `cat .git` 看它指到哪個 repo，再去那個主 repo 的 `.git` 檢查設定與 hooks。
+`.git` 裡的設定檔、hooks、`info/`（含 include 進來的設定檔與全域設定），以及 `core.hooksPath` 指到的 hooks 資料夾（在 `.git` 以外、是符號連結也算）也會比對。這些一有變動，腳本就不再跑任何 git 指令，直接當成有改動，回結束碼 6（四種模式都一樣），並多印一行 `devin-run: git_config_changed=1`。看到結束碼 6 先不要跑任何 git 指令（`git status` 就可能執行被埋進設定的程式），改用 `cat .git/config`、`ls -la .git/hooks` 檢查（有設 `core.hooksPath` 就連那個資料夾一起看）。連結 worktree 的 `.git` 是一個檔案：先 `cat .git` 看它指到哪個 repo，再去那個主 repo 的 `.git` 檢查設定與 hooks。
 
 限制有六個：
 - 只偵測、不還原。看到 5 就跑 `git status --short` 與 `git diff`，確認後自己還原（結束碼 6 時照上一段先檢查，不要跑 git）。
 - 抓不到被 `.gitignore` 忽略的檔。未追蹤檔超過 2000 個時只比對檔名（多印一行 `devin-run: untracked_hash_skipped=<個數>`）；單一未追蹤檔超過 50 MB 只比對大小與修改時間。
 - 子模組只看指到哪個 commit，不看子模組裡面的改動。
 - 分不出是誰改的。比對範圍是整個 repo，連同所有分支、stash、`.git` 設定與全域 git 設定；同一個 repo 的其他 worktree 在這段時間 commit、背景 fetch、別的程序改了 git 設定，也會回 5 或 6。
-- git 指令本身出錯、或解析不到 `.git` 位置時，一律當成有改動（後者多印一行 `devin-run: git_unresolved=1`）。
+- git 指令本身出錯、解析不到 `.git` 位置、或 git 因設定錯誤等原因整個拒跑時，一律當成有改動（後兩者多印一行 `devin-run: git_unresolved=1`）。
 - 工作目錄不是 git repo 時不檢查（輸出 `workdir_changed=na`）。
 
 結束碼 6 蓋掉所有其他結束碼；結束碼 5 蓋掉 6 以外的結束碼（含逾時的 124）。逾時與否另看 `stderr.log`。

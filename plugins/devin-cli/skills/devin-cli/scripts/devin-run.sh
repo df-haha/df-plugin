@@ -63,7 +63,7 @@ MAX_UNTRACKED_FILES=2000        # 未追蹤檔超過這個數量就只比對檔�
 MAX_HASH_BYTES=$((50*1024*1024)) # 單檔超過這個大小只比對大小與修改時間
 GIT_SAFE=( --no-pager -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.pager=cat
            -c diff.external= -c log.showSignature=false -c status.submoduleSummary=false )
-FILTER_OFF=(); PIN_GIT_DIR=""; PIN_WORK_TREE=""; COMMON_DIR=""; PATHSPEC=()
+FILTER_OFF=(); PIN_GIT_DIR=""; PIN_WORK_TREE=""; COMMON_DIR=""; PATHSPEC=(); HOOKS_DIR=""; HOOKS_UNRESOLVED=0
 g() {
   local -a pin=()
   [ -z "$PIN_GIT_DIR" ] || pin=( "GIT_DIR=$PIN_GIT_DIR" "GIT_WORK_TREE=$PIN_WORK_TREE" )
@@ -77,9 +77,16 @@ hash_path() {
   if [ ! -e "$1" ] && [ ! -L "$1" ]; then echo "absent $1"; return 0; fi
   find "$1" -name objects -prune -o -type f -exec sha256sum {} + -o -printf '%y %p %l\n' 2>&1 || echo "find-failed $1"
 }
+# core.hooksPath 指到的資料夾：跟著符號連結讀（find 會偵測迴圈），深度有上限。另記資料夾本身實際指到哪裡。
+hash_path_follow() {
+  if [ ! -e "$1" ] && [ ! -L "$1" ]; then echo "absent $1"; return 0; fi
+  printf 'target %s -> %s\n' "$1" "$(realpath -m -- "$1")"
+  find -L "$1" -maxdepth 4 -type f -exec sha256sum {} + -o -printf '%y %p\n' 2>&1 || echo "find-failed $1"
+}
 meta_fingerprint() {
   {
     local p
+    [ -z "$HOOKS_DIR" ] || hash_path_follow "$HOOKS_DIR"
     for p in "$COMMON_DIR/config" "$COMMON_DIR/config.worktree" "$COMMON_DIR/hooks" \
              "$PIN_GIT_DIR/config.worktree" "$PIN_GIT_DIR/commondir"; do hash_path "$p"; done
     # info/ 只看會影響 git 判讀的檔（info/refs 會被 gc 自動改寫，不看）
@@ -102,7 +109,7 @@ fingerprint() {
   (
     cd "$PIN_WORK_TREE" || exit 1
     fail=0
-    echo "## status";   g status --porcelain=v1 --ignore-submodules=dirty -- ${PATHSPEC[@]+"${PATHSPEC[@]}"} || fail=1
+    echo "## status";   g status --porcelain=v1 --untracked-files=all --ignore-submodules=dirty -- ${PATHSPEC[@]+"${PATHSPEC[@]}"} || fail=1
     echo "## diff";     g diff --no-ext-diff --no-textconv --binary --submodule=short --ignore-submodules=dirty -- ${PATHSPEC[@]+"${PATHSPEC[@]}"} || fail=1
     echo "## cached";   g diff --cached --no-ext-diff --no-textconv --binary --submodule=short --ignore-submodules=dirty -- ${PATHSPEC[@]+"${PATHSPEC[@]}"} || fail=1
     echo "## head";     g rev-parse --verify -q HEAD || echo "rc=$?"
@@ -131,9 +138,12 @@ fingerprint() {
   ) | sha256sum | cut -d" " -f1
 }
 
-# 是 git 工作目錄卻解析不到 .git 位置時（例如很舊的 git），一律當成有改動（失效時從嚴）
+# 是 git 工作目錄卻解析不到 .git 位置（例如很舊的 git），或 git 因設定錯誤、擁有者檢查等原因整個拒跑
+# （訊息不是「not a git repository」）時，一律當成有改動（失效時從嚴）
 IS_GIT=0; GIT_UNRESOLVED=0
-if [ "$(g rev-parse --is-inside-work-tree 2>/dev/null)" = true ]; then
+INSIDE=$(LC_ALL=C g rev-parse --is-inside-work-tree 2>"$SCRATCH/rev-parse.err") || INSIDE=error
+if [ "$INSIDE" = error ] && ! command grep -q 'not a git repository' "$SCRATCH/rev-parse.err"; then GIT_UNRESOLVED=1
+elif [ "$INSIDE" = true ]; then
   if GIT_INFO=$(g rev-parse --git-dir --git-common-dir --show-toplevel 2>/dev/null); then
     mapfile -t GIT_LINES <<< "$GIT_INFO"
     if [ "${#GIT_LINES[@]}" -eq 3 ] && PIN_GIT_DIR=$(realpath -e -- "${GIT_LINES[0]}") \
@@ -143,13 +153,26 @@ if [ "$(g rev-parse --is-inside-work-tree 2>/dev/null)" = true ]; then
   [ "$IS_GIT" -eq 1 ] || { GIT_UNRESOLVED=1; PIN_GIT_DIR=""; COMMON_DIR=""; PIN_WORK_TREE=""; }
 fi
 if [ "$IS_GIT" -eq 1 ]; then
-  # 輸出資料夾在 repo 裡、且裡面沒有追蹤中的檔時，腳本自己寫的 answer.md 等不算改動。
-  # 裡面有追蹤中的檔（例如 -o src）或就是 repo 根目錄時不排除，寧可誤報。
-  case "$OUTDIR" in "$PIN_WORK_TREE"/*)
-    OUT_REL=${OUTDIR#"$PIN_WORK_TREE"/}
-    OUT_TRACKED=$(cd "$PIN_WORK_TREE" && g ls-files -- ":(top,literal)$OUT_REL") || OUT_TRACKED=error
-    [ -n "$OUT_TRACKED" ] || PATHSPEC=( ":(top)" ":(top,exclude,literal)$OUT_REL" ) ;;
+  # 輸出資料夾在 repo 裡時，只排除腳本自己寫的四個檔；資料夾裡出現其他檔照樣算改動
+  case "$OUTDIR/" in "$PIN_WORK_TREE"/*)
+    OUT_REL=${OUTDIR#"$PIN_WORK_TREE"}; OUT_REL=${OUT_REL#/}
+    PATHSPEC=( ":(top)" )
+    for f in answer.md answer.md.tmp stderr.log export.json; do
+      PATHSPEC+=( ":(top,exclude,literal)${OUT_REL:+$OUT_REL/}$f" )
+    done ;;
   esac
+  # core.hooksPath 若指到 .git 以外，代理可在那裡埋 hooks，使用者之後 commit 時才執行。
+  # 腳本自己的 git 已用 -c 蓋掉它，所以讀設定時排除指令列層（command）的值；相對路徑以工作目錄根為準（git 的規則）。
+  # 有設定卻解析不出路徑時，執行後一律當成設定被改（失效時從嚴）。
+  HOOKS_RC=0; HOOKS_LIST=$(g config --type=path --show-scope --get-all core.hooksPath 2>/dev/null) || HOOKS_RC=$?
+  if [ "$HOOKS_RC" -eq 0 ]; then
+    HOOKS_RAW=$(printf '%s\n' "$HOOKS_LIST" | awk -F'\t' '$1 != "command" { v = substr($0, index($0, "\t") + 1) } END { print v }')
+    if [ -n "$HOOKS_RAW" ]; then
+      case "$HOOKS_RAW" in /*) ;; *) HOOKS_RAW="$PIN_WORK_TREE/$HOOKS_RAW" ;; esac
+      HOOKS_DIR=$(realpath -m -s -- "$HOOKS_RAW") || { HOOKS_DIR=""; HOOKS_UNRESOLVED=1; }
+    fi
+  elif [ "$HOOKS_RC" -ne 1 ]; then HOOKS_UNRESOLVED=1   # 1＝沒設定；其他＝讀取或展開失敗
+  fi
   # 設定裡定義的每個 filter 都清成空指令：代理可在 .gitattributes 把任一 filter 套到檔案上
   declare -A SEEN_FILTER=()
   while IFS= read -r key; do
@@ -177,7 +200,7 @@ if [ "$GIT_UNRESOLVED" -eq 1 ]; then
   if [ "${READONLY[$MODE]}" -eq 1 ]; then RC=5; fi
 elif [ "$IS_GIT" -eq 1 ]; then
   CHANGED=0
-  if [ "$META_BEFORE" != "$(meta_fingerprint)" ]; then GIT_CONFIG_CHANGED=1
+  if [ "$HOOKS_UNRESOLVED" -eq 1 ] || [ "$META_BEFORE" != "$(meta_fingerprint)" ]; then GIT_CONFIG_CHANGED=1
   else
     CFG_AFTER=$(config_fingerprint) || CFG_AFTER=error-after
     [ "$CFG_BEFORE" = "$CFG_AFTER" ] || GIT_CONFIG_CHANGED=1
@@ -196,6 +219,7 @@ echo "devin-run: mode=$MODE model=$MODEL permission=${PERMISSION[$MODE]} trust=$
 echo "devin-run: answer=$OUTDIR/answer.md stderr=$OUTDIR/stderr.log export=$OUTDIR/export.json"
 [ "$GIT_CONFIG_CHANGED" -eq 0 ] || echo "devin-run: git_config_changed=1"
 [ "$GIT_UNRESOLVED" -eq 0 ] || echo "devin-run: git_unresolved=1"
+[ "$HOOKS_UNRESOLVED" -eq 0 ] || echo "devin-run: hooks_path_unresolved=1"
 if [ "$UNTRUSTED" -eq 1 ]; then
   echo "devin-run: untrusted_workspace=1"
   echo "devin-run: 提示：devin 拒跑未受信任的工作目錄。是使用者自己的 repo、或使用者當輪同意，才加 --trust 重跑；外部來源的程式碼不要直接加。"
