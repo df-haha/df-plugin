@@ -29,7 +29,7 @@ function makeHome(rows, chats = []) {
 }
 
 function row(id, overrides = {}) {
-  return { id, title: `待辦 ${id}`, priority: "P1", due: null, status: "open", src_ids: ["mail:x"], created_at: "2026-11-09T08:00:00+08:00", ...overrides };
+  return { id, title: `待辦 ${id}`, priority: "P1", due: null, status: "open", src_ids: ["mail:x"], created_at: new Date().toISOString(), ...overrides };
 }
 
 /** 假 Work Hub：清單正常，建立依 onCreate(rpc) 回應；記錄每個工具呼叫。 */
