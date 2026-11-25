@@ -199,7 +199,11 @@ test("子行程：試跑（--review-file、--json）與實寫，stdout、stderr 
   const { server, url } = await fakeServer();
   const stateBase = fs.mkdtempSync(path.join(os.tmpdir(), "wi-base-"));
   const childEnv = { PATH: process.env.PATH, SYSTEMROOT: process.env.SYSTEMROOT, WORKHUB_INBOX_API_KEY: KEY, WORKHUB_INBOX_ENDPOINT: url, WORKHUB_INBOX_STATE_DIR: stateBase };
-  const home = makeHome(evilRows(), EVIL_CHATS);
+  // 子行程拿不到注入的 now，用真實日期判斷新鮮度（有到期日看到期日，否則看建立日）：
+  // 建立時間改成現在、到期日改成明天（台北），免得過了預設天數就全被濾掉
+  const tomorrow = new Date(Date.now() + 86_400_000).toLocaleDateString("sv-SE", { timeZone: "Asia/Taipei" });
+  const freshRows = evilRows().map((r) => ({ ...r, created_at: new Date().toISOString(), ...(r.due ? { due: tomorrow } : {}) }));
+  const home = makeHome(freshRows, EVIL_CHATS);
   try {
     for (const extra of [["--review-file"], ["--review-file", "--json"], ["--apply"], ["--apply", "--json"]]) {
       const { code, stdout, stderr } = await runCli(["sync", "--source", "daily-agenda", "--da-home", home, ...extra], childEnv);
