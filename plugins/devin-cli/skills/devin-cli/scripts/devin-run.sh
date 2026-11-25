@@ -2,7 +2,7 @@
 # devin-run.sh — 以非互動模式呼叫 devin CLI，固定帶安全旗標並檢查「靜默失敗」。
 # 用法：devin-run.sh <ask|review|edit|code> <prompt 檔> [--trust] [-C 工作目錄] [-o 輸出資料夾] [-m 模型] [-r session_id] [-t 逾時秒數]
 # --trust：略過 devin 的工作區信任檢查（帶 --respect-workspace-trust false）。只用在使用者自己的 repo；不帶時未受信任的資料夾會被 devin 拒跑。
-# 結束碼：0 成功｜2 用法錯誤｜3 有工具呼叫被拒（可能只做一半，讀 answer.md 判斷）｜4 沒有回覆內容｜5 唯讀模式卻改動了工作目錄｜6 .git 的設定或 hooks 被改（任何模式，蓋掉其他結束碼；先別跑 git）｜124 逾時｜其他＝devin 自己的結束碼
+# 結束碼：0 成功｜2 用法錯誤（含 -o 裡已有輸出檔）｜3 有工具呼叫被拒（可能只做一半，讀 answer.md 判斷）｜4 沒有回覆內容｜5 唯讀模式卻改動了工作目錄｜6 .git 的設定或 hooks 被改（任何模式，蓋掉其他結束碼；先別跑 git）｜7 git 狀態無法判讀，未執行｜124 逾時｜其他＝devin 自己的結束碼
 set -euo pipefail
 
 # 模式 → 權限（auto 只讀；accept-edits 可改檔不可跑指令；smart 可改檔＋跑快速模型判定安全的指令）
@@ -20,10 +20,11 @@ MODE=$1; PROMPT_FILE=$2; shift 2
 [ -r "$PROMPT_FILE" ] || { echo "讀不到 prompt 檔：$PROMPT_FILE" >&2; exit 2; }
 PROMPT_FILE=$(realpath "$PROMPT_FILE")
 
-# --trust 可放在其他選項之間任何位置；先抽出來，其餘交給 getopts（選項的值剛好是 --trust 時不抽）
+# --trust 可放在其他選項之間任何位置；先抽出來，其餘交給 getopts（選項的值剛好是 --trust 時不抽；遇到 -- 就停）
 TRUST=0; REST=()
 while [ $# -gt 0 ]; do
   case $1 in
+    --) REST+=( "$@" ); break ;;
     --trust) TRUST=1 ;;
     -[Comrt]) REST+=( "$1" ); if [ $# -ge 2 ]; then REST+=( "$2" ); shift; fi ;;
     *) REST+=( "$1" ) ;;
@@ -39,9 +40,18 @@ while getopts "C:o:m:r:t:" opt; do
     r) RESUME=$OPTARG ;; t) TIMEOUT=$OPTARG ;; *) usage ;;
   esac
 done
+shift $((OPTIND - 1))
+[ $# -eq 0 ] || { echo "多出來的參數：$*" >&2; exit 2; }
+[[ $TIMEOUT =~ ^[1-9][0-9]*$ ]] || { echo "-t 要是正整數（秒）：$TIMEOUT" >&2; exit 2; }
 [ -d "$WORKDIR" ] || { echo "工作目錄不存在：$WORKDIR" >&2; exit 2; }
 [ -n "$OUTDIR" ] || OUTDIR=$(mktemp -d "${TMPDIR:-/tmp}/devin-run.XXXXXX")
 mkdir -p "$OUTDIR"; OUTDIR=$(realpath "$OUTDIR")
+# 輸出檔已存在就拒跑：不覆寫舊結果，也不寫進別人放的符號連結
+for f in answer.md answer.md.tmp stderr.log export.json; do
+  if [ -e "$OUTDIR/$f" ] || [ -L "$OUTDIR/$f" ]; then
+    echo "輸出資料夾裡已有 $f：$OUTDIR（每次派工用新的 -o 資料夾，或不帶 -o）" >&2; exit 2
+  fi
+done
 
 ARGS=( -p --prompt-file "$PROMPT_FILE"
        --model "$MODEL"
@@ -61,33 +71,51 @@ SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/devin-run-fp.XXXXXX"); trap 'rm -rf "$SCRAT
 # (3) 執行後先不用 git 比對設定檔與 hooks，有變就不再跑任何 git，直接當成有改動。
 MAX_UNTRACKED_FILES=2000        # 未追蹤檔超過這個數量就只比對檔名
 MAX_HASH_BYTES=$((50*1024*1024)) # 單檔超過這個大小只比對大小與修改時間
-GIT_SAFE=( --no-pager -c core.fsmonitor=false -c core.hooksPath=/dev/null -c core.pager=cat
-           -c diff.external= -c log.showSignature=false -c status.submoduleSummary=false )
-FILTER_OFF=(); PIN_GIT_DIR=""; PIN_WORK_TREE=""; COMMON_DIR=""; PATHSPEC=(); HOOKS_DIR=""; HOOKS_UNRESOLVED=0
+# 覆寫用 GIT_CONFIG_COUNT／KEY／VALUE 環境變數傳（git 2.31 起），不用 -c：-c 在第一個 = 切開，
+# filter 名稱含 = 時會被拆錯。排在呼叫端原有的同類設定之後，所以這裡的值優先。
+SAFE_KEYS=( core.fsmonitor core.hooksPath core.pager diff.external log.showSignature status.submoduleSummary )
+SAFE_VALS=( false          /dev/null      cat        ""            false             false )
+PIN_GIT_DIR=""; PIN_WORK_TREE=""; COMMON_DIR=""; PATHSPEC=(); HOOKS_DIR=""; OUT_IN_TREE=0
 g() {
-  local -a pin=()
-  [ -z "$PIN_GIT_DIR" ] || pin=( "GIT_DIR=$PIN_GIT_DIR" "GIT_WORK_TREE=$PIN_WORK_TREE" )
-  env ${pin[@]+"${pin[@]}"} GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 \
-    git "${GIT_SAFE[@]}" ${FILTER_OFF[@]+"${FILTER_OFF[@]}"} "$@"
+  local -a envs=( GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 )
+  local base=${GIT_CONFIG_COUNT:-0} i
+  [[ $base =~ ^[0-9]+$ ]] || base=0
+  for i in "${!SAFE_KEYS[@]}"; do
+    envs+=( "GIT_CONFIG_KEY_$((base + i))=${SAFE_KEYS[$i]}" "GIT_CONFIG_VALUE_$((base + i))=${SAFE_VALS[$i]}" )
+  done
+  envs+=( "GIT_CONFIG_COUNT=$((base + ${#SAFE_KEYS[@]}))" )
+  [ -z "$PIN_GIT_DIR" ] || envs+=( "GIT_DIR=$PIN_GIT_DIR" "GIT_WORK_TREE=$PIN_WORK_TREE" )
+  env "${envs[@]}" git --no-pager "$@"
+}
+# 拒跑（devin 不啟動）：git 狀態判讀不了時，比對結果不可信，edit／code 也可能回 0
+refuse_unresolved() {
+  echo "devin-run: mode=$MODE model=$MODEL permission=${PERMISSION[$MODE]} trust=$TRUST workdir=$WORKDIR"
+  echo "devin-run: git_unresolved=1"
+  echo "devin-run: 提示：$1；修好 git 狀態（例：git 設定錯誤、目錄擁有者不符、git 版本太舊）後再跑，devin 未執行。"
+  echo "devin-run: rejected_tool_calls=0 workdir_changed=na exit=7"
+  exit 7
 }
 
 # .git 裡會影響 git 行為、但 git status 看不到的檔：設定檔、hooks、info/（exclude、attributes）、
 # 連結 worktree 的指向檔、子模組的設定與 hooks。只用 find／sha256sum，不呼叫 git。
 hash_path() {
   if [ ! -e "$1" ] && [ ! -L "$1" ]; then echo "absent $1"; return 0; fi
-  find "$1" -name objects -prune -o -type f -exec sha256sum {} + -o -printf '%y %p %l\n' 2>&1 || echo "find-failed $1"
+  # 每個項目都記類型、權限、擁有者（chmod +x 一個 hook 也算改動），一般檔再加內容雜湊
+  find "$1" -name objects -prune -o -printf '%y %m %U %p %l\n' -type f -exec sha256sum {} + 2>&1 || echo "find-failed $1"
 }
-# core.hooksPath 指到的資料夾：跟著符號連結讀（find 會偵測迴圈），深度有上限。另記資料夾本身實際指到哪裡。
+# hooks 資料夾：跟著符號連結讀（find 會偵測迴圈），深度有上限。另記資料夾本身實際指到哪裡。
 hash_path_follow() {
   if [ ! -e "$1" ] && [ ! -L "$1" ]; then echo "absent $1"; return 0; fi
   printf 'target %s -> %s\n' "$1" "$(realpath -m -- "$1")"
-  find -L "$1" -maxdepth 4 -type f -exec sha256sum {} + -o -printf '%y %p\n' 2>&1 || echo "find-failed $1"
+  find -L "$1" -maxdepth 4 -printf '%y %m %U %p %l\n' -type f -exec sha256sum {} + 2>&1 || echo "find-failed $1"
 }
 meta_fingerprint() {
   {
     local p
     [ -z "$HOOKS_DIR" ] || hash_path_follow "$HOOKS_DIR"
-    for p in "$COMMON_DIR/config" "$COMMON_DIR/config.worktree" "$COMMON_DIR/hooks" \
+    # hooks 裡的符號連結可能指到工作目錄的腳本：跟著連結比對實際內容與權限
+    hash_path_follow "$COMMON_DIR/hooks"
+    for p in "$COMMON_DIR/config" "$COMMON_DIR/config.worktree" \
              "$PIN_GIT_DIR/config.worktree" "$PIN_GIT_DIR/commondir"; do hash_path "$p"; done
     # info/ 只看會影響 git 判讀的檔（info/refs 會被 gc 自動改寫，不看）
     for p in "$COMMON_DIR" "$PIN_GIT_DIR"; do
@@ -96,7 +124,7 @@ meta_fingerprint() {
     if [ -f "$PIN_WORK_TREE/.git" ] || [ -L "$PIN_WORK_TREE/.git" ]; then hash_path "$PIN_WORK_TREE/.git"; fi
     if [ -d "$COMMON_DIR/modules" ]; then
       find "$COMMON_DIR/modules" -name objects -prune -o \( -name config -o -name commondir -o -path '*/hooks/*' -o -path '*/info/attributes' -o -path '*/info/exclude' \) \
-        \( -type f -exec sha256sum {} + -o -printf '%y %p %l\n' \) 2>&1 || echo "find-failed modules"
+        -printf '%y %m %U %p %l\n' -type f -exec sha256sum {} + 2>&1 || echo "find-failed modules"
     fi
   } | LC_ALL=C sort | sha256sum | cut -d" " -f1
 }
@@ -138,69 +166,88 @@ fingerprint() {
   ) | sha256sum | cut -d" " -f1
 }
 
-# 是 git 工作目錄卻解析不到 .git 位置（例如很舊的 git），或 git 因設定錯誤、擁有者檢查等原因整個拒跑
-# （訊息不是「not a git repository」）時，一律當成有改動（失效時從嚴）
-IS_GIT=0; GIT_UNRESOLVED=0
+# 是 git 工作目錄卻解析不到 .git 位置，或 git 因設定錯誤、擁有者檢查等原因整個拒跑
+# （訊息不是「not a git repository」）時，不啟動 devin，回 7（失效時從嚴）
+IS_GIT=0
 INSIDE=$(LC_ALL=C g rev-parse --is-inside-work-tree 2>"$SCRATCH/rev-parse.err") || INSIDE=error
-if [ "$INSIDE" = error ] && ! command grep -q 'not a git repository' "$SCRATCH/rev-parse.err"; then GIT_UNRESOLVED=1
+if [ "$INSIDE" = error ] && ! command grep -q 'not a git repository' "$SCRATCH/rev-parse.err"; then
+  refuse_unresolved "git 無法判讀這個工作目錄"
 elif [ "$INSIDE" = true ]; then
+  # 覆寫要靠 GIT_CONFIG_COUNT（git 2.31 起）；沒生效就等於沒關掉執行點
+  [ "$(g config --get core.fsmonitor 2>/dev/null)" = false ] && [ "$(g config --get core.hooksPath 2>/dev/null)" = /dev/null ] \
+    || refuse_unresolved "git 不支援以環境變數覆寫設定（需要 2.31 以上）"
   if GIT_INFO=$(g rev-parse --git-dir --git-common-dir --show-toplevel 2>/dev/null); then
     mapfile -t GIT_LINES <<< "$GIT_INFO"
     if [ "${#GIT_LINES[@]}" -eq 3 ] && PIN_GIT_DIR=$(realpath -e -- "${GIT_LINES[0]}") \
        && COMMON_DIR=$(realpath -e -- "${GIT_LINES[1]}") && PIN_WORK_TREE=$(realpath -e -- "${GIT_LINES[2]}") \
        && [ -d "$PIN_GIT_DIR" ] && [ -d "$COMMON_DIR" ] && [ -d "$PIN_WORK_TREE" ]; then IS_GIT=1; fi
   fi
-  [ "$IS_GIT" -eq 1 ] || { GIT_UNRESOLVED=1; PIN_GIT_DIR=""; COMMON_DIR=""; PIN_WORK_TREE=""; }
+  [ "$IS_GIT" -eq 1 ] || refuse_unresolved "解析不到 .git 的位置"
 fi
 if [ "$IS_GIT" -eq 1 ]; then
   # 輸出資料夾在 repo 裡時，只排除腳本自己寫的四個檔；資料夾裡出現其他檔照樣算改動
   case "$OUTDIR/" in "$PIN_WORK_TREE"/*)
     OUT_REL=${OUTDIR#"$PIN_WORK_TREE"}; OUT_REL=${OUT_REL#/}
-    PATHSPEC=( ":(top)" )
+    OUT_IN_TREE=1; PATHSPEC=( ":(top)" )
     for f in answer.md answer.md.tmp stderr.log export.json; do
       PATHSPEC+=( ":(top,exclude,literal)${OUT_REL:+$OUT_REL/}$f" )
     done ;;
   esac
   # core.hooksPath 若指到 .git 以外，代理可在那裡埋 hooks，使用者之後 commit 時才執行。
   # 腳本自己的 git 已用 -c 蓋掉它，所以讀設定時排除指令列層（command）的值；相對路徑以工作目錄根為準（git 的規則）。
-  # 有設定卻解析不出路徑時，執行後一律當成設定被改（失效時從嚴）。
+  # 有設定卻解析不出路徑時不啟動 devin（失效時從嚴）。
   HOOKS_RC=0; HOOKS_LIST=$(g config --type=path --show-scope --get-all core.hooksPath 2>/dev/null) || HOOKS_RC=$?
   if [ "$HOOKS_RC" -eq 0 ]; then
     HOOKS_RAW=$(printf '%s\n' "$HOOKS_LIST" | awk -F'\t' '$1 != "command" { v = substr($0, index($0, "\t") + 1) } END { print v }')
     if [ -n "$HOOKS_RAW" ]; then
       case "$HOOKS_RAW" in /*) ;; *) HOOKS_RAW="$PIN_WORK_TREE/$HOOKS_RAW" ;; esac
-      HOOKS_DIR=$(realpath -m -s -- "$HOOKS_RAW") || { HOOKS_DIR=""; HOOKS_UNRESOLVED=1; }
+      HOOKS_DIR=$(realpath -m -s -- "$HOOKS_RAW") || refuse_unresolved "core.hooksPath 解析不出路徑"
     fi
-  elif [ "$HOOKS_RC" -ne 1 ]; then HOOKS_UNRESOLVED=1   # 1＝沒設定；其他＝讀取或展開失敗
+  elif [ "$HOOKS_RC" -ne 1 ]; then refuse_unresolved "core.hooksPath 讀不到或展開失敗"   # 1＝沒設定
   fi
-  # 設定裡定義的每個 filter 都清成空指令：代理可在 .gitattributes 把任一 filter 套到檔案上
+  # 設定裡定義的每個 filter 都清成空指令：代理可在 .gitattributes 把任一 filter 套到檔案上。
+  # 名稱用 NUL 分隔讀進來（可含 = 等任何字元）；列舉失敗就不啟動 devin。
+  FILTER_RC=0
+  g config -z --name-only --get-regexp '^filter\..*\.(clean|smudge|process)$' > "$SCRATCH/filters" 2>/dev/null || FILTER_RC=$?
+  [ "$FILTER_RC" -le 1 ] || refuse_unresolved "列舉 filter 設定失敗"   # 1＝沒有任何 filter
   declare -A SEEN_FILTER=()
-  while IFS= read -r key; do
+  while IFS= read -r -d '' key; do
     name=${key#filter.}; name=${name%.*}
     [ -z "${SEEN_FILTER[$name]:-}" ] || continue
     SEEN_FILTER[$name]=1
-    FILTER_OFF+=( -c "filter.$name.clean=" -c "filter.$name.smudge=" -c "filter.$name.process=" -c "filter.$name.required=false" )
-  done < <(g config --name-only --get-regexp '^filter\..*\.(clean|smudge|process)$' 2>/dev/null || true)
+    for k in clean smudge process required; do
+      SAFE_KEYS+=( "filter.$name.$k" ); if [ "$k" = required ]; then SAFE_VALS+=( false ); else SAFE_VALS+=( "" ); fi
+    done
+  done < "$SCRATCH/filters"
   META_BEFORE=$(meta_fingerprint) || META_BEFORE=error-before
   CFG_BEFORE=$(config_fingerprint) || CFG_BEFORE=error-before
   BEFORE=$(fingerprint) || BEFORE=error-before
 fi
 RC=0
-timeout "$TIMEOUT" devin "${ARGS[@]}" > "$OUTDIR/answer.md.tmp" 2> "$OUTDIR/stderr.log" || RC=$?
-mv "$OUTDIR/answer.md.tmp" "$OUTDIR/answer.md"
+timeout -- "$TIMEOUT" devin "${ARGS[@]}" > "$OUTDIR/answer.md.tmp" 2> "$OUTDIR/stderr.log" || RC=$?
+# 代理可能把腳本自己的輸出檔換成資料夾或符號連結（排除規則只認檔名，資料夾裡的檔也會被一起排除）。
+# mv 失敗不中斷（否則 set -e 會讓腳本不印結果就結束），改記成輸出檔被動過。
+OUT_TAMPERED=0
+if [ -f "$OUTDIR/answer.md.tmp" ] && [ ! -L "$OUTDIR/answer.md.tmp" ] \
+   && mv -fT -- "$OUTDIR/answer.md.tmp" "$OUTDIR/answer.md" 2>/dev/null; then :; else OUT_TAMPERED=1; fi
+if [ "$OUT_IN_TREE" -eq 1 ]; then
+  for f in answer.md answer.md.tmp stderr.log export.json; do
+    p="$OUTDIR/$f"
+    if [ -L "$p" ] || { [ -e "$p" ] && [ ! -f "$p" ]; }; then OUT_TAMPERED=1; fi
+  done
+fi
 
-REJECTED=$(command grep -c 'rejected a tool call' "$OUTDIR/stderr.log" || true)
+REJECTED=0
+if [ -f "$OUTDIR/stderr.log" ]; then REJECTED=$(command grep -c 'rejected a tool call' "$OUTDIR/stderr.log" || true); fi
+REJECTED=${REJECTED:-0}
 if [ "$RC" -eq 0 ] && [ "$REJECTED" -gt 0 ]; then RC=3; fi
 if [ "$RC" -eq 0 ] && [ ! -s "$OUTDIR/answer.md" ]; then RC=4; fi
 # 沒帶 --trust、資料夾又沒被信任過：devin 自己回非零，保留它的結束碼，只加提示
-UNTRUSTED=0; ! command grep -q 'Refusing to run in an untrusted workspace' "$OUTDIR/stderr.log" || UNTRUSTED=1
+UNTRUSTED=0; ! command grep -qs 'Refusing to run in an untrusted workspace' "$OUTDIR/stderr.log" || UNTRUSTED=1
 CHANGED=na; GIT_CONFIG_CHANGED=0
-if [ "$GIT_UNRESOLVED" -eq 1 ]; then
-  CHANGED=1
-  if [ "${READONLY[$MODE]}" -eq 1 ]; then RC=5; fi
-elif [ "$IS_GIT" -eq 1 ]; then
+if [ "$IS_GIT" -eq 1 ]; then
   CHANGED=0
-  if [ "$HOOKS_UNRESOLVED" -eq 1 ] || [ "$META_BEFORE" != "$(meta_fingerprint)" ]; then GIT_CONFIG_CHANGED=1
+  if [ "$META_BEFORE" != "$(meta_fingerprint)" ]; then GIT_CONFIG_CHANGED=1
   else
     CFG_AFTER=$(config_fingerprint) || CFG_AFTER=error-after
     [ "$CFG_BEFORE" = "$CFG_AFTER" ] || GIT_CONFIG_CHANGED=1
@@ -210,6 +257,7 @@ elif [ "$IS_GIT" -eq 1 ]; then
     AFTER=$(fingerprint) || AFTER=error-after
     [ "$BEFORE" = "$AFTER" ] || CHANGED=1
   fi
+  [ "$OUT_TAMPERED" -eq 0 ] || CHANGED=1
   if [ "${READONLY[$MODE]}" -eq 1 ] && [ "$CHANGED" -eq 1 ]; then RC=5; fi
   # .git 設定或 hooks 被改：任何模式都回 6，蓋掉其他結束碼（之後跑 git 可能執行被埋的程式）
   if [ "$GIT_CONFIG_CHANGED" -eq 1 ]; then RC=6; fi
@@ -218,8 +266,7 @@ fi
 echo "devin-run: mode=$MODE model=$MODEL permission=${PERMISSION[$MODE]} trust=$TRUST workdir=$WORKDIR"
 echo "devin-run: answer=$OUTDIR/answer.md stderr=$OUTDIR/stderr.log export=$OUTDIR/export.json"
 [ "$GIT_CONFIG_CHANGED" -eq 0 ] || echo "devin-run: git_config_changed=1"
-[ "$GIT_UNRESOLVED" -eq 0 ] || echo "devin-run: git_unresolved=1"
-[ "$HOOKS_UNRESOLVED" -eq 0 ] || echo "devin-run: hooks_path_unresolved=1"
+[ "$OUT_TAMPERED" -eq 0 ] || echo "devin-run: output_tampered=1"
 if [ "$UNTRUSTED" -eq 1 ]; then
   echo "devin-run: untrusted_workspace=1"
   echo "devin-run: 提示：devin 拒跑未受信任的工作目錄。是使用者自己的 repo、或使用者當輪同意，才加 --trust 重跑；外部來源的程式碼不要直接加。"

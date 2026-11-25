@@ -25,20 +25,26 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/devin-cli/scripts/devin-run.sh" <ask|review|e
 
 選項：`--trust` 略過 devin 的工作區信任檢查（規則見「硬規則」）、`-m <模型>` 換模型、`-r <session_id>` 續接上一輪、`-t <秒>` 逾時（預設 1800）。
 
-結束碼：`0` 成功｜`3` 有工具呼叫被拒（可能只做一半，讀 `answer.md` 判斷缺什麼）｜`4` 沒有回覆｜`5` 唯讀模式（`ask`、`review`）卻改動了工作目錄｜`6` `.git` 的設定或 hooks 被改（任何模式都算；不要跑 git，處理方式見下方）｜`124` 逾時。
+結束碼：`0` 成功｜`2` 用法錯誤（含輸出資料夾裡已經有 `answer.md` 等輸出檔）｜`3` 有工具呼叫被拒（可能只做一半，讀 `answer.md` 判斷缺什麼）｜`4` 沒有回覆｜`5` 唯讀模式（`ask`、`review`）卻改動了工作目錄｜`6` `.git` 的設定或 hooks 被改（任何模式都算；不要跑 git，處理方式見下方）｜`7` git 狀態判讀不了，devin 沒有執行｜`124` 逾時。
+
+結束碼 2 的輸出資料夾規則：`-o` 指到的資料夾裡，`answer.md`、`answer.md.tmp`、`stderr.log`、`export.json` 任一個已經存在（含符號連結），腳本就拒跑，不覆寫舊結果。每次派工用新的輸出資料夾，或不帶 `-o` 讓腳本自己建暫存資料夾。
+
+結束碼 7 的判定方式：工作目錄是 git repo，但 git 讀不懂它（例：git 設定錯誤、`core.hooksPath` 展開不了、目錄擁有者不符、git 版本太舊），或列不出設定裡的 filter。這時事後比對不可信，所以四種模式都在啟動 devin 之前就停下，印 `devin-run: git_unresolved=1`。修好 git 狀態再跑。
 
 結束碼 3 的判定方式：devin 自己回 0，但 `stderr.log` 出現 `rejected a tool call`。
 
-結束碼 5 的判定方式：比對執行前後整個 repo 的 `git status`、未暫存與已暫存的 `git diff`、HEAD 與目前分支、所有分支與標籤、stash、skip-worktree 等索引標記，以及未追蹤檔的內容。輸出資料夾（`-o`）在 repo 裡時，只有腳本自己寫的 `answer.md`、`answer.md.tmp`、`stderr.log`、`export.json` 四個檔不算在內；資料夾裡出現其他檔照樣算改動。
+結束碼 5 的判定方式：比對執行前後整個 repo 的 `git status`、未暫存與已暫存的 `git diff`、HEAD 與目前分支、所有分支與標籤、stash、skip-worktree 等索引標記，以及未追蹤檔的內容。輸出資料夾（`-o`）在 repo 裡時，只有腳本自己寫的 `answer.md`、`answer.md.tmp`、`stderr.log`、`export.json` 四個檔不算在內；資料夾裡出現其他檔、或這四個檔被換成資料夾或符號連結，照樣算改動（後者多印一行 `devin-run: output_tampered=1`）。
 
-`.git` 裡的設定檔、hooks、`info/`（含 include 進來的設定檔與全域設定），以及 `core.hooksPath` 指到的 hooks 資料夾（在 `.git` 以外、是符號連結也算）也會比對。這些一有變動，腳本就不再跑任何 git 指令，直接當成有改動，回結束碼 6（四種模式都一樣），並多印一行 `devin-run: git_config_changed=1`。看到結束碼 6 先不要跑任何 git 指令（`git status` 就可能執行被埋進設定的程式），改用 `cat .git/config`、`ls -la .git/hooks` 檢查（有設 `core.hooksPath` 就連那個資料夾一起看）。連結 worktree 的 `.git` 是一個檔案：先 `cat .git` 看它指到哪個 repo，再去那個主 repo 的 `.git` 檢查設定與 hooks。
+`.git` 裡的設定檔、hooks、`info/`（含 include 進來的設定檔與全域設定），以及 `core.hooksPath` 指到的 hooks 資料夾（在 `.git` 以外、是符號連結也算）也會比對，連檔案權限與擁有者一起比（例：hook 被加上執行權限）。這些一有變動，腳本就不再跑任何 git 指令，直接當成有改動，回結束碼 6（四種模式都一樣），並多印一行 `devin-run: git_config_changed=1`。看到結束碼 6 先不要跑任何 git 指令（`git status` 就可能執行被埋進設定的程式），改用 `cat .git/config`、`ls -la .git/hooks` 檢查（有設 `core.hooksPath` 就連那個資料夾一起看）。連結 worktree 的 `.git` 是一個檔案：先 `cat .git` 看它指到哪個 repo，再去那個主 repo 的 `.git` 檢查設定與 hooks。
 
-限制有六個：
+限制有八個：
 - 只偵測、不還原。看到 5 就跑 `git status --short` 與 `git diff`，確認後自己還原（結束碼 6 時照上一段先檢查，不要跑 git）。
 - 抓不到被 `.gitignore` 忽略的檔。未追蹤檔超過 2000 個時只比對檔名（多印一行 `devin-run: untracked_hash_skipped=<個數>`）；單一未追蹤檔超過 50 MB 只比對大小與修改時間。
 - 子模組只看指到哪個 commit，不看子模組裡面的改動。
 - 分不出是誰改的。比對範圍是整個 repo，連同所有分支、stash、`.git` 設定與全域 git 設定；同一個 repo 的其他 worktree 在這段時間 commit、背景 fetch、別的程序改了 git 設定，也會回 5 或 6。
-- git 指令本身出錯、解析不到 `.git` 位置、或 git 因設定錯誤等原因整個拒跑時，一律當成有改動（後兩者多印一行 `devin-run: git_unresolved=1`）。
+- 執行後 git 指令本身出錯時，一律當成有改動。
+- 只抓 git 看得到的改動。git 會正規化掉的內容差異（例：`.gitattributes` 設了 `eol=lf`，檔案只被改成 CRLF 換行）抓不到。
+- 腳本靠 `PATH` 找 `git`、`find`、`sha256sum`。`PATH` 上如果有 Devin 寫得到的資料夾（例：repo 裡的 `bin/`），Devin 可以放一支同名假程式。不要把工作目錄裡的資料夾放進 `PATH`。
 - 工作目錄不是 git repo 時不檢查（輸出 `workdir_changed=na`）。
 
 結束碼 6 蓋掉所有其他結束碼；結束碼 5 蓋掉 6 以外的結束碼（含逾時的 124）。逾時與否另看 `stderr.log`。
@@ -137,6 +143,7 @@ session 依資料夾分開。在 A 資料夾 `list` 看不到 B 資料夾的 ses
 
 - 速查表：`references/models.md`。原文：`references/models-full.md`。即時清單：`devin models`。
 - **一律寫完整代號**（例 `claude-opus-5-5-high`），代號從 `devin models` 的輸出複製，不自己拼。多數別名指到舊版：`opus`＝Opus 5、`fable`＝Fable 5.1、`sonnet`＝Sonnet 5、`gpt`＝GPT-5.5。
+- **Fusion（主模型＋副手）**：主模型規劃、想難的部分、審成果，副手照著寫；副手用 SWE-2 時免費，只有主模型的部分照價收費。寫 code 想要比 `swe-2-high` 更好的品質時，用 `-m fusion-claude-fable-5-2-high-sidekick-swe-2-high`。`-p` 模式下的行為：未實測。細節見 `references/models.md`。
 - 換模型：包裝腳本加 `-m <代號>`。各模式的預設在 `scripts/devin-run.sh` 的 `DEFAULT_MODEL` 表（plugin 更新會覆蓋本機改動，臨時換用 `-m`）。
 - 使用者說「用 X 模型跑」時照他說的，不替換。
 

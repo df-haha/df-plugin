@@ -7,7 +7,10 @@ set -u
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 SCRIPT=${DEVIN_RUN:-$HERE/../skills/devin-cli/scripts/devin-run.sh}
-ROOT=$(mktemp -d "${TMPDIR:-/tmp}/devin-run-test.XXXXXX")
+# 暫存資料夾建不起來就立刻停：後面的 HOME、PATH、假 devin 全都放在 ROOT 底下，ROOT 空的會寫到真實路徑
+ROOT=$(mktemp -d "${TMPDIR:-/tmp}/devin-run-test.XXXXXX") || { echo "ABORT: mktemp 失敗" >&2; exit 2; }
+case "$ROOT" in /?*) ;; *) echo "ABORT: ROOT 不合理：$ROOT" >&2; exit 2 ;; esac
+[ -d "$ROOT" ] || { echo "ABORT: ROOT 不是資料夾" >&2; exit 2; }
 trap 'rm -rf "$ROOT"' EXIT
 
 # 與本機 git 設定隔離（本機全域設定有 filter.lfs 等，會影響結果）
@@ -22,6 +25,8 @@ cat > "$ROOT/bin/devin" <<'STUB'
 #!/usr/bin/env bash
 set -e
 [ -z "${FAKE_ARGV:-}" ] || printf '%s\n' "$@" > "$FAKE_ARGV"
+# 從 --export 的路徑找出輸出資料夾
+out=""; prev=""; for a in "$@"; do [ "$prev" != "--export" ] || out=$(dirname "$a"); prev=$a; done
 case "${FAKE_ACTION:-none}" in
   none) ;;
   edit) echo changed >> f.txt ;;
@@ -40,9 +45,11 @@ case "${FAKE_ACTION:-none}" in
   reject) echo "warning: rejected a tool call that requires confirmation" >&2 ;;
   untrusted) echo "Error: Refusing to run in an untrusted workspace" >&2; exit 1 ;;
   plant-hookspath) printf '#!/bin/sh\ntouch /nonexistent\n' > "$FAKE_PAYLOAD/pre-commit"; chmod +x "$FAKE_PAYLOAD/pre-commit" ;;
-  plant-outdir)  # 從 --export 的路徑找出輸出資料夾，在裡面多放一個檔
-    prev=""; for a in "$@"; do [ "$prev" != "--export" ] || out=$(dirname "$a"); prev=$a; done
-    printf '#!/bin/sh\necho pwned\n' > "$out/planted.sh" ;;
+  plant-outdir) printf '#!/bin/sh\necho pwned\n' > "$out/planted.sh" ;;
+  outdir-export-dir) mkdir "$out/export.json"; printf '#!/bin/sh\necho pwned\n' > "$out/export.json/planted.sh" ;;
+  outdir-tmp-dir) rm -f "$out/answer.md.tmp"; mkdir "$out/answer.md.tmp" ;;
+  chmod-x) chmod +x "$FAKE_PAYLOAD" ;;
+  edit-hook-target) echo "echo changed" >> scripts/hook.sh ;;
   poison-exit124) printf '[core]\n\tfsmonitor = %s\n' "$FAKE_PAYLOAD" >> .git/config; echo partial; exit 124 ;;
   *) echo "unknown FAKE_ACTION" >&2; exit 99 ;;
 esac
@@ -52,19 +59,21 @@ chmod +x "$ROOT/bin/devin"
 export PATH="$ROOT/bin:$PATH"
 echo "review this" > "$ROOT/prompt.md"
 
-PASS=0; FAILS=()
+PASS=0; FAILS=(); OUTN=0
 check() { # check <名稱> <條件說明> <0=通過>
   if [ "$3" -eq 0 ]; then PASS=$((PASS+1)); echo "ok   $1: $2"; else FAILS+=("$1"); echo "FAIL $1: $2"; fi
 }
 expect_rc()      { local r=0; [ "$RC" -eq "$2" ] || r=1; check "$1" "exit=$RC (want $2)" "$r"; }
 expect_absent()  { if [ -e "$2" ]; then check "$1" "marker present (want absent)" 1; else check "$1" "marker absent" 0; fi; }
+expect_not_run() { local r=0; [ ! -e "$2" ] || r=1; check "$1" "fake devin 沒被呼叫" "$r"; }
 expect_line()    { local r=0; printf '%s\n' "$OUT" | grep -qF -- "$2" || r=1; check "$1" "output has '$2'" "$r"; }
 
 # 跑包裝腳本：run <模式> <工作目錄> [其他參數]；其他參數放在 -C 與 -o 之間；結果在 RC、OUT
 run() {
   local mode=$1 dir=$2; shift 2
+  OUTN=$((OUTN + 1))
   if [ "$(command -v devin)" != "$ROOT/bin/devin" ]; then echo "ABORT: devin 不是假的那支" >&2; exit 2; fi
-  OUT=$(cd "$dir" && timeout 120 bash "$SCRIPT" "$mode" "$ROOT/prompt.md" -C "$dir" "$@" -o "$ROOT/out-$RANDOM" 2>&1); RC=$?
+  OUT=$(cd "$dir" && timeout 120 bash "$SCRIPT" "$mode" "$ROOT/prompt.md" -C "$dir" "$@" -o "$ROOT/out-$OUTN" 2>&1); RC=$?
 }
 new_repo() { # 建一個有一筆 commit 的 repo，印路徑
   local d="$ROOT/repo-$1"
@@ -225,8 +234,9 @@ expect_rc c20c-hookspath-untouched 0
 R=$(new_repo c20d)
 # shellcheck disable=SC2088
 git -C "$R" config core.hooksPath '~no-such-user-c20d/hooks'
-FAKE_ACTION=none run ask "$R"
-expect_rc c20d-hookspath-unresolvable 5; expect_line c20d-hookspath-unresolvable-line "devin-run: git_unresolved=1"
+FAKE_ARGV="$ROOT/argv-c20d" FAKE_ACTION=none run edit "$R"
+expect_rc c20d-hookspath-unresolvable 7; expect_line c20d-hookspath-unresolvable-line "devin-run: git_unresolved=1"
+expect_not_run c20d-devin-not-invoked "$ROOT/argv-c20d"
 # 20e. 真的不是 git repo：照舊不檢查
 mkdir "$ROOT/plain-c20e"; FAKE_ACTION=none run ask "$ROOT/plain-c20e"
 expect_rc c20e-not-a-repo 0; expect_line c20e-not-a-repo-na "workdir_changed=na"
@@ -238,6 +248,67 @@ if [ "$(command -v devin)" = "$ROOT/bin/devin" ]; then
 else echo "ABORT" >&2; exit 2; fi
 expect_rc c21-outdir-planted-file 5
 r=1; [ -f "$R/devin-out/planted.sh" ] && r=0; check c21-planted-file-exists "假 devin 真的放了 planted.sh" "$r"
+
+# 22a. 輸出資料夾在 repo 裡，代理把 export.json 換成資料夾並在裡面藏檔
+R=$(new_repo c22a)
+if [ "$(command -v devin)" = "$ROOT/bin/devin" ]; then
+  OUT=$(cd "$R" && FAKE_ACTION=outdir-export-dir timeout 120 bash "$SCRIPT" review "$ROOT/prompt.md" -C "$R" -o "$R/devin-out" 2>&1); RC=$?
+else echo "ABORT" >&2; exit 2; fi
+expect_rc c22a-export-json-dir 5; expect_line c22a-summary-printed "workdir_changed=1 exit=5"
+# 22b. 代理把 answer.md.tmp 換成資料夾：腳本的 mv 失敗也要印完結果行、回非零
+R=$(new_repo c22b); FAKE_ACTION=outdir-tmp-dir run review "$R"
+expect_rc c22b-tmp-dir 5; expect_line c22b-summary-printed "exit=5"; expect_line c22b-tampered-line "devin-run: output_tampered=1"
+# 22c. .git 以外的 hooks 資料夾裡原本沒有執行權限的 hook，被加上執行權限
+R=$(new_repo c22c); mkdir "$HOME/hooks-c22c"; printf '#!/bin/sh\nexit 0\n' > "$HOME/hooks-c22c/pre-commit"
+git -C "$R" config core.hooksPath "$HOME/hooks-c22c"
+FAKE_ACTION=chmod-x FAKE_PAYLOAD="$HOME/hooks-c22c/pre-commit" run review "$R"
+expect_rc c22c-hookspath-chmod 6
+# 22d. 同上，在 .git/hooks 裡
+R=$(new_repo c22d); printf '#!/bin/sh\nexit 0\n' > "$R/.git/hooks/pre-commit"; chmod -x "$R/.git/hooks/pre-commit"
+FAKE_ACTION=chmod-x FAKE_PAYLOAD="$R/.git/hooks/pre-commit" run edit "$R"
+expect_rc c22d-githooks-chmod 6
+
+# 23. filter 名稱含 =（-c 會在第一個 = 切開，覆寫失效）
+R=$(new_repo c23); P=$(payload c23); git -C "$R" config 'filter.a=b.clean' "$P"
+echo 'f.txt filter=a=b' > "$R/.git/info/attributes"; echo pre >> "$R/f.txt"
+FAKE_ACTION=none run ask "$R"
+expect_absent c23-filter-name-with-equals "$ROOT/marker-c23"; expect_rc c23-filter-name-with-equals-rc 0
+
+# 24. .git/hooks 裡的符號連結指到工作目錄的腳本，代理改那個腳本
+R=$(new_repo c24); mkdir "$R/scripts"; printf '#!/bin/sh\nexit 0\n' > "$R/scripts/hook.sh"; chmod +x "$R/scripts/hook.sh"
+git -C "$R" add scripts; git -C "$R" commit -qm hook; ln -s ../../scripts/hook.sh "$R/.git/hooks/pre-commit"
+FAKE_ACTION=edit-hook-target run edit "$R"
+expect_rc c24-hook-symlink-target-edit 6
+
+# 25. -o 裡已經有輸出檔：拒跑、不覆寫
+R=$(new_repo c25a); mkdir "$ROOT/out-c25a"; echo old > "$ROOT/out-c25a/answer.md"
+if [ "$(command -v devin)" = "$ROOT/bin/devin" ]; then
+  OUT=$(cd "$R" && FAKE_ARGV="$ROOT/argv-c25a" FAKE_ACTION=none timeout 120 bash "$SCRIPT" ask "$ROOT/prompt.md" -C "$R" -o "$ROOT/out-c25a" 2>&1); RC=$?
+else echo "ABORT" >&2; exit 2; fi
+expect_rc c25a-existing-answer 2; expect_not_run c25a-devin-not-invoked "$ROOT/argv-c25a"
+r=1; [ "$(cat "$ROOT/out-c25a/answer.md")" = old ] && r=0; check c25a-answer-unchanged "answer.md 沒被覆寫" "$r"
+R=$(new_repo c25b); mkdir "$ROOT/out-c25b"; echo keep > "$ROOT/target-c25b"; ln -s "$ROOT/target-c25b" "$ROOT/out-c25b/stderr.log"
+if [ "$(command -v devin)" = "$ROOT/bin/devin" ]; then
+  OUT=$(cd "$R" && FAKE_ARGV="$ROOT/argv-c25b" FAKE_ACTION=none timeout 120 bash "$SCRIPT" ask "$ROOT/prompt.md" -C "$R" -o "$ROOT/out-c25b" 2>&1); RC=$?
+else echo "ABORT" >&2; exit 2; fi
+expect_rc c25b-existing-stderr-symlink 2; expect_not_run c25b-devin-not-invoked "$ROOT/argv-c25b"
+r=1; [ "$(cat "$ROOT/target-c25b")" = keep ] && r=0; check c25b-symlink-target-unchanged "符號連結指到的檔沒被動" "$r"
+
+# 26. 參數：-- 之後的 --trust 不算、多出來的參數、-t 不是正整數
+R=$(new_repo c26)
+FAKE_ARGV="$ROOT/argv-c26a" FAKE_ACTION=none run ask "$R" -- --trust
+expect_rc c26a-dashdash-trust 2; expect_not_run c26a-devin-not-invoked "$ROOT/argv-c26a"
+FAKE_ARGV="$ROOT/argv-c26b" FAKE_ACTION=none run ask "$R" -t --help
+expect_rc c26b-timeout-help 2; expect_not_run c26b-devin-not-invoked "$ROOT/argv-c26b"
+FAKE_ARGV="$ROOT/argv-c26c" FAKE_ACTION=none run ask "$R" -t 0
+expect_rc c26c-timeout-zero 2; expect_not_run c26c-devin-not-invoked "$ROOT/argv-c26c"
+
+# 27. 測試本身：暫存資料夾建不起來時立刻停，不往外寫任何東西
+mkdir "$ROOT/f-cwd" "$ROOT/f-home"
+(cd "$ROOT/f-cwd" && HOME="$ROOT/f-home" TMPDIR=/nonexistent bash "$HERE/$(basename "$0")" >/dev/null 2>&1); r=$?
+check c27-harness-mktemp-fail-rc "TMPDIR 不存在時測試以非零結束（rc=$r）" "$([ "$r" -ne 0 ] && echo 0 || echo 1)"
+r=0; [ -z "$(ls -A "$ROOT/f-cwd")" ] && [ -z "$(ls -A "$ROOT/f-home")" ] || r=1
+check c27-harness-wrote-nothing "目前資料夾與 HOME 都沒被寫入" "$r"
 
 # 16. 未追蹤檔太多：只比對檔名並註明
 R=$(new_repo c16); mkdir "$R/many"; (cd "$R/many" && touch f{0001..2001}); FAKE_ACTION=none run ask "$R"
